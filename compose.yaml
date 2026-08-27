@@ -1,0 +1,82 @@
+name: compass
+
+services:
+  db:
+    image: postgis/postgis:16-3.5
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-compass}
+      POSTGRES_USER: ${POSTGRES_USER:-compass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-compass-local-only}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  etl:
+    profiles: ["jobs"]
+    build:
+      context: .
+    entrypoint: ["compass-etl"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-180}
+      HTTP_USER_AGENT: ${HTTP_USER_AGENT:-compass-cng/0.1.0}
+      MIMIT_STATIONS_URL: ${MIMIT_STATIONS_URL:-https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv}
+      MIMIT_PRICES_URL: ${MIMIT_PRICES_URL:-https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv}
+      MIMIT_MAX_DOWNLOAD_BYTES: ${MIMIT_MAX_DOWNLOAD_BYTES:-52428800}
+      OVERPASS_URL: ${OVERPASS_URL:-https://overpass-api.de/api/interpreter}
+      OVERPASS_AREA_ISO3166_1: ${OVERPASS_AREA_ISO3166_1:-IT}
+      OVERPASS_MAX_DOWNLOAD_BYTES: ${OVERPASS_MAX_DOWNLOAD_BYTES:-104857600}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  postgres_data:
+
