@@ -1,7 +1,7 @@
-# Docker deployment and Phase 0/1 live validation
+# Docker deployment and live validation
 
-This is the reference test-server workflow. It is intentionally limited to repository bootstrap,
-health scaffolding and raw source ingestion.
+This is the reference test-server workflow for repository bootstrap, raw source ingestion and Phase
+2 normalized station reconciliation.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ Edit `.env` so:
 
 ```bash
 docker compose config --quiet
-docker compose --profile jobs build
+docker compose build api
 docker compose up -d db migrate api
 docker compose ps
 docker compose logs --no-color migrate
@@ -45,7 +45,7 @@ Expected invariants:
 - liveness returns `status=ok` with `database=not_checked`;
 - readiness returns `status=ok` with `database=ready`;
 - PostGIS has a non-empty version;
-- Alembic reports revision `0001 (head)`.
+- Alembic reports the repository's current head revision (`0002` once Phase 2 is synchronized).
 
 ## Phase 1 live acquisition and idempotency validation
 
@@ -113,5 +113,76 @@ Return:
 4. all five inspection-query outputs above;
 5. diagnostics/logs if any command fails.
 
-Do not begin Phase 2 until these Phase 0/1 live invariants pass or the operator explicitly waives the
+These Phase 0/1 invariants are prerequisites for Phase 2 unless the operator explicitly waives them.
+
+## Phase 2 migration and reconciliation validation
+
+Run these commands from the repository root after synchronizing the Phase 2 changes. Existing Phase
+1 raw records are inputs; they do not need to be downloaded again.
+
+```bash
+docker compose build api
+docker compose up -d db migrate api
+docker compose logs --no-color migrate
+docker compose exec -T api alembic current
+docker compose --profile jobs run --rm etl normalize
+docker compose --profile jobs run --rm etl normalize
+```
+
+Expected invariants:
+
+- migration exits zero and Alembic reports `0002 (head)`;
+- the first normalize result is `completed`, normally with `reused=false`;
+- `stations_seen`, `price_rows_seen`, and `osm_features_seen` are non-zero;
+- `matched + ambiguous + unmatched == stations_seen`;
+- the prompt repeat has the same reconciliation run/configuration hash and `reused=true`;
+- no live download is performed by `normalize`.
+
+Inspect the schema, outcome counts, and representative current data:
+
+```bash
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = '\''public'\'' AND indexname IN ('\''ix_stations_location_gist'\'', '\''ix_osm_cng_features_location_gist'\'') ORDER BY indexname;"'
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT status, count(*) FROM reconciliation_results WHERE reconciliation_run_id = (SELECT max(id) FROM reconciliation_runs WHERE status = '\''completed'\'') GROUP BY status ORDER BY status;"'
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT id, algorithm_version, status, configuration_sha256, metrics FROM reconciliation_runs ORDER BY id DESC LIMIT 3;"'
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT s.mimit_station_id, s.name, s.municipality, ST_Y(s.location::geometry) AS latitude, ST_X(s.location::geometry) AS longitude, p.unit_price, p.currency, p.unit, p.service_mode, p.observed_at AS price_observed_at, o.osm_type, o.osm_id, o.opening_hours, o.phone, l.match_method, l.confidence, l.distance_meters FROM stations s JOIN station_current_prices cp ON cp.station_id = s.id AND cp.fuel_type = '\''cng'\'' JOIN station_prices p ON p.id = cp.station_price_id LEFT JOIN station_osm_links l ON l.station_id = s.id LEFT JOIN osm_cng_features o ON o.id = l.osm_feature_id WHERE s.is_active ORDER BY (o.id IS NOT NULL) DESC, s.id LIMIT 20;"'
+```
+
+The two index definitions must use `gist`. The representative query must return active Italian CNG
+stations with EUR/kg prices and timestamps. At least some rows should include OSM identity and any
+available opening-hours/phone enrichment; null enrichment is valid for unmatched stations and must
+not be invented.
+
+Manual overrides are available for operator-reviewed cases. Do not run these merely for smoke
+testing because they intentionally change reconciliation state:
+
+```bash
+docker compose --profile jobs run --rm etl override \
+  --mimit-station-id MIMIT_ID --action link --osm-type node --osm-id OSM_ID \
+  --reason "operator-verified identity" --created-by OPERATOR
+docker compose --profile jobs run --rm etl override \
+  --mimit-station-id MIMIT_ID --action unmatch \
+  --reason "operator-verified non-match" --created-by OPERATOR
+docker compose --profile jobs run --rm etl normalize
+```
+
+### Phase 2 diagnostics
+
+```bash
+docker compose ps -a
+docker compose logs --no-color --tail=300 migrate api db
+docker compose exec -T api alembic current
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT id, status, error_message, metrics FROM reconciliation_runs ORDER BY id DESC LIMIT 10;"'
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT r.status, r.decision_reason, count(*) FROM reconciliation_results r WHERE r.reconciliation_run_id = (SELECT max(id) FROM reconciliation_runs) GROUP BY r.status, r.decision_reason ORDER BY r.status, count(*) DESC;"'
+```
+
+Return the migration log/current revision, both normalize JSON lines, and all four Phase 2 inspection
+query outputs. If anything fails, also return the Phase 2 diagnostic output. Do not include `.env`.
+
+Do not begin Phase 3 until these Phase 2 live invariants pass or the operator explicitly waives the
 gate.

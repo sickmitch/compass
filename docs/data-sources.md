@@ -38,7 +38,22 @@ alternate compliant instance. A failed OSM import does not delete or invalidate 
 
 ## Reconciliation boundary
 
-There is no universal cross-source identifier. Phase 1 defines only separate source identities and
-provenance. Phase 2 will add deterministic matching where possible, confidence/method version,
-manual overrides, and explicit unmatched/ambiguous states. Low-confidence fuzzy joins will never be
-created silently.
+There is no universal cross-source identifier. Compass keeps MIMIT and OSM identities and fields
+separate, then evaluates candidates using PostGIS geography distance and normalized name similarity.
+The versioned `mimit-osm-distance-name-v1` policy defaults to:
+
+- candidate search within 250 metres;
+- automatic proximity eligibility within 50 metres;
+- eligibility from 50–150 metres only when name similarity is at least 0.75;
+- ambiguity when the two best eligible scores differ by less than 0.08.
+
+All values are environment-configurable, validated for consistency, stored with each run and covered
+by deterministic fixtures. A candidate outside the eligibility rules stays unmatched even when it is
+inside the audit/search radius. Similar top candidates stay ambiguous. Candidate rank, distance,
+name similarity, score and eligibility remain inspectable; low-confidence joins are never silently
+created.
+
+Manual `link` and `unmatch` overrides include an operator, reason and stable source identities. They
+participate in the reconciliation configuration hash, so applying an override creates a new result
+run. A manual target absent from the latest OSM snapshot becomes explicitly unmatched rather than
+silently falling back to an automatic link.

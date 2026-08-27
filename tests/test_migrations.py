@@ -18,3 +18,6 @@ def test_offline_migration_accepts_percent_in_database_password(monkeypatch, cap
     generated_sql = capsys.readouterr().out
     assert "CREATE EXTENSION IF NOT EXISTS postgis" in generated_sql
     assert "CREATE TABLE ingestion_runs" in generated_sql
+    assert "CREATE TABLE stations" in generated_sql
+    assert "CREATE TABLE reconciliation_results" in generated_sql
+    assert "CREATE INDEX ix_stations_location_gist ON stations USING gist" in generated_sql

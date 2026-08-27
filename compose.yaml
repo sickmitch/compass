@@ -18,8 +18,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    build:
-      context: .
+    image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
@@ -29,6 +28,7 @@ services:
     restart: "no"
 
   api:
+    image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     build:
       context: .
     environment:
@@ -57,8 +57,7 @@ services:
 
   etl:
     profiles: ["jobs"]
-    build:
-      context: .
+    image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     entrypoint: ["compass-etl"]
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
@@ -70,6 +69,11 @@ services:
       OVERPASS_URL: ${OVERPASS_URL:-https://overpass-api.de/api/interpreter}
       OVERPASS_AREA_ISO3166_1: ${OVERPASS_AREA_ISO3166_1:-IT}
       OVERPASS_MAX_DOWNLOAD_BYTES: ${OVERPASS_MAX_DOWNLOAD_BYTES:-104857600}
+      RECONCILIATION_MAX_DISTANCE_METERS: ${RECONCILIATION_MAX_DISTANCE_METERS:-250}
+      RECONCILIATION_AUTO_MATCH_DISTANCE_METERS: ${RECONCILIATION_AUTO_MATCH_DISTANCE_METERS:-50}
+      RECONCILIATION_NAMED_MATCH_DISTANCE_METERS: ${RECONCILIATION_NAMED_MATCH_DISTANCE_METERS:-150}
+      RECONCILIATION_NAME_SIMILARITY_THRESHOLD: ${RECONCILIATION_NAME_SIMILARITY_THRESHOLD:-0.75}
+      RECONCILIATION_AMBIGUITY_SCORE_MARGIN: ${RECONCILIATION_AMBIGUITY_SCORE_MARGIN:-0.08}
     depends_on:
       db:
         condition: service_healthy
@@ -79,4 +83,3 @@ services:
 
 volumes:
   postgres_data:
-

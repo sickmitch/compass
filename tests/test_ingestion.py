@@ -23,7 +23,16 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @contextmanager
 def _session() -> Iterator[Session]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            RawSourceSnapshot.__table__,
+            IngestionRun.__table__,
+            RawMimitStation.__table__,
+            RawMimitCngPrice.__table__,
+            RawOsmCngFeature.__table__,
+        ],
+    )
     try:
         with Session(engine) as session:
             yield session

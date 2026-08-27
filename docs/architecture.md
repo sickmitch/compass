@@ -6,10 +6,10 @@ Compass uses five explicit server/domain boundaries and one first-class device c
 
 1. **Source adapters** fetch MIMIT CSV and OSM Overpass JSON without embedding source-specific
    behavior in routing code.
-2. **ETL** retains exact payloads, parses source records and publishes counts. Phase 1 stops before
-   reconciliation.
-3. **PostgreSQL/PostGIS** stores source history now and will own normalized/spatial station data in
-   Phase 2.
+2. **ETL** retains exact payloads, parses source records and publishes counts. Normalization is a
+   separate restartable command so source acquisition remains independently useful.
+3. **PostgreSQL/PostGIS** stores raw source history, normalized/spatial station data, price history
+   and reconciliation evidence.
 4. **Routing intelligence** will own corridor pruning, detour math, arrival-time opening status,
    ranking and predictive reachability. It will not live in the Android UI or raw ETL adapters.
 5. **FastAPI** will expose strict versioned mobile contracts when routing domain operations exist.
@@ -46,16 +46,41 @@ The current raw model preserves:
 - OSM element type + ID and unmodified tags;
 - per-run visible metrics.
 
-## Deliberate Phase 1 limits
+## Phase 2 normalized data flow
 
-- MIMIT coordinates are source values and are not assumed verified.
-- OSM data never overwrites MIMIT source data.
-- No fuzzy/spatial join exists yet.
-- No normalized station or PostGIS geometry exists yet.
+```text
+latest completed MIMIT run ─> MIMIT-anchored stations ─> geography(Point, 4326) + price history
+                                        │
+                                        ├─ ST_DWithin 250 m candidate search (GiST)
+                                        │          └─ deterministic distance/name policy
+latest completed OSM run ───> stable OSM features ─> matched / ambiguous / unmatched evidence
+                                                               └─ current enrichment link
+```
+
+`stations` represents official MIMIT station identity and fields. `osm_cng_features` represents
+stable OSM type/ID and enrichment fields. `station_osm_links` is the current accepted relationship;
+it does not copy or overwrite authoritative station fields. Price observations are semantically
+deduplicated in `station_prices`, while `station_current_prices` points to the latest observation for
+each station/fuel/service-mode tuple.
+
+Each reconciliation run records its MIMIT/OSM input run IDs, algorithm version, effective policy,
+manual overrides, configuration hash, decisions, ranked candidates and summary counts. Identical
+inputs are reused. A changed override or policy creates a distinct run. An OSM feature cannot be
+linked to two stations: automatic conflicts become ambiguous, while conflicting manual claims fail.
+
+Source coordinates outside conservative Italian bounds, or missing coordinates, remain preserved in
+raw tables but produce a null normalized geography and an explicit unmatched outcome.
+
+## Deliberate Phase 2 limits
+
+- MIMIT coordinates remain authoritative source values, not verified road-access points.
+- OSM data never overwrites MIMIT source data; only accepted links expose enrichment.
+- Reconciliation uses conservative deterministic proximity/name rules, not address geocoding or an
+  opaque fuzzy model.
 - No route, detour, opening-hours evaluation, ranking, traffic or predictive logic exists yet.
 
-These are enforced by keeping MIMIT and OSM in separate raw tables. Phase 2 will add normalized
-spatial models and a testable reconciliation mechanism through a new migration.
+Phase 3 will add the reproducible Valhalla runtime and routing adapter without changing these source
+authority boundaries.
 
 ## Runtime
 
@@ -65,5 +90,10 @@ The default Compose graph contains:
 - `migrate`: one-shot Alembic upgrade after the database is healthy;
 - `api`: non-root FastAPI container with liveness/readiness healthcheck and loopback-only host bind;
 - `etl`: profile-gated one-shot job, not a persistent service.
+
+All three application workloads use the same configurable `COMPASS_IMAGE`. Only `api` declares the
+repository build, so one build produces the exact image used for migrations, the API and ETL. This
+prevents a successful old migration image from reporting completion while newer application code
+expects a schema it never created.
 
 Secrets are environment supplied. No host-specific paths or privileged containers are required.

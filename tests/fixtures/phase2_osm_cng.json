@@ -1,0 +1,54 @@
+{
+  "version": 0.6,
+  "generator": "Phase 2 deterministic fixture",
+  "osm3s": {"timestamp_osm_base": "2026-08-26T20:00:00Z"},
+  "elements": [
+    {
+      "type": "node",
+      "id": 101,
+      "lat": 45.4642,
+      "lon": 9.19,
+      "tags": {
+        "amenity": "fuel",
+        "fuel:cng": "yes",
+        "name": "Milano Metano",
+        "opening_hours": "24/7",
+        "contact:phone": "+39 02 123456"
+      }
+    },
+    {
+      "type": "node",
+      "id": 201,
+      "lat": 44.49508,
+      "lon": 11.3426,
+      "tags": {
+        "amenity": "fuel",
+        "fuel:cng": "yes",
+        "name": "Bologna CNG",
+        "opening_hours": "Mo-Sa 07:00-19:00"
+      }
+    },
+    {
+      "type": "node",
+      "id": 202,
+      "lat": 44.49472,
+      "lon": 11.3426,
+      "tags": {
+        "amenity": "fuel",
+        "fuel:cng": "yes",
+        "name": "Bologna CNG",
+        "phone": "+39 051 654321"
+      }
+    },
+    {
+      "type": "way",
+      "id": 301,
+      "center": {"lat": 40.8518, "lon": 14.2681},
+      "tags": {
+        "amenity": "fuel",
+        "fuel:cng": "yes",
+        "name": "Napoli Metano"
+      }
+    }
+  ]
+}

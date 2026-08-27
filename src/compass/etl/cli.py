@@ -9,6 +9,7 @@ from compass.etl.acquisition import DownloadedPayload, download
 from compass.etl.osm import build_cng_query
 from compass.etl.service import ingest_mimit, ingest_osm
 from compass.logging import configure_logging
+from compass.reconciliation.service import normalize_and_reconcile, set_match_override
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,8 +82,28 @@ def _osm(args: argparse.Namespace) -> dict[str, object]:
         )
 
 
+def _normalize(_args: argparse.Namespace) -> dict[str, object]:
+    with SessionLocal() as session:
+        return normalize_and_reconcile(session)
+
+
+def _override(args: argparse.Namespace) -> dict[str, object]:
+    with SessionLocal() as session:
+        return set_match_override(
+            session,
+            mimit_station_id=args.mimit_station_id,
+            action=args.action,
+            reason=args.reason,
+            created_by=args.created_by,
+            osm_type=args.osm_type,
+            osm_id=args.osm_id,
+        )
+
+
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Compass raw CNG source ingestion")
+    root = argparse.ArgumentParser(
+        description="Compass CNG source ingestion, normalization and reconciliation"
+    )
     subcommands = root.add_subparsers(dest="command", required=True)
     mimit = subcommands.add_parser("mimit", help="ingest MIMIT active stations and CNG prices")
     mimit.add_argument("--stations-file", type=Path)
@@ -91,6 +112,20 @@ def parser() -> argparse.ArgumentParser:
     osm = subcommands.add_parser("osm", help="ingest OSM CNG fuel features through Overpass")
     osm.add_argument("--input-file", type=Path)
     osm.set_defaults(handler=_osm)
+    normalize = subcommands.add_parser(
+        "normalize", help="normalize latest raw imports and reconcile MIMIT with OSM"
+    )
+    normalize.set_defaults(handler=_normalize)
+    override = subcommands.add_parser(
+        "override", help="set or clear a manual MIMIT-to-OSM reconciliation override"
+    )
+    override.add_argument("--mimit-station-id", required=True)
+    override.add_argument("--action", choices=("link", "unmatch", "clear"), required=True)
+    override.add_argument("--osm-type", choices=("node", "way", "relation"))
+    override.add_argument("--osm-id", type=int)
+    override.add_argument("--reason", required=True)
+    override.add_argument("--created-by", required=True)
+    override.set_defaults(handler=_override)
     return root
 
 
