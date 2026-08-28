@@ -4,7 +4,7 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository currently implements the accepted **Phases 0–3** foundation:
+This repository currently implements the accepted **Phases 0–4** foundation:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -21,8 +21,11 @@ This repository currently implements the accepted **Phases 0–3** foundation:
 - a strict `POST /api/v1/routes` A-to-B contract returning metres, seconds, polyline6 geometry and
   maneuvers;
 - dependency-specific liveness/readiness state and stable routing error codes.
+- validated polyline6-to-PostGIS route geometry conversion;
+- configurable autonomy-aware CNG corridors using the 20%-of-effective-range policy and caps;
+- GiST-compatible spatial candidate pruning with explainable before/after metrics.
 
-It intentionally does **not** yet select CNG candidates, calculate station detours, evaluate opening
+It intentionally does **not** yet calculate station detours or road distance, evaluate opening
 hours, rank stations, ingest traffic or implement predictive refuelling. Those remain later gated
 phases.
 
@@ -89,6 +92,22 @@ The first full-Italy build is a substantial operator task. Image pulls, resource
 regional overrides, rollback-safe graph updates, exact acceptance invariants and diagnostics are documented in
 [deployment and live validation](docs/deployment.md#phase-3-valhalla-bootstrap-and-base-route-validation).
 
+## Phase 4 spatial candidate pruning
+
+With normalized stations and routing available, request a base route plus a spatial CNG corridor:
+
+```bash
+curl --fail -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300}' \
+  http://127.0.0.1:8000/api/v1/cng/corridor-candidates
+```
+
+The default 300 km effective range produces an uncapped 60 km radius and applies the configured
+50 km maximum. Response metrics distinguish the all-Italy station inventory from geocoded,
+in-corridor and returned candidates. Candidate distance is a straight-line spatial prefilter value,
+not road distance or detour. See the
+[Phase 4 live gate](docs/deployment.md#phase-4-autonomy-aware-corridor-validation).
+
 ## Repository layout
 
 ```text
@@ -97,6 +116,7 @@ src/compass/etl/       source acquisition, parsing and raw ingestion
 src/compass/normalization/ normalized source values and coordinate validation
 src/compass/reconciliation/ deterministic source matching and manual overrides
 src/compass/routing/   provider boundary and Valhalla HTTP adapter
+src/compass/candidates/ corridor policy, geometry decoding and PostGIS pruning
 migrations/            Alembic schema history
 tests/fixtures/        small network-free source fixtures
 docs/adr/              accepted architecture decisions
@@ -105,10 +125,12 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phases 2 and 3 have passed repository-local checks and their documented operator-run live tests.
+Phases 2–4 have passed repository-local checks and their documented operator-run live tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
-representative Milan A-to-B API route. Evidence is recorded in `docs/phases/phase-2-acceptance.md`
-and `docs/phases/phase-3-acceptance.md`.
+representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
+a Milan-to-Bologna route against the full 1,512-station inventory. Evidence is recorded in
+`docs/phases/phase-2-acceptance.md`, `docs/phases/phase-3-acceptance.md` and
+`docs/phases/phase-4-acceptance.md`.
 
 The project intends to be open source, but a repository code license has not yet been selected by
 the owner. Source datasets retain their own licenses; see `docs/data-sources.md`.

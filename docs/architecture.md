@@ -12,8 +12,9 @@ Compass uses six explicit server/domain boundaries and one first-class device cl
    and reconciliation evidence.
 4. **Routing provider** exposes a provider-neutral async interface. Its Valhalla adapter owns HTTP
    translation, response validation and failure classification.
-5. **Routing intelligence** will own corridor pruning, detour math, arrival-time opening status,
-   ranking and predictive reachability. It will not live in the Android UI or raw ETL adapters.
+5. **Routing intelligence** owns corridor policy and spatial pruning; later phases add detour math,
+   arrival-time opening status, ranking and predictive reachability. It does not live in the Android
+   UI or raw ETL adapters.
 6. **FastAPI** exposes strict versioned mobile contracts without exposing provider response shapes.
 7. **Android (Kotlin, Jetpack Compose, MapLibre Native)** owns presentation and interaction state.
 
@@ -100,6 +101,35 @@ domain objects. No source station model is consulted in this phase.
 - No traffic input or claim of traffic-aware routing.
 - No opening-hours evaluation, ranking, predictive range model or multi-waypoint public API.
 - Tile refresh remains an explicit operator job; application startup never erases the tile volume.
+
+## Phase 4 spatial-pruning flow
+
+```text
+A/B + effective CNG range ─> one base-route call ─> decode polyline6
+                                                        │
+                                                        └─> transient PostGIS LineString
+                                                              │
+20% range policy + caps ──────────────────────────────────────┤
+                                                              └─ ST_DWithin geography corridor
+                                                                  │
+stations.location GiST ───────────────────────────────────────────┘
+                                    └─ cheap route distance/projection ordering + count metrics
+```
+
+The route is request state, not durable domain history, so Phase 4 does not add a route table.
+`stations.location` remains the MIMIT-anchored geography point from Phase 2. `ST_DWithin` performs
+metre-based corridor filtering and can use its existing GiST index. `ST_Distance` and
+`ST_LineLocatePoint` are computed only for the reduced spatial set and are labeled as cheap
+prefilter values.
+
+## Deliberate Phase 4 limits
+
+- Effective CNG range is an explicit request input; no tank/consumption model estimates it yet.
+- Corridor inclusion proves spatial proximity only, not fuel reachability or road access.
+- Candidate distance-to-route is not road-network distance from the previous waypoint.
+- No candidate route, matrix, detour threshold, opening-hours evaluation or score is calculated.
+- A configurable response limit protects the contract while the true pre-limit count remains in
+  metrics for observability.
 
 ## Runtime
 

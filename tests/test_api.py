@@ -2,10 +2,17 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import httpx
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from compass.api.main import app
+from compass.candidates.domain import (
+    CorridorCandidateResult,
+    CorridorRadius,
+    SpatialCandidate,
+    SpatialPruningMetrics,
+)
 from compass.db import get_session
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import (
@@ -212,3 +219,110 @@ def test_base_route_hides_provider_failure_details() -> None:
         "code": "routing_unavailable",
         "message": "The routing service is unavailable.",
     }
+
+
+def test_corridor_candidates_exposes_policy_and_prefilter_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeRoutingProvider()
+    expected_route = asyncio.run(
+        provider.route(
+            RouteRequest(
+                origin=Coordinate(45.4642, 9.19),
+                destination=Coordinate(44.4949, 11.3426),
+            )
+        )
+    )
+
+    async def override_session() -> AsyncIterator[object]:
+        yield object()
+
+    async def override_provider() -> FakeRoutingProvider:
+        return provider
+
+    async def fake_find(*args: object, **kwargs: object) -> CorridorCandidateResult:
+        assert kwargs["max_route_geometry_points"] == 200_000
+        return CorridorCandidateResult(
+            base_route=expected_route,
+            corridor=CorridorRadius(300, 0.20, 60, 50, "maximum"),
+            metrics=SpatialPruningMetrics(
+                active_station_count=1512,
+                active_station_with_location_count=1505,
+                excluded_missing_location_count=7,
+                corridor_candidate_count=83,
+                returned_candidate_count=1,
+                pruned_with_location_count=1422,
+                reduction_ratio=1 - 83 / 1505,
+                candidate_limit_applied=False,
+            ),
+            candidates=(
+                SpatialCandidate(
+                    station_id=10,
+                    mimit_station_id="1001",
+                    name="Milano Metano",
+                    municipality="Milano",
+                    province="MI",
+                    latitude=45.4642,
+                    longitude=9.19,
+                    straight_line_distance_to_route_meters=12.5,
+                    route_fraction=0.1,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr("compass.api.routes.find_corridor_candidates", fake_find)
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_routing_provider] = override_provider
+    try:
+        response = _post(
+            "/api/v1/cng/corridor-candidates",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 44.4949, "longitude": 11.3426},
+                "effective_cng_range_km": 300,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "spatial_pruning"
+    assert body["corridor"] == {
+        "effective_cng_range_km": 300.0,
+        "range_fraction": 0.2,
+        "uncapped_radius_km": 60.0,
+        "radius_km": 50.0,
+        "cap_applied": "maximum",
+    }
+    assert body["metrics"]["active_station_count"] == 1512
+    assert body["metrics"]["corridor_candidate_count"] == 83
+    assert body["metrics"]["routing_calls"] == 1
+    assert body["candidates"] == [
+        {
+            "station_id": 10,
+            "mimit_station_id": "1001",
+            "name": "Milano Metano",
+            "municipality": "Milano",
+            "province": "MI",
+            "latitude": 45.4642,
+            "longitude": 9.19,
+            "straight_line_distance_to_route_meters": 12.5,
+            "route_fraction": 0.1,
+        }
+    ]
+
+
+def test_corridor_candidates_rejects_detour_input() -> None:
+    response = _post(
+        "/api/v1/cng/corridor-candidates",
+        {
+            "origin": {"latitude": 45.4642, "longitude": 9.19},
+            "destination": {"latitude": 44.4949, "longitude": 11.3426},
+            "effective_cng_range_km": 300,
+            "maximum_detour_minutes": 10,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_request"

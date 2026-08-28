@@ -14,3 +14,12 @@ def test_valhalla_url_is_normalized() -> None:
 def test_valhalla_url_requires_http_host(value: str) -> None:
     with pytest.raises(ValidationError, match="valhalla_url"):
         Settings(_env_file=None, valhalla_url=value)
+
+
+def test_corridor_radius_bounds_are_ordered() -> None:
+    with pytest.raises(ValidationError, match="minimum radius"):
+        Settings(
+            _env_file=None,
+            cng_corridor_minimum_radius_km=51,
+            cng_corridor_maximum_radius_km=50,
+        )

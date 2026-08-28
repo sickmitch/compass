@@ -1,7 +1,7 @@
 # Docker deployment and live validation
 
 This is the reference test-server workflow for repository bootstrap, raw source ingestion, Phase 2
-normalized station reconciliation and Phase 3 base routing.
+normalized station reconciliation, Phase 3 base routing and Phase 4 spatial candidate pruning.
 
 ## Prerequisites
 
@@ -316,3 +316,66 @@ Return the tile job's final output, `ps -a`, PBF identity line, both status/heal
 complete Compass route response. If an invariant fails, include the matching diagnostics. Do not
 return `.env`, credentials or the full PBF. A deployment that fails these invariants must be fixed
 before proceeding into functionality that depends on routing.
+
+## Phase 4 autonomy-aware corridor validation
+
+Run from the repository root after synchronizing Phase 4. The Phase 2 normalized data and Phase 3
+Italy graph must still be present. No migration beyond `0002` is expected because this phase reuses
+the station geography GiST index and creates request route geometry transiently.
+
+```bash
+docker compose build api
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300}' \
+  http://127.0.0.1:8000/api/v1/cng/corridor-candidates \
+  -o /tmp/compass-phase4-corridor.json
+
+python3 -c 'import json; p=json.load(open("/tmp/compass-phase4-corridor.json")); print(json.dumps({"stage":p["stage"],"corridor":p["corridor"],"metrics":p["metrics"],"candidate_sample":p["candidates"][:5]},indent=2))'
+```
+
+Expected invariants:
+
+- readiness is HTTP 200 with database and routing both `ready`;
+- the corridor request is HTTP 200 with `stage=spatial_pruning`;
+- `uncapped_radius_km=60`, `radius_km=50`, and `cap_applied=maximum`;
+- `routing_calls=1`—there is no per-station routing in Phase 4;
+- `active_station_count >= active_station_with_location_count > corridor_candidate_count`;
+- `excluded_missing_location_count` equals the difference between the first two counts;
+- `pruned_with_location_count` equals geocoded count minus corridor count;
+- `reduction_ratio >= 0.50` for this representative northern-Italy route;
+- returned count equals the candidate array length and is no more than the configured 200 limit;
+- every candidate has non-negative `straight_line_distance_to_route_meters`, a `route_fraction`
+  from 0 through 1, and coordinates within the 50 km corridor.
+
+The spatial distance is intentionally not a detour or road-network distance. Do not use these
+results as proof that a station satisfies a user detour limit.
+
+### Phase 4 diagnostics
+
+If the endpoint fails or counts are inconsistent, return:
+
+```bash
+curl --silent --show-error -i \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300}' \
+  http://127.0.0.1:8000/api/v1/cng/corridor-candidates
+docker compose --profile routing logs --no-color --tail=300 api valhalla db
+docker compose exec -T api alembic current
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT count(*) FILTER (WHERE is_active) AS active, count(*) FILTER (WHERE is_active AND location IS NOT NULL) AS geocoded FROM stations; SELECT indexname, indexdef FROM pg_indexes WHERE indexname = '\''ix_stations_location_gist'\'';"'
+```
+
+Return the summarized JSON printed by Python and readiness output. If any invariant fails, also
+return the HTTP response with headers and the three diagnostics. Keep the full JSON in `/tmp` only;
+do not return the long route polyline/maneuver payload unless requested.
+
+### Phase 4 accepted live result
+
+The operator completed this procedure on 2026-08-28. The Milan-to-Bologna request returned HTTP
+200, a 210,925 metre route, the expected capped 50 km corridor, 325 candidates from 1,505 geocoded
+stations, 200 returned candidates, a 78.4% reduction ratio and exactly one routing call. Alembic
+remained at `0002 (head)`. These results satisfy the Phase 4 live gate.

@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     valhalla_connect_timeout_seconds: float = Field(default=5, gt=0)
     valhalla_read_timeout_seconds: float = Field(default=60, gt=0)
     valhalla_route_language: str = Field(default="it-IT", pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$")
+    cng_corridor_range_fraction: float = Field(default=0.20, gt=0, le=1)
+    cng_corridor_minimum_radius_km: float = Field(default=5, gt=0)
+    cng_corridor_maximum_radius_km: float = Field(default=50, gt=0)
+    cng_corridor_candidate_limit: int = Field(default=200, gt=0, le=1000)
+    route_geometry_max_points: int = Field(default=200_000, ge=2)
     reconciliation_max_distance_meters: float = Field(default=250, gt=0)
     reconciliation_auto_match_distance_meters: float = Field(default=50, gt=0)
     reconciliation_named_match_distance_meters: float = Field(default=150, gt=0)
@@ -50,6 +55,14 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "reconciliation distances must satisfy auto-match <= named-match <= maximum"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_corridor_radii(self) -> "Settings":
+        if self.cng_corridor_minimum_radius_km > self.cng_corridor_maximum_radius_km:
+            raise ValueError(
+                "cng corridor minimum radius must not exceed its maximum radius"
             )
         return self
 
