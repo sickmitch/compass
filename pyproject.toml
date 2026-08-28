@@ -7,6 +7,8 @@ name = "compass-cng"
 version = "0.1.0"
 description = "Open-source, CNG-aware navigation foundations for Italy"
 readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
   "alembic==1.16.5",

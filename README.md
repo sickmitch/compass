@@ -132,5 +132,6 @@ a Milan-to-Bologna route against the full 1,512-station inventory. Evidence is r
 `docs/phases/phase-2-acceptance.md`, `docs/phases/phase-3-acceptance.md` and
 `docs/phases/phase-4-acceptance.md`.
 
-The project intends to be open source, but a repository code license has not yet been selected by
-the owner. Source datasets retain their own licenses; see `docs/data-sources.md`.
+Compass source code is licensed under the
+[GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;
+see `docs/data-sources.md`.
