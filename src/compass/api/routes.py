@@ -1,9 +1,10 @@
 from dataclasses import asdict
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,12 @@ from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.candidates.service import find_corridor_candidates
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
+from compass.detours.domain import (
+    EligibleDetourCandidate,
+    NetworkDetourPolicy,
+    NetworkDetourRequest,
+)
+from compass.detours.service import evaluate_cng_detours
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import (
     BaseRoute,
@@ -54,6 +61,26 @@ class CorridorCandidatesRequest(BaseRouteRequest):
             "It controls spatial corridor width only."
         ),
     )
+
+
+class DetourCandidatesRequest(CorridorCandidatesRequest):
+    maximum_detour_minutes: float = Field(
+        ge=0,
+        le=240,
+        description="Inclusive maximum added road-network travel time.",
+    )
+    departure_at: datetime = Field(
+        description=(
+            "Timezone-aware departure instant used to calculate station and destination ETAs."
+        )
+    )
+
+    @field_validator("departure_at")
+    @classmethod
+    def validate_departure_offset(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("departure_at must include a UTC offset")
+        return value
 
 
 class RouteGeometry(StrictModel):
@@ -138,6 +165,64 @@ class CorridorCandidatesResponse(StrictModel):
     corridor: CorridorPolicyResponse
     metrics: SpatialPruningMetricsResponse
     candidates: list[SpatialCandidateResponse]
+
+
+class NetworkCostBasisResponse(StrictModel):
+    provider: Literal["valhalla"]
+    traffic_state: Literal["not_configured"]
+    traffic_aware: Literal[False]
+    duration_model: Literal["valhalla_graph_speeds"]
+    distance_model: Literal["road_network"]
+
+
+class NetworkEvaluationMetricsResponse(StrictModel):
+    spatial_candidate_count: int = Field(ge=0)
+    matrix_candidate_count: int = Field(ge=0)
+    reachable_candidate_count: int = Field(ge=0)
+    unreachable_candidate_count: int = Field(ge=0)
+    eligible_candidate_count: int = Field(ge=0)
+    excluded_by_detour_count: int = Field(ge=0)
+    matrix_batch_size: int = Field(gt=0)
+    matrix_calls: int = Field(ge=0)
+    matrix_fallback_splits: int = Field(
+        ge=0,
+        description="Binary batch splits used to isolate uncorrelatable locations.",
+    )
+    matrix_location_failures: int = Field(
+        ge=0,
+        description="Isolated candidate locations with no suitable routing edge.",
+    )
+    base_route_calls: Literal[1]
+    per_candidate_route_calls: Literal[0]
+
+
+class EligibleDetourCandidateResponse(SpatialCandidateResponse):
+    distance_from_previous_waypoint_meters: float = Field(
+        ge=0,
+        description="Road-network distance from the request origin/previous waypoint.",
+    )
+    duration_from_previous_waypoint_seconds: float = Field(ge=0)
+    station_to_destination_distance_meters: float = Field(ge=0)
+    station_to_destination_duration_seconds: float = Field(ge=0)
+    route_via_station_distance_meters: float = Field(ge=0)
+    route_via_station_duration_seconds: float = Field(ge=0)
+    extra_distance_meters: float = Field(ge=0)
+    detour_duration_seconds: float = Field(ge=0)
+    detour_minutes: float = Field(ge=0)
+    station_eta: datetime
+    destination_eta: datetime
+
+
+class DetourCandidatesResponse(StrictModel):
+    stage: Literal["network_detour"] = "network_detour"
+    departure_at: datetime
+    maximum_detour_minutes: float = Field(ge=0)
+    base_route: BaseRouteResponse
+    corridor: CorridorPolicyResponse
+    spatial_pruning: SpatialPruningMetricsResponse
+    cost_basis: NetworkCostBasisResponse
+    network_evaluation: NetworkEvaluationMetricsResponse
+    candidates: list[EligibleDetourCandidateResponse]
 
 
 @router.post(
@@ -250,6 +335,88 @@ async def corridor_candidates(
     )
 
 
+@router.post(
+    "/cng/detour-candidates",
+    response_model=DetourCandidatesResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "Invalid request or no route."},
+        502: {"model": ErrorResponse, "description": "Invalid routing provider response."},
+        503: {"model": ErrorResponse, "description": "Database or routing unavailable."},
+    },
+)
+async def detour_candidates(
+    request: DetourCandidatesRequest,
+    session: Annotated[Session, Depends(get_session)],
+    provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    settings: Annotated[Settings, Depends(get_api_settings)],
+) -> DetourCandidatesResponse | JSONResponse:
+    route_request = RouteRequest(
+        origin=Coordinate(
+            latitude=request.origin.latitude,
+            longitude=request.origin.longitude,
+        ),
+        destination=Coordinate(
+            latitude=request.destination.latitude,
+            longitude=request.destination.longitude,
+        ),
+        costing=request.costing,
+        language=request.language or settings.valhalla_route_language,
+    )
+    domain_request = NetworkDetourRequest(
+        corridor_request=CorridorCandidateRequest(
+            route=route_request,
+            effective_cng_range_km=request.effective_cng_range_km,
+        ),
+        maximum_detour_seconds=request.maximum_detour_minutes * 60,
+        departure_at=request.departure_at,
+    )
+    corridor_policy = CorridorPolicy(
+        range_fraction=settings.cng_corridor_range_fraction,
+        minimum_radius_km=settings.cng_corridor_minimum_radius_km,
+        maximum_radius_km=settings.cng_corridor_maximum_radius_km,
+        candidate_limit=settings.cng_corridor_candidate_limit,
+    )
+    try:
+        result = await evaluate_cng_detours(
+            session,
+            provider,
+            domain_request,
+            corridor_policy=corridor_policy,
+            detour_policy=NetworkDetourPolicy(
+                matrix_batch_size=settings.valhalla_matrix_batch_size
+            ),
+            max_route_geometry_points=settings.route_geometry_max_points,
+        )
+    except NoRouteError:
+        return _error(422, "route_not_found", "No route was found between the locations.")
+    except RoutingUnavailableError:
+        return _error(503, "routing_unavailable", "The routing service is unavailable.")
+    except RoutingProviderError:
+        return _error(
+            502,
+            "routing_provider_error",
+            "The routing service returned an invalid response.",
+        )
+    except SQLAlchemyError:
+        return _error(503, "database_unavailable", "The station database is unavailable.")
+
+    spatial = result.spatial_result
+    return DetourCandidatesResponse(
+        departure_at=result.departure_at,
+        maximum_detour_minutes=result.maximum_detour_seconds / 60,
+        base_route=_base_route_response(spatial.base_route),
+        corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),
+        spatial_pruning=SpatialPruningMetricsResponse.model_validate(
+            asdict(spatial.metrics)
+        ),
+        cost_basis=NetworkCostBasisResponse.model_validate(asdict(result.cost_basis)),
+        network_evaluation=NetworkEvaluationMetricsResponse.model_validate(
+            asdict(result.metrics)
+        ),
+        candidates=[_detour_candidate_response(candidate) for candidate in result.candidates],
+    )
+
+
 def _base_route_response(route: BaseRoute) -> BaseRouteResponse:
     return BaseRouteResponse(
         distance_meters=route.distance_meters,
@@ -259,6 +426,39 @@ def _base_route_response(route: BaseRoute) -> BaseRouteResponse:
             ManeuverResponse.model_validate(asdict(maneuver)) for maneuver in route.maneuvers
         ],
         provider="valhalla",
+    )
+
+
+def _detour_candidate_response(
+    candidate: EligibleDetourCandidate,
+) -> EligibleDetourCandidateResponse:
+    return EligibleDetourCandidateResponse.model_validate(
+        {
+            **asdict(candidate.station),
+            "distance_from_previous_waypoint_meters": (
+                candidate.distance_from_previous_waypoint_meters
+            ),
+            "duration_from_previous_waypoint_seconds": (
+                candidate.duration_from_previous_waypoint_seconds
+            ),
+            "station_to_destination_distance_meters": (
+                candidate.station_to_destination_distance_meters
+            ),
+            "station_to_destination_duration_seconds": (
+                candidate.station_to_destination_duration_seconds
+            ),
+            "route_via_station_distance_meters": (
+                candidate.route_via_station_distance_meters
+            ),
+            "route_via_station_duration_seconds": (
+                candidate.route_via_station_duration_seconds
+            ),
+            "extra_distance_meters": candidate.extra_distance_meters,
+            "detour_duration_seconds": candidate.detour_duration_seconds,
+            "detour_minutes": candidate.detour_minutes,
+            "station_eta": candidate.station_eta,
+            "destination_eta": candidate.destination_eta,
+        }
     )
 
 

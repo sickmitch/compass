@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     valhalla_connect_timeout_seconds: float = Field(default=5, gt=0)
     valhalla_read_timeout_seconds: float = Field(default=60, gt=0)
     valhalla_route_language: str = Field(default="it-IT", pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$")
+    valhalla_matrix_batch_size: int = Field(default=40, gt=0, le=100)
     cng_corridor_range_fraction: float = Field(default=0.20, gt=0, le=1)
     cng_corridor_minimum_radius_km: float = Field(default=5, gt=0)
     cng_corridor_maximum_radius_km: float = Field(default=50, gt=0)

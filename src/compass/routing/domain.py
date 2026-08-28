@@ -43,6 +43,32 @@ class BaseRoute:
     provider: str
 
 
+@dataclass(frozen=True, slots=True)
+class MatrixRequest:
+    sources: tuple[Coordinate, ...]
+    targets: tuple[Coordinate, ...]
+    costing: str = "auto"
+
+    def __post_init__(self) -> None:
+        if not self.sources:
+            raise ValueError("matrix sources must not be empty")
+        if not self.targets:
+            raise ValueError("matrix targets must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class MatrixCost:
+    distance_meters: float
+    duration_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class MatrixResult:
+    costs: tuple[tuple[MatrixCost | None, ...], ...]
+    provider: str
+    algorithm: str
+
+
 class RoutingError(Exception):
     """Base error raised at the routing provider boundary."""
 
@@ -59,7 +85,13 @@ class NoRouteError(RoutingError):
     """The provider could not find a route between valid locations."""
 
 
+class MatrixLocationError(RoutingProviderError):
+    """One or more matrix locations could not be correlated to the routing graph."""
+
+
 class RoutingProvider(Protocol):
     async def route(self, request: RouteRequest) -> BaseRoute: ...
+
+    async def matrix(self, request: MatrixRequest) -> MatrixResult: ...
 
     async def is_ready(self) -> bool: ...

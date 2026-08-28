@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from math import isfinite
 from typing import Any
 
 import httpx
@@ -6,6 +7,10 @@ import httpx
 from compass.routing.domain import (
     BaseRoute,
     Maneuver,
+    MatrixCost,
+    MatrixLocationError,
+    MatrixRequest,
+    MatrixResult,
     NoRouteError,
     RouteRequest,
     RoutingProviderError,
@@ -13,6 +18,7 @@ from compass.routing.domain import (
 )
 
 VALHALLA_NO_ROUTE_ERROR_CODES = {442}
+VALHALLA_MATRIX_LOCATION_ERROR_CODES = {171}
 
 
 class ValhallaRoutingAdapter:
@@ -75,6 +81,55 @@ class ValhallaRoutingAdapter:
             )
 
         return _parse_route(_json_mapping(response))
+
+    async def matrix(self, request: MatrixRequest) -> MatrixResult:
+        payload = {
+            "sources": [
+                {"lat": coordinate.latitude, "lon": coordinate.longitude}
+                for coordinate in request.sources
+            ],
+            "targets": [
+                {"lat": coordinate.latitude, "lon": coordinate.longitude}
+                for coordinate in request.targets
+            ],
+            "costing": request.costing,
+            "units": "kilometers",
+            "verbose": True,
+            "shape_format": "no_shape",
+        }
+        response = await self._request("POST", "/sources_to_targets", json=payload)
+        if response.status_code >= 500:
+            raise RoutingUnavailableError(
+                f"Valhalla returned HTTP {response.status_code}"
+            )
+        if response.status_code >= 400:
+            error_code = _optional_int(_json_mapping(response).get("error_code"))
+            if error_code in VALHALLA_MATRIX_LOCATION_ERROR_CODES:
+                raise MatrixLocationError(
+                    "Valhalla could not correlate one or more matrix locations"
+                )
+            if error_code in VALHALLA_NO_ROUTE_ERROR_CODES:
+                return MatrixResult(
+                    costs=tuple(
+                        tuple(None for _target in request.targets)
+                        for _source in request.sources
+                    ),
+                    provider="valhalla",
+                    algorithm="no_route",
+                )
+            raise RoutingProviderError(
+                f"Valhalla rejected the matrix request with HTTP {response.status_code}"
+            )
+        if response.status_code >= 300:
+            raise RoutingProviderError(
+                f"Valhalla returned unexpected HTTP {response.status_code}"
+            )
+
+        return _parse_matrix(
+            _json_mapping(response),
+            source_count=len(request.sources),
+            target_count=len(request.targets),
+        )
 
     async def is_ready(self) -> bool:
         try:
@@ -152,6 +207,58 @@ def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
         ) from error
 
 
+def _parse_matrix(
+    payload: Mapping[str, Any], *, source_count: int, target_count: int
+) -> MatrixResult:
+    try:
+        units = _string(payload["units"], "units")
+        if units != "kilometers":
+            raise RoutingProviderError("Valhalla matrix units must be kilometers")
+        algorithm = _string(payload["algorithm"], "algorithm")
+        rows = _list(payload["sources_to_targets"], "sources_to_targets")
+        if len(rows) != source_count:
+            raise RoutingProviderError("Valhalla matrix source dimension is invalid")
+
+        parsed_rows: list[tuple[MatrixCost | None, ...]] = []
+        for source_index, row_value in enumerate(rows):
+            row = _list(row_value, f"sources_to_targets[{source_index}]")
+            if len(row) != target_count:
+                raise RoutingProviderError("Valhalla matrix target dimension is invalid")
+            parsed_row: list[MatrixCost | None] = []
+            for target_index, cell_value in enumerate(row):
+                field = f"sources_to_targets[{source_index}][{target_index}]"
+                cell = _mapping(cell_value, field)
+                if _integer(cell["from_index"], f"{field}.from_index") != source_index:
+                    raise RoutingProviderError(f"{field}.from_index is invalid")
+                if _integer(cell["to_index"], f"{field}.to_index") != target_index:
+                    raise RoutingProviderError(f"{field}.to_index is invalid")
+                distance = cell.get("distance")
+                duration = cell.get("time")
+                if distance is None and duration is None:
+                    parsed_row.append(None)
+                elif distance is None or duration is None:
+                    raise RoutingProviderError(
+                        f"{field} must contain both distance and time or neither"
+                    )
+                else:
+                    parsed_row.append(
+                        MatrixCost(
+                            distance_meters=_number(distance, f"{field}.distance") * 1000,
+                            duration_seconds=_number(duration, f"{field}.time"),
+                        )
+                    )
+            parsed_rows.append(tuple(parsed_row))
+        return MatrixResult(
+            costs=tuple(parsed_rows),
+            provider="valhalla",
+            algorithm=algorithm,
+        )
+    except KeyError as error:
+        raise RoutingProviderError(
+            f"Valhalla matrix response is missing {error.args[0]}"
+        ) from error
+
+
 def _parse_maneuver(value: Mapping[str, Any], index: int) -> Maneuver:
     field = f"trip.legs[0].maneuvers[{index}]"
     try:
@@ -208,6 +315,8 @@ def _list(value: Any, field: str) -> list[Any]:
 def _number(value: Any, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise RoutingProviderError(f"{field} must be a number")
+    if not isfinite(value):
+        raise RoutingProviderError(f"{field} must be finite")
     if value < 0:
         raise RoutingProviderError(f"{field} must not be negative")
     return float(value)

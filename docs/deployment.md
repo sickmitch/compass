@@ -1,7 +1,8 @@
 # Docker deployment and live validation
 
 This is the reference test-server workflow for repository bootstrap, raw source ingestion, Phase 2
-normalized station reconciliation, Phase 3 base routing and Phase 4 spatial candidate pruning.
+normalized station reconciliation, Phase 3 base routing, Phase 4 spatial candidate pruning and the
+accepted Phase 5 batched detour workflow.
 
 ## Prerequisites
 
@@ -379,3 +380,160 @@ The operator completed this procedure on 2026-08-28. The Milan-to-Bologna reques
 200, a 210,925 metre route, the expected capped 50 km corridor, 325 candidates from 1,505 geocoded
 stations, 200 returned candidates, a 78.4% reduction ratio and exactly one routing call. Alembic
 remained at `0002 (head)`. These results satisfy the Phase 4 live gate.
+
+## Phase 5 batched network detour validation
+
+Run from the repository root after synchronizing Phase 5. Keep the accepted Phase 2 normalized data
+and Phase 3 Italy graph. No migration beyond `0002` is expected. `departure_at` must include an
+explicit UTC offset; use an offset appropriate for the requested civil time.
+
+```bash
+docker compose build api
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-28T08:00:00+02:00"}' \
+  http://127.0.0.1:8000/api/v1/cng/detour-candidates \
+  -o /tmp/compass-phase5-detours.json
+
+python3 - <<'PY'
+import json
+from datetime import datetime
+
+p = json.load(open("/tmp/compass-phase5-detours.json"))
+s = p["spatial_pruning"]
+n = p["network_evaluation"]
+candidates = p["candidates"]
+assert p["stage"] == "network_detour"
+assert p["cost_basis"]["traffic_state"] == "not_configured"
+assert p["cost_basis"]["traffic_aware"] is False
+assert p["cost_basis"]["distance_model"] == "road_network"
+assert n["spatial_candidate_count"] == s["corridor_candidate_count"]
+assert n["matrix_candidate_count"] == s["returned_candidate_count"]
+assert n["reachable_candidate_count"] + n["unreachable_candidate_count"] == n["matrix_candidate_count"]
+assert n["eligible_candidate_count"] + n["excluded_by_detour_count"] == n["reachable_candidate_count"]
+assert n["eligible_candidate_count"] == len(candidates)
+assert n["base_route_calls"] == 1
+assert n["per_candidate_route_calls"] == 0
+minimum_calls = 0 if n["matrix_candidate_count"] == 0 else 2 * ((n["matrix_candidate_count"] + n["matrix_batch_size"] - 1) // n["matrix_batch_size"])
+assert n["matrix_calls"] == minimum_calls + 4 * n["matrix_fallback_splits"]
+assert n["matrix_location_failures"] <= n["unreachable_candidate_count"]
+for candidate in candidates:
+    assert candidate["detour_duration_seconds"] <= 600.000001
+    assert abs(candidate["detour_minutes"] * 60 - candidate["detour_duration_seconds"]) < 0.001
+    assert abs(candidate["route_via_station_distance_meters"] - candidate["distance_from_previous_waypoint_meters"] - candidate["station_to_destination_distance_meters"]) < 0.001
+    assert abs(candidate["route_via_station_duration_seconds"] - candidate["duration_from_previous_waypoint_seconds"] - candidate["station_to_destination_duration_seconds"]) < 0.001
+    assert datetime.fromisoformat(candidate["station_eta"]).utcoffset() is not None
+    assert datetime.fromisoformat(candidate["destination_eta"]).utcoffset() is not None
+assert [c["detour_duration_seconds"] for c in candidates] == sorted(c["detour_duration_seconds"] for c in candidates)
+print(json.dumps({"stage": p["stage"], "corridor": p["corridor"], "spatial_pruning": s, "cost_basis": p["cost_basis"], "network_evaluation": n, "candidate_sample": candidates[:5]}, indent=2))
+PY
+
+# Independently validate one known candidate with ordinary Valhalla routes. These three route
+# calls are acceptance diagnostics only; the Compass request above must still use matrix batches.
+docker compose --profile routing exec -T api python - <<'PY' \
+  > /tmp/compass-phase5-known-route.json
+import json
+import urllib.request
+
+url = "http://valhalla:8002/route"
+origin = {"lat": 45.4642, "lon": 9.1900, "type": "break"}
+station = {"lat": 45.321004, "lon": 9.376063, "type": "break"}
+destination = {"lat": 44.4949, "lon": 11.3426, "type": "break"}
+
+def route(start, end):
+    body = json.dumps({
+        "locations": [start, end],
+        "costing": "auto",
+        "units": "kilometers",
+        "directions_type": "none",
+    }).encode()
+    request = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        summary = json.load(response)["trip"]["summary"]
+    return {"distance_meters": summary["length"] * 1000, "duration_seconds": summary["time"]}
+
+base = route(origin, destination)
+outward = route(origin, station)
+onward = route(station, destination)
+via_distance = outward["distance_meters"] + onward["distance_meters"]
+via_duration = outward["duration_seconds"] + onward["duration_seconds"]
+print(json.dumps({
+    "mimit_station_id": "43690",
+    "base": base,
+    "origin_to_station": outward,
+    "station_to_destination": onward,
+    "route_via_station_distance_meters": via_distance,
+    "route_via_station_duration_seconds": via_duration,
+    "extra_distance_meters": max(0, via_distance - base["distance_meters"]),
+    "detour_duration_seconds": max(0, via_duration - base["duration_seconds"]),
+}, indent=2))
+PY
+
+python3 - <<'PY'
+import json
+
+p = json.load(open("/tmp/compass-phase5-detours.json"))
+known = json.load(open("/tmp/compass-phase5-known-route.json"))
+candidate = next(c for c in p["candidates"] if c["mimit_station_id"] == known["mimit_station_id"])
+assert known["detour_duration_seconds"] <= 600
+assert candidate["detour_duration_seconds"] <= 600
+assert abs(candidate["route_via_station_distance_meters"] - known["route_via_station_distance_meters"]) <= 1000
+assert abs(candidate["route_via_station_duration_seconds"] - known["route_via_station_duration_seconds"]) <= 120
+print(json.dumps({"batched_candidate": candidate, "independent_route_check": known}, indent=2))
+PY
+
+docker compose --profile routing logs --no-color --since=5m api valhalla \
+  | grep -E 'POST /route|POST /sources_to_targets|detour-candidates'
+docker compose exec -T api alembic current
+```
+
+Expected invariants:
+
+- readiness and the detour request are HTTP 200;
+- `stage=network_detour`, the applied corridor policy remains the accepted Phase 4 policy and the
+  request maximum is ten minutes;
+- the matrix count equals Phase 4's returned count, not the all-Italy active count;
+- reachable plus unreachable equals evaluated, and eligible plus detour-excluded equals reachable;
+- matrix calls equal two per configured batch on the clean path (ten when 200 candidates use
+  batches of 40), plus four observable calls per binary fallback split;
+- an uncorrelatable station is counted as unreachable without discarding valid batch siblings;
+- `base_route_calls=1` and `per_candidate_route_calls=0`;
+- every returned candidate satisfies the inclusive 600-second maximum and its two leg sums;
+- MIMIT station `43690` (San Zenone Ovest) is independently eligible under ordinary route calls,
+  appears in the batched response and agrees within 1 km / 120 seconds; these tolerances account for
+  CostMatrix versus bidirectional A* path/snap differences;
+- distance from the previous waypoint is explicitly a road-network field;
+- station and destination ETA values retain a UTC offset;
+- cost metadata says traffic is not configured and not traffic-aware;
+- metrics prove the Compass request made one base `/route`, zero per-candidate route calls and only
+  batched `/sources_to_targets` calls. The final filtered log also contains the three deliberately
+  independent `/route` diagnostics above, so four route lines are expected in this procedure.
+  Healthcheck `/status` lines may also appear.
+
+The request evaluates at most the Phase 4 returned-candidate limit. If
+`spatial_pruning.candidate_limit_applied=true`, it is intentionally not an exhaustive evaluation of
+every pre-limit corridor station.
+
+### Phase 5 diagnostics
+
+If the endpoint fails or matrix/count invariants do not hold, return:
+
+```bash
+curl --silent --show-error -i \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-28T08:00:00+02:00"}' \
+  http://127.0.0.1:8000/api/v1/cng/detour-candidates
+docker compose --profile routing logs --no-color --tail=500 api valhalla db
+docker compose --profile routing exec -T valhalla sh -c \
+  'curl --fail --silent --show-error -H "Content-Type: application/json" -d '\''{"sources":[{"lat":45.4642,"lon":9.1900}],"targets":[{"lat":45.321004,"lon":9.376063},{"lat":45.141970,"lon":9.634009}],"costing":"auto","units":"kilometers","verbose":true,"shape_format":"no_shape"}'\'' http://127.0.0.1:8002/sources_to_targets'
+docker compose exec -T api alembic current
+```
+
+Return both summarized JSON objects, the independent known-route comparison, filtered request logs
+and Alembic output. If a check fails, also return the HTTP response with headers and all diagnostics.
+Keep the full route/candidate JSON in `/tmp` unless a specific malformed item must be inspected.

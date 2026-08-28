@@ -14,11 +14,18 @@ from compass.candidates.domain import (
     SpatialPruningMetrics,
 )
 from compass.db import get_session
+from compass.detours.domain import (
+    NetworkCostBasis,
+    NetworkDetourResult,
+    NetworkEvaluationMetrics,
+    calculate_detour_candidate,
+)
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import (
     BaseRoute,
     Coordinate,
     Maneuver,
+    MatrixCost,
     RouteRequest,
     RoutingUnavailableError,
 )
@@ -326,3 +333,171 @@ def test_corridor_candidates_rejects_detour_input() -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_request"
+
+
+def test_detour_candidates_exposes_network_costs_eta_and_no_traffic_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeRoutingProvider()
+    expected_route = asyncio.run(
+        provider.route(
+            RouteRequest(
+                origin=Coordinate(45.4642, 9.19),
+                destination=Coordinate(44.4949, 11.3426),
+            )
+        )
+    )
+    station = SpatialCandidate(
+        station_id=10,
+        mimit_station_id="1001",
+        name="Milano Metano",
+        municipality="Milano",
+        province="MI",
+        latitude=45.4,
+        longitude=9.3,
+        straight_line_distance_to_route_meters=12.5,
+        route_fraction=0.1,
+    )
+    spatial = CorridorCandidateResult(
+        base_route=expected_route,
+        corridor=CorridorRadius(300, 0.20, 60, 50, "maximum"),
+        metrics=SpatialPruningMetrics(
+            active_station_count=1512,
+            active_station_with_location_count=1505,
+            excluded_missing_location_count=7,
+            corridor_candidate_count=83,
+            returned_candidate_count=1,
+            pruned_with_location_count=1422,
+            reduction_ratio=1 - 83 / 1505,
+            candidate_limit_applied=False,
+        ),
+        candidates=(station,),
+    )
+
+    async def override_session() -> AsyncIterator[object]:
+        yield object()
+
+    async def override_provider() -> FakeRoutingProvider:
+        return provider
+
+    async def fake_evaluate(*args: object, **kwargs: object) -> NetworkDetourResult:
+        domain_request = args[2]
+        assert domain_request.maximum_detour_seconds == 600  # type: ignore[attr-defined]
+        assert domain_request.departure_at.isoformat() == (  # type: ignore[attr-defined]
+            "2026-08-28T08:00:00+02:00"
+        )
+        assert kwargs["detour_policy"].matrix_batch_size == 40
+        departure_at = domain_request.departure_at  # type: ignore[attr-defined]
+        candidate = calculate_detour_candidate(
+            station=station,
+            base_route=expected_route,
+            previous_to_station=MatrixCost(1_200, 120),
+            station_to_destination=MatrixCost(1_600, 260),
+            departure_at=departure_at,
+        )
+        return NetworkDetourResult(
+            spatial_result=spatial,
+            maximum_detour_seconds=600,
+            departure_at=departure_at,
+            cost_basis=NetworkCostBasis(),
+            metrics=NetworkEvaluationMetrics(
+                spatial_candidate_count=83,
+                matrix_candidate_count=1,
+                reachable_candidate_count=1,
+                unreachable_candidate_count=0,
+                eligible_candidate_count=1,
+                excluded_by_detour_count=0,
+                matrix_batch_size=40,
+                matrix_calls=2,
+                matrix_fallback_splits=0,
+                matrix_location_failures=0,
+            ),
+            candidates=(candidate,),
+        )
+
+    monkeypatch.setattr("compass.api.routes.evaluate_cng_detours", fake_evaluate)
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_routing_provider] = override_provider
+    try:
+        response = _post(
+            "/api/v1/cng/detour-candidates",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 44.4949, "longitude": 11.3426},
+                "effective_cng_range_km": 300,
+                "maximum_detour_minutes": 10,
+                "departure_at": "2026-08-28T08:00:00+02:00",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "network_detour"
+    assert body["departure_at"] == "2026-08-28T08:00:00+02:00"
+    assert body["maximum_detour_minutes"] == 10
+    assert body["cost_basis"] == {
+        "provider": "valhalla",
+        "traffic_state": "not_configured",
+        "traffic_aware": False,
+        "duration_model": "valhalla_graph_speeds",
+        "distance_model": "road_network",
+    }
+    assert body["network_evaluation"] == {
+        "spatial_candidate_count": 83,
+        "matrix_candidate_count": 1,
+        "reachable_candidate_count": 1,
+        "unreachable_candidate_count": 0,
+        "eligible_candidate_count": 1,
+        "excluded_by_detour_count": 0,
+        "matrix_batch_size": 40,
+        "matrix_calls": 2,
+        "matrix_fallback_splits": 0,
+        "matrix_location_failures": 0,
+        "base_route_calls": 1,
+        "per_candidate_route_calls": 0,
+    }
+    assert body["candidates"] == [
+        {
+            "station_id": 10,
+            "mimit_station_id": "1001",
+            "name": "Milano Metano",
+            "municipality": "Milano",
+            "province": "MI",
+            "latitude": 45.4,
+            "longitude": 9.3,
+            "straight_line_distance_to_route_meters": 12.5,
+            "route_fraction": 0.1,
+            "distance_from_previous_waypoint_meters": 1200.0,
+            "duration_from_previous_waypoint_seconds": 120.0,
+            "station_to_destination_distance_meters": 1600.0,
+            "station_to_destination_duration_seconds": 260.0,
+            "route_via_station_distance_meters": 2800.0,
+            "route_via_station_duration_seconds": 380.0,
+            "extra_distance_meters": 300.0,
+            "detour_duration_seconds": 60.0,
+            "detour_minutes": 1.0,
+            "station_eta": "2026-08-28T08:02:00+02:00",
+            "destination_eta": "2026-08-28T08:06:20+02:00",
+        }
+    ]
+
+
+def test_detour_candidates_requires_timezone_offset() -> None:
+    response = _post(
+        "/api/v1/cng/detour-candidates",
+        {
+            "origin": {"latitude": 45.4642, "longitude": 9.19},
+            "destination": {"latitude": 44.4949, "longitude": 11.3426},
+            "effective_cng_range_km": 300,
+            "maximum_detour_minutes": 10,
+            "departure_at": "2026-08-28T08:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "invalid_request",
+        "message": "The request payload is invalid.",
+    }

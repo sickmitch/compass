@@ -12,9 +12,9 @@ Compass uses six explicit server/domain boundaries and one first-class device cl
    and reconciliation evidence.
 4. **Routing provider** exposes a provider-neutral async interface. Its Valhalla adapter owns HTTP
    translation, response validation and failure classification.
-5. **Routing intelligence** owns corridor policy and spatial pruning; later phases add detour math,
-   arrival-time opening status, ranking and predictive reachability. It does not live in the Android
-   UI or raw ETL adapters.
+5. **Routing intelligence** owns corridor policy, spatial pruning and batched road detour math;
+   later phases add arrival-time opening status, ranking and predictive reachability. It does not
+   live in the Android UI or raw ETL adapters.
 6. **FastAPI** exposes strict versioned mobile contracts without exposing provider response shapes.
 7. **Android (Kotlin, Jetpack Compose, MapLibre Native)** owns presentation and interaction state.
 
@@ -130,6 +130,39 @@ prefilter values.
 - No candidate route, matrix, detour threshold, opening-hours evaluation or score is calculated.
 - A configurable response limit protects the contract while the true pre-limit count remains in
   metrics for observability.
+
+## Phase 5 network-detour flow
+
+```text
+Phase 4 returned candidates ── batches of 40 ─┬─ previous waypoint -> stations (one-to-many)
+                                              └─ stations -> destination (many-to-one)
+                                                                  │
+base A/B route cost ──────────────────────────────────────────────┤
+user maximum detour ─────────────────────────────────────────────┤
+                                                                  └─ eligible road-cost results
+```
+
+The provider boundary exposes a rectangular matrix of optional road costs; the Valhalla adapter
+owns `/sources_to_targets`, kilometre conversion, source/target index validation and unreachable
+pair semantics. Routing intelligence combines the two legs, compares them to the Phase 4 base
+route, calculates ETAs from an offset-aware departure and applies the caller's maximum detour
+inclusively.
+
+Phase 5 evaluates no more than Phase 4's configurable returned-candidate limit. With the defaults,
+200 candidates require a clean-path minimum of ten matrix calls rather than 200 full route calls.
+An error-171 batch is binary-split to isolate uncorrelatable stations without losing valid siblings.
+Metrics expose the pre-limit corridor count, matrix-evaluated count, reachability, eligibility,
+batch/call/fallback counts and the absence of per-candidate route calls.
+
+## Deliberate Phase 5 limits
+
+- Graph speeds are used without an external traffic overlay; responses explicitly report
+  `traffic_state=not_configured` and `traffic_aware=false`.
+- ETAs are elapsed-time projections only. Opening-hours parsing and status at ETA are later work.
+- Eligibility ordering by detour cost is deterministic but is not price/opening/quality ranking.
+- Refuelling dwell time is not included in detour duration.
+- A Phase 4 candidate limit can make evaluation non-exhaustive; that state remains visible.
+- Selecting a station and returning a full route through it is not part of this endpoint.
 
 ## Runtime
 

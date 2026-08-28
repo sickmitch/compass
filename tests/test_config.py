@@ -23,3 +23,9 @@ def test_corridor_radius_bounds_are_ordered() -> None:
             cng_corridor_minimum_radius_km=51,
             cng_corridor_maximum_radius_km=50,
         )
+
+
+@pytest.mark.parametrize("value", [0, 101])
+def test_matrix_batch_size_is_bounded(value: int) -> None:
+    with pytest.raises(ValidationError, match="valhalla_matrix_batch_size"):
+        Settings(_env_file=None, valhalla_matrix_batch_size=value)
