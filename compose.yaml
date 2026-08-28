@@ -34,6 +34,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HTTP_USER_AGENT: ${HTTP_USER_AGENT:-compass-cng/0.1.0}
+      VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
+      VALHALLA_CONNECT_TIMEOUT_SECONDS: ${VALHALLA_CONNECT_TIMEOUT_SECONDS:-5}
+      VALHALLA_READ_TIMEOUT_SECONDS: ${VALHALLA_READ_TIMEOUT_SECONDS:-60}
+      VALHALLA_ROUTE_LANGUAGE: ${VALHALLA_ROUTE_LANGUAGE:-it-IT}
     depends_on:
       db:
         condition: service_healthy
@@ -53,6 +58,50 @@ services:
       start_period: 10s
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  valhalla-tiles:
+    profiles: ["routing-build"]
+    image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
+    environment:
+      tile_urls: ${VALHALLA_TILE_URLS:-https://download.geofabrik.de/europe/italy-latest.osm.pbf}
+      serve_tiles: "False"
+      # A build job must inspect PBF hashes so partial/stale tiles cannot be trusted.
+      use_tiles_ignore_pbf: "False"
+      force_rebuild: ${VALHALLA_FORCE_REBUILD:-False}
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      build_tar: "True"
+      use_default_speeds_config: "False"
+      server_threads: ${VALHALLA_THREADS:-2}
+    volumes:
+      - valhalla_data:/custom_files
+    restart: "no"
+
+  valhalla:
+    profiles: ["routing"]
+    image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
+    environment:
+      tile_urls: ${VALHALLA_TILE_URLS:-https://download.geofabrik.de/europe/italy-latest.osm.pbf}
+      serve_tiles: "True"
+      # Serving reuses the graph already validated by the one-shot build job.
+      use_tiles_ignore_pbf: "True"
+      force_rebuild: ${VALHALLA_FORCE_REBUILD:-False}
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      build_tar: "True"
+      use_default_speeds_config: "False"
+      server_threads: ${VALHALLA_THREADS:-2}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8002/status >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - valhalla_data:/custom_files
     restart: unless-stopped
 
   etl:
@@ -83,3 +132,5 @@ services:
 
 volumes:
   postgres_data:
+  valhalla_data:
+    name: ${VALHALLA_VOLUME_NAME:-compass_valhalla_data}

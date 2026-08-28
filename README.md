@@ -4,7 +4,7 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository currently implements **Phases 0–2**:
+This repository currently implements the accepted **Phases 0–3** foundation:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -16,9 +16,15 @@ This repository currently implements **Phases 0–2**:
 - semantic CNG price history plus explicit current-price pointers;
 - versioned, deterministic MIMIT-to-OSM reconciliation with matched, ambiguous and unmatched states;
 - auditable candidates, confidence/method values and operator-controlled manual overrides.
+- a version/digest-pinned Valhalla tile bootstrap and internal routing runtime;
+- a provider-neutral async routing boundary with fixture-tested Valhalla translation;
+- a strict `POST /api/v1/routes` A-to-B contract returning metres, seconds, polyline6 geometry and
+  maneuvers;
+- dependency-specific liveness/readiness state and stable routing error codes.
 
-It intentionally does **not** yet run Valhalla, expose routing APIs, evaluate opening hours, or rank
-route candidates. Those begin in later gated phases.
+It intentionally does **not** yet select CNG candidates, calculate station detours, evaluate opening
+hours, rank stations, ingest traffic or implement predictive refuelling. Those remain later gated
+phases.
 
 ## Quick local validation
 
@@ -41,11 +47,11 @@ cp .env.example .env
 docker compose build api
 docker compose up -d db migrate api
 curl --fail http://127.0.0.1:8000/health/live
-curl --fail http://127.0.0.1:8000/health/ready
 ```
 
 The service binds to loopback by default. Public exposure is deliberately outside this repository's
-current scope.
+current scope. Readiness requires Valhalla after Phase 3; follow the routing bootstrap below before
+expecting `/health/ready` to return 200.
 
 ## Source imports and Phase 2 normalization
 
@@ -66,6 +72,23 @@ returns `"reused": true`. Its metrics expose matched, ambiguous and unmatched st
 See [deployment and live validation](docs/deployment.md),
 [architecture](docs/architecture.md), and [data sources](docs/data-sources.md).
 
+## Phase 3 base routing
+
+Build Italy tiles once into the named volume, then start the internal router and API:
+
+```bash
+docker compose --profile routing-build run --rm valhalla-tiles
+docker compose --profile routing up -d db migrate valhalla api
+curl --fail http://127.0.0.1:8000/health/ready
+curl --fail -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":45.4857,"longitude":9.2045}}' \
+  http://127.0.0.1:8000/api/v1/routes
+```
+
+The first full-Italy build is a substantial operator task. Image pulls, resource expectations,
+regional overrides, rollback-safe graph updates, exact acceptance invariants and diagnostics are documented in
+[deployment and live validation](docs/deployment.md#phase-3-valhalla-bootstrap-and-base-route-validation).
+
 ## Repository layout
 
 ```text
@@ -73,6 +96,7 @@ src/compass/api/       health-level FastAPI scaffolding
 src/compass/etl/       source acquisition, parsing and raw ingestion
 src/compass/normalization/ normalized source values and coordinate validation
 src/compass/reconciliation/ deterministic source matching and manual overrides
+src/compass/routing/   provider boundary and Valhalla HTTP adapter
 migrations/            Alembic schema history
 tests/fixtures/        small network-free source fixtures
 docs/adr/              accepted architecture decisions
@@ -81,9 +105,10 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phase 2 has passed repository-local checks, an isolated PostGIS integration test and the documented
-operator-run live test against representative MIMIT and OSM snapshots. The accepted live counts and
-evidence are recorded in `docs/phases/phase-2-acceptance.md`.
+Phases 2 and 3 have passed repository-local checks and their documented operator-run live tests.
+Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
+representative Milan A-to-B API route. Evidence is recorded in `docs/phases/phase-2-acceptance.md`
+and `docs/phases/phase-3-acceptance.md`.
 
 The project intends to be open source, but a repository code license has not yet been selected by
 the owner. Source datasets retain their own licenses; see `docs/data-sources.md`.

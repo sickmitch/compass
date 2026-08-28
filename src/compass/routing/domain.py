@@ -1,0 +1,65 @@
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class Coordinate:
+    latitude: float
+    longitude: float
+
+
+@dataclass(frozen=True, slots=True)
+class RouteRequest:
+    origin: Coordinate
+    destination: Coordinate
+    costing: str = "auto"
+    language: str = "it-IT"
+
+
+@dataclass(frozen=True, slots=True)
+class Maneuver:
+    type: int
+    instruction: str
+    distance_meters: float
+    duration_seconds: float
+    begin_shape_index: int
+    end_shape_index: int
+    street_names: tuple[str, ...] = ()
+    verbal_transition_alert_instruction: str | None = None
+    verbal_pre_transition_instruction: str | None = None
+    verbal_post_transition_instruction: str | None = None
+    bearing_before: int | None = None
+    bearing_after: int | None = None
+    travel_mode: str | None = None
+    travel_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BaseRoute:
+    distance_meters: float
+    duration_seconds: float
+    encoded_polyline: str
+    maneuvers: tuple[Maneuver, ...]
+    provider: str
+
+
+class RoutingError(Exception):
+    """Base error raised at the routing provider boundary."""
+
+
+class RoutingUnavailableError(RoutingError):
+    """The provider could not be reached or returned a transient failure."""
+
+
+class RoutingProviderError(RoutingError):
+    """The provider rejected the request or returned an invalid contract."""
+
+
+class NoRouteError(RoutingError):
+    """The provider could not find a route between valid locations."""
+
+
+class RoutingProvider(Protocol):
+    async def route(self, request: RouteRequest) -> BaseRoute: ...
+
+    async def is_ready(self) -> bool: ...

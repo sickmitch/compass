@@ -57,3 +57,19 @@ Manual `link` and `unmatch` overrides include an operator, reason and stable sou
 participate in the reconciliation configuration hash, so applying an override creates a new result
 run. A manual target absent from the latest OSM snapshot becomes explicitly unmatched rather than
 silently falling back to an automatic link.
+
+## Valhalla routing graph input
+
+Phase 3 uses OpenStreetMap extracts from Geofabrik as the default Valhalla graph input:
+
+- Italy extract: <https://download.geofabrik.de/europe/italy.html>
+- Geofabrik download server: <https://download.geofabrik.de/>
+
+`VALHALLA_TILE_URLS` is configurable for regional extracts or an operator-hosted PBF. A URL ending in
+`latest` changes as OSM is updated; reproducibility of an exact historical graph requires retaining
+the downloaded PBF/hash or using an immutable operator-controlled URL. The named Valhalla volume
+retains build inputs and metadata separately from application images.
+
+Routing graph data derives from OSM and remains subject to ODbL attribution obligations. The graph
+is not treated as a source of live traffic. Phase 3 exposes provider identity but makes no traffic
+freshness or traffic-aware routing claim.

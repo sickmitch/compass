@@ -1,0 +1,53 @@
+{
+  "trip": {
+    "legs": [
+      {
+        "maneuvers": [
+          {
+            "type": 1,
+            "instruction": "Procedi verso nord su Via Roma.",
+            "verbal_pre_transition_instruction": "Procedi verso nord su Via Roma.",
+            "street_names": ["Via Roma"],
+            "bearing_before": 0,
+            "bearing_after": 12,
+            "time": 240.5,
+            "length": 2.1,
+            "begin_shape_index": 0,
+            "end_shape_index": 7,
+            "travel_mode": "drive",
+            "travel_type": "car"
+          },
+          {
+            "type": 4,
+            "instruction": "Svolta a sinistra su Via Milano.",
+            "verbal_transition_alert_instruction": "Svolta a sinistra.",
+            "verbal_pre_transition_instruction": "Svolta a sinistra su Via Milano.",
+            "verbal_post_transition_instruction": "Continua su Via Milano.",
+            "street_names": ["Via Milano"],
+            "bearing_before": 12,
+            "bearing_after": 278,
+            "time": 79.5,
+            "length": 0.4,
+            "begin_shape_index": 7,
+            "end_shape_index": 10,
+            "travel_mode": "drive",
+            "travel_type": "car"
+          }
+        ],
+        "summary": {
+          "time": 320.0,
+          "length": 2.5
+        },
+        "shape": "_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"
+      }
+    ],
+    "summary": {
+      "time": 320.0,
+      "length": 2.5
+    },
+    "status_message": "Found route between points",
+    "status": 0,
+    "units": "kilometers",
+    "language": "it-IT"
+  }
+}

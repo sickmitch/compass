@@ -1,12 +1,13 @@
 # Docker deployment and live validation
 
-This is the reference test-server workflow for repository bootstrap, raw source ingestion and Phase
-2 normalized station reconciliation.
+This is the reference test-server workflow for repository bootstrap, raw source ingestion, Phase 2
+normalized station reconciliation and Phase 3 base routing.
 
 ## Prerequisites
 
 - Linux host with Docker Engine and the Compose plugin;
-- outbound HTTPS access to `www.mimit.gov.it` and the configured Overpass endpoint;
+- outbound HTTPS access to `www.mimit.gov.it`, the configured Overpass endpoint, `ghcr.io` and the
+  configured Valhalla PBF host;
 - this repository synchronized onto the test server;
 - no public reverse proxy is required.
 
@@ -33,7 +34,6 @@ docker compose up -d db migrate api
 docker compose ps
 docker compose logs --no-color migrate
 curl --fail --silent --show-error http://127.0.0.1:8000/health/live
-curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
 docker compose exec -T db sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT extversion FROM pg_extension WHERE extname = '\''postgis'\'';"'
 docker compose exec -T api alembic current
@@ -42,8 +42,7 @@ docker compose exec -T api alembic current
 Expected invariants:
 
 - `db` and `api` are healthy and `migrate` exited with code 0;
-- liveness returns `status=ok` with `database=not_checked`;
-- readiness returns `status=ok` with `database=ready`;
+- liveness returns `status=ok` with both dependencies `not_checked`;
 - PostGIS has a non-empty version;
 - Alembic reports the repository's current head revision (`0002` once Phase 2 is synchronized).
 
@@ -113,7 +112,9 @@ Return:
 4. all five inspection-query outputs above;
 5. diagnostics/logs if any command fails.
 
-These Phase 0/1 invariants are prerequisites for Phase 2 unless the operator explicitly waives them.
+On the current Phase 3 checkout, `/health/ready` intentionally returns HTTP 503 with
+`routing=unavailable` until the routing bootstrap below has completed. These Phase 0/1 invariants
+are prerequisites for Phase 2 unless the operator explicitly waives them.
 
 ## Phase 2 migration and reconciliation validation
 
@@ -186,3 +187,132 @@ query outputs. If anything fails, also return the Phase 2 diagnostic output. Do 
 
 Do not begin Phase 3 until these Phase 2 live invariants pass or the operator explicitly waives the
 gate.
+
+## Phase 3 Valhalla bootstrap and base-route validation
+
+Run from the repository root after synchronizing Phase 3. Confirm `.env` contains the pinned
+`VALHALLA_IMAGE` from `.env.example`. The default PBF is the full Italy extract. Set
+`VALHALLA_TILE_URLS` to a Geofabrik regional extract before the first build only if a regional graph
+is intended. `VALHALLA_THREADS` controls build/server concurrency; the default is deliberately two.
+
+The initial download and tile build can be long-running and needs substantially more disk than the
+compressed PBF. Do not interrupt it merely because output pauses, and do not use
+`docker compose down -v`: that would delete both database and routing named volumes.
+
+The tile job checks the scripted image's PBF registration and rebuilds when its graph is missing or
+unregistered. The persistent service only reuses the graph after that one-shot job exits
+successfully. Keep
+`VALHALLA_FORCE_REBUILD=False` for normal operation.
+
+```bash
+docker compose --profile routing --profile routing-build config --quiet
+docker compose build api
+docker compose --profile routing-build pull valhalla-tiles
+docker compose --profile routing pull valhalla
+docker compose --profile routing-build run --rm valhalla-tiles
+docker compose --profile routing up -d db migrate valhalla api
+docker compose --profile routing ps -a
+docker compose --profile routing exec -T valhalla \
+  curl --fail --silent --show-error http://127.0.0.1:8002/status
+docker compose --profile routing exec -T valhalla sh -c \
+  'ls -lh /custom_files/*.pbf /custom_files/valhalla_tiles.tar && sha256sum /custom_files/*.pbf'
+curl --fail --silent --show-error http://127.0.0.1:8000/health/live
+curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":45.4857,"longitude":9.2045}}' \
+  http://127.0.0.1:8000/api/v1/routes
+```
+
+The representative route stays within Milan so it is valid for the default Italy graph and for
+regional graphs that include Milan. Expected invariants:
+
+- `valhalla-tiles` exits zero and leaves data in the `valhalla_data` named volume;
+- the identity command reports the retained PBF filename, size and content SHA-256;
+- `valhalla`, `db` and `api` are healthy; `migrate` exits zero;
+- Valhalla `/status` returns a JSON object;
+- liveness returns `database=not_checked` and `routing=not_checked`;
+- readiness returns HTTP 200 with `database=ready` and `routing=ready`;
+- the route returns HTTP 200, `provider=valhalla`, positive `distance_meters` and
+  `duration_seconds`, `geometry.format=polyline6`, a non-empty `encoded_polyline`, and at least one
+  maneuver with an instruction and shape indexes.
+
+Valhalla is intentionally not published on a host port. Its status is tested from inside the
+container; only the loopback-bound Compass API is host-accessible.
+
+### Recovery after an interrupted or partial tile build
+
+If the builder reports `Couldn't find usable tiles`, synchronize the current Compose policy and
+force exactly one reconstruction in the same volume:
+
+```bash
+VALHALLA_FORCE_REBUILD=True \
+  docker compose --profile routing-build run --rm valhalla-tiles
+```
+
+The command-scoped override also forces replacement of a stale tile archive; it does not modify
+`.env`. Do not set `VALHALLA_FORCE_REBUILD=True` permanently, because doing so would rebuild on every
+container start. After the job exits zero, continue with `docker compose --profile routing up ...`
+and the status/readiness/route checks above.
+
+### Routing graph update and rollback
+
+Do not overwrite the active graph when refreshing a `latest` extract. Choose a new physical volume
+name, build into it, and smoke-test it with an isolated candidate container. The example date is a
+label; use the actual build date or another unique release identifier:
+
+```bash
+VALHALLA_VOLUME_NAME=compass_valhalla_data_20260827 \
+  docker compose --profile routing-build run --rm valhalla-tiles
+
+VALHALLA_VOLUME_NAME=compass_valhalla_data_20260827 \
+  docker compose --profile routing run -d --name compass-valhalla-candidate \
+  --no-deps valhalla
+
+docker inspect --format '{{.State.Health.Status}}' compass-valhalla-candidate
+docker exec compass-valhalla-candidate \
+  curl --fail --silent --show-error http://127.0.0.1:8002/status
+docker exec compass-valhalla-candidate sh -c \
+  'ls -lh /custom_files/*.pbf /custom_files/valhalla_tiles.tar && sha256sum /custom_files/*.pbf'
+docker rm -f compass-valhalla-candidate
+```
+
+Wait and repeat the `docker inspect` command until it reports `healthy` before the two `docker exec`
+checks. Then set `VALHALLA_VOLUME_NAME=compass_valhalla_data_20260827` in `.env` and activate it:
+
+```bash
+docker compose --profile routing up -d --force-recreate valhalla api
+curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+```
+
+Repeat the representative route request above. If it fails, restore the previous
+`VALHALLA_VOLUME_NAME` in `.env` and run the same `--force-recreate valhalla api` command. The old
+volume remains intact. Removing retired graph volumes is intentionally not automated; list and
+confirm an exact volume target before any later operator-controlled deletion.
+
+### Phase 3 diagnostics
+
+If tile construction or startup fails, return:
+
+```bash
+docker compose --profile routing --profile routing-build ps -a
+docker compose --profile routing logs --no-color --tail=300 valhalla api db migrate
+docker volume inspect compass_valhalla_data
+docker compose --profile routing exec -T valhalla sh -c \
+  'find /custom_files -maxdepth 2 -type f -printf "%p %s bytes\n" | sort | head -100'
+```
+
+If Valhalla is healthy but the API is not ready or routing fails, also return:
+
+```bash
+docker compose --profile routing exec -T api python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://valhalla:8002/status', timeout=5).read().decode())"
+docker compose --profile routing exec -T api python -c \
+  "import json,urllib.request; data=json.dumps({'locations':[{'lat':45.4642,'lon':9.1900},{'lat':45.4857,'lon':9.2045}],'costing':'auto','shape_format':'polyline6'}).encode(); request=urllib.request.Request('http://valhalla:8002/route',data=data,headers={'Content-Type':'application/json'}); print(urllib.request.urlopen(request,timeout=60).read().decode())"
+docker compose --profile routing logs --no-color --tail=300 api valhalla
+```
+
+Return the tile job's final output, `ps -a`, PBF identity line, both status/health bodies and the
+complete Compass route response. If an invariant fails, include the matching diagnostics. Do not
+return `.env`, credentials or the full PBF. A deployment that fails these invariants must be fixed
+before proceeding into functionality that depends on routing.
