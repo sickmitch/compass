@@ -249,6 +249,41 @@ semantic content to the runtime schema.
   operational requirement.
 - Stale data thresholds are operator policy, not claims about upstream publication guarantees.
 
+## Phase 8 Android route-preview boundary
+
+The first device client consumes the public API rather than provider or persistence models:
+
+```text
+Compose screen ─> RoutePreviewViewModel ─> RoutingRepository
+                                                │
+                                                └─> strict Compass API DTOs ─> POST /api/v1/routes
+                                                              │
+polyline6 decoder <─ domain RoutePreview <────────────────────┘
+        │
+        └─> MapLibre GeoJSON source/style layers + endpoint markers
+```
+
+`data` owns HTTP and JSON translation, `domain` owns route concepts and geometry decoding, and `ui`
+owns Android lifecycle and presentation state. Compose never receives raw HTTP DTOs, and MapLibre
+types do not enter the repository interface. Manual application-level dependency construction keeps
+the boundary replaceable without adding framework infrastructure for a single screen.
+
+The debug API endpoint and map style are build properties. Emulator/USB development can reach the
+loopback-bound backend through `10.0.2.2` or `adb reverse`; cleartext is limited to those development
+addresses, while non-local endpoints require HTTPS. The checked-in device runner preflights the
+backend, builds, installs and launches the app but leaves visual rendering as an explicit human gate.
+
+## Deliberate Phase 8 limits
+
+- The preview uses a fixed accepted Milan-to-Bologna fixture pair; destination entry is later UI.
+- No CNG candidate request, station card, Add Stop flow or selected-stop route is implemented before
+  Phase 9.
+- No navigation session, location tracking, voice guidance, rerouting or background service exists.
+- Map-style availability is an independent external dependency and is not labeled as backend
+  routing failure.
+- Physical-device rendering and lifecycle behavior require operator evidence before Phase 8 is
+  accepted.
+
 ## Runtime
 
 The default Compose graph contains:

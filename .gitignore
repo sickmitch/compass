@@ -10,3 +10,10 @@ dist/
 build/
 *.egg-info/
 
+# Android/Gradle local state and generated outputs
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/.idea/
+android/**/*.iml
+android/**/build/

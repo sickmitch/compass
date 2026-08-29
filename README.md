@@ -4,8 +4,7 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–6** foundation and the locally validated
-**Phase 7** public API contract:
+This repository implements the accepted **Phases 0–8** server and Android client foundation:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -37,9 +36,13 @@ This repository implements the accepted **Phases 0–6** foundation and the loca
 - selected-stop route recomputation with two explicit polyline6/maneuver legs;
 - source-by-source freshness metadata and data-aware readiness;
 - a checked-in OpenAPI artifact, shared machine error envelope and live contract verifier.
+- a native Kotlin/Jetpack Compose Android application with data/domain/UI separation;
+- a strict Phase 7 API client, validated polyline6 decoder and lifecycle-aware route state;
+- a MapLibre route preview with endpoint layers, route summary and backend maneuvers;
+- pinned Android/Gradle dependencies, JVM tests, lint/APK validation and an executable device gate.
 
 It intentionally does **not** yet ingest traffic, implement predictive refuelling, or provide the
-Android client. Those remain later gated phases.
+Android CNG Add-Stop workflow and navigation session. Those remain later gated phases.
 
 ## Quick local validation
 
@@ -170,6 +173,28 @@ See the [Phase 7 live gate](docs/deployment.md#phase-7-public-api-contract-valid
 image and services are restarted, the checked-in `scripts/run-phase7-live.sh` runner executes the
 complete gate without requiring inline JSON or chained shell commands.
 
+## Phase 8 Android client foundation
+
+The native app in `android/` consumes `POST /api/v1/routes` and displays the fixed accepted
+Milan-to-Bologna preview: MapLibre road geometry and endpoints, distance, duration, provider and a
+scrollable maneuver list. HTTP DTOs, domain route models and Compose state are separate; the Phase 9
+CNG workflow is not implemented early.
+
+Repository-local Android validation uses the checked-in Gradle wrapper:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+cd android
+./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+cd ..
+```
+
+The reusable physical-device procedure is documented in
+[Android client development](docs/android.md) and automated by `scripts/run-phase8-live.sh`.
+The completed operator-run gate and device evidence are recorded in the
+[Phase 8 acceptance record](docs/phases/phase-8-acceptance.md).
+
 ## Repository layout
 
 ```text
@@ -183,15 +208,18 @@ src/compass/detours/  batched network-cost evaluation and deterministic detour m
 src/compass/ranking/  arrival-time opening evaluation, price freshness and explainable ranking
 src/compass/stations/ public station detail reads and provenance
 src/compass/freshness/ ingestion/reconciliation freshness policy
+android/               native Kotlin/Compose/MapLibre device client
 migrations/            Alembic schema history
 tests/fixtures/        small network-free source fixtures
+scripts/               reproducible local/live validation runners
 docs/adr/              accepted architecture decisions
 compose.yaml           reference server-side deployment
 ```
 
 ## Project status and licensing
 
-Phases 2–7 have passed repository-local checks and their documented operator-run live tests.
+Phases 2–8 have passed repository-local checks and their documented operator-run live or device
+tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
 representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
 a Milan-to-Bologna route against the full 1,512-station inventory. Phase 5 validated batched
@@ -205,6 +233,10 @@ including the real-world `Su, PH off` Sunday case.
 Phase 7 validated the stable public API, official-ID station detail, two-leg selected-stop routing,
 data-aware health/freshness, shared 404/422 errors and the published OpenAPI contract through the
 checked-in live-gate runner.
+Phase 8 passed repository-local JVM tests, Android lint and debug APK assembly. Its executable
+handoff then preflighted the real backend, built and installed the APK, launched it successfully on
+the operator's device, and produced the accepted MapLibre Milan-to-Bologna route preview with
+endpoint markers, Valhalla summary and maneuvers. Phase 9 has not started.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;
