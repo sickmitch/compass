@@ -4,7 +4,7 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–5** foundation:
+This repository implements the accepted **Phases 0–6** foundation:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -28,10 +28,14 @@ This repository implements the accepted **Phases 0–5** foundation:
 - bounded Valhalla matrix batching over only the spatially pruned candidates;
 - strict maximum-detour eligibility with road distance, two-leg costs and offset-aware ETAs;
 - explicit no-traffic cost metadata and matrix/per-candidate routing metrics.
+- OSM `opening_hours` evaluation at each station ETA in the explicit `Europe/Rome` timezone;
+- distinct `open`, `closed` and `unknown` availability with missing/invalid validation state;
+- deterministic ranking from detour, availability, MIMIT CNG unit price and price freshness;
+- explicit score components, price/source timestamps and at-most-one-query candidate enrichment.
 
-It intentionally does **not** yet evaluate opening hours, perform multi-factor station ranking,
-ingest traffic, recompute a selected route through a station or implement predictive refuelling.
-Those remain later gated phases.
+It intentionally does **not** yet ingest traffic, recompute a selected route through a station,
+publish the broader Phase 7 mobile API, or implement predictive refuelling. Those remain later
+gated phases.
 
 ## Quick local validation
 
@@ -127,6 +131,22 @@ time/distance, station/destination ETAs and eligibility metrics. The current gra
 traffic feed, so the response explicitly reports `traffic_aware=false`. See the
 [Phase 5 live gate](docs/deployment.md#phase-5-batched-network-detour-validation).
 
+## Phase 6 arrival-time availability and ranking
+
+Request ranked CNG candidates after the same spatial and road-network gates:
+
+```bash
+curl --fail -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00"}' \
+  http://127.0.0.1:8000/api/v1/cng/ranked-candidates
+```
+
+Closed-at-ETA stations are excluded by default; `"include_closed":true` retains them with an
+explicit zero opening score and configurable score multiplier. Missing or invalid hours remain
+`unknown`, not open. Prices remain optional and expose MIMIT observation/ingestion timestamps plus
+freshness at station ETA. See the
+[Phase 6 live gate](docs/deployment.md#phase-6-arrival-time-availability-and-ranking-validation).
+
 ## Repository layout
 
 ```text
@@ -137,6 +157,7 @@ src/compass/reconciliation/ deterministic source matching and manual overrides
 src/compass/routing/   provider boundary and Valhalla HTTP adapter
 src/compass/candidates/ corridor policy, geometry decoding and PostGIS pruning
 src/compass/detours/  batched network-cost evaluation and deterministic detour math
+src/compass/ranking/  arrival-time opening evaluation, price freshness and explainable ranking
 migrations/            Alembic schema history
 tests/fixtures/        small network-free source fixtures
 docs/adr/              accepted architecture decisions
@@ -145,15 +166,17 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phases 2–5 have passed repository-local checks and their documented operator-run live tests.
+Phases 2–6 have passed repository-local checks and their documented operator-run live tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
 representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
 a Milan-to-Bologna route against the full 1,512-station inventory. Phase 5 validated batched
 road-network detour eligibility over 200 pruned candidates using one base route and ten Valhalla
 matrix calls, with an independent known-station route comparison. Evidence is recorded in
 `docs/phases/phase-2-acceptance.md`, `docs/phases/phase-3-acceptance.md` and
-`docs/phases/phase-4-acceptance.md`, with the Phase 5 gate in
-`docs/phases/phase-5-acceptance.md`.
+`docs/phases/phase-4-acceptance.md`, with the Phase 5 and Phase 6 gates in
+`docs/phases/phase-5-acceptance.md` and `docs/phases/phase-6-acceptance.md`. Phase 6 validated
+arrival-time opening states and explainable ranking over the same full-Italy bounded matrix pipeline,
+including the real-world `Su, PH off` Sunday case.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;

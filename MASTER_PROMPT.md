@@ -700,10 +700,10 @@ If a design issue from a future phase must be decided now to avoid a bad interfa
 
 # Start instruction
 
-Start with **Phase 0 only**.
-
 First inspect the repository and `AGENTS.md`.
 
-Then implement the minimum repository foundation required for Phase 0.
+Then implement the minimum repository foundation required.
 
 At the end, stop and give the human the exact Docker/bootstrap validation commands to run on the live test server and the outputs that should be returned to you.
+
+Be VERY descriptive on what need to be done on the server to test the hand-off.

@@ -73,3 +73,17 @@ retains build inputs and metadata separately from application images.
 Routing graph data derives from OSM and remains subject to ODbL attribution obligations. The graph
 is not treated as a source of live traffic. Phase 3 exposes provider identity but makes no traffic
 freshness or traffic-aware routing claim.
+
+## Opening-hours interpretation data and software
+
+Phase 6 interprets only the OSM `opening_hours` expression retained on an accepted OSM enrichment
+link. It does not invent hours for missing data. Evaluation uses the open-source
+[`opening-hours-py`](https://pypi.org/project/opening-hours-py/) parser, pinned to 2.1.4, with the
+station ETA converted to the `Europe/Rome` IANA timezone and Italy supplied as the country context.
+The parser is licensed under MIT or Apache-2.0. Timezone rules are supplied by the Python runtime or
+the pinned `tzdata` 2026.3 fallback package (Apache-2.0).
+
+Parser warnings and the original expression remain visible in API results. Missing syntax,
+unparseable syntax and a valid expression whose state is unknown are separate cases. OSM remains the
+source and retains its ODbL attribution requirements; parser output does not change source ownership
+or authoritative MIMIT station/price fields.

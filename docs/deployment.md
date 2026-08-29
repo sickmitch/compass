@@ -1,8 +1,8 @@
 # Docker deployment and live validation
 
 This is the reference test-server workflow for repository bootstrap, raw source ingestion, Phase 2
-normalized station reconciliation, Phase 3 base routing, Phase 4 spatial candidate pruning and the
-accepted Phase 5 batched detour workflow.
+normalized station reconciliation, Phase 3 base routing, Phase 4 spatial candidate pruning, the
+accepted Phase 5 batched detour workflow and the accepted Phase 6 ranking workflow.
 
 ## Prerequisites
 
@@ -537,3 +537,121 @@ docker compose exec -T api alembic current
 Return both summarized JSON objects, the independent known-route comparison, filtered request logs
 and Alembic output. If a check fails, also return the HTTP response with headers and all diagnostics.
 Keep the full route/candidate JSON in `/tmp` unless a specific malformed item must be inspected.
+
+## Phase 6 arrival-time availability and ranking validation
+
+Run this gate from the repository root after synchronizing Phase 6. The accepted normalized data and
+Italy Valhalla volume must still be present. No new migration is expected: Alembic remains at `0002`.
+The API image must be rebuilt because Phase 6 adds pinned Python packages and application code.
+
+The commands below deliberately use Sunday 30 August 2026. This makes normal weekday-only OSM
+schedules visibly closed while `24/7` schedules remain open. It is a deterministic civil-time test,
+not a claim about whether those stations are open today. The `+02:00` offset is correct for Italy on
+that date; the service converts every station ETA to the configured `Europe/Rome` timezone.
+
+Copy each fenced shell block as a whole and do not paste shell prompt characters into it. The full
+API responses stay under `/tmp` because route geometry makes them large; the checked-in verifier
+prints only the evidence that should be returned.
+
+First rebuild and restart the application against the existing database/router:
+
+```bash
+docker compose build api
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+docker compose --profile routing ps -a
+curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+```
+
+Both calls below run the same route. The first exercises the user-facing default (closed stations
+excluded); the second includes closed stations only so their explicit penalty can be inspected.
+Keep `phase6_started_at` in the same terminal so the later log command isolates these two requests.
+
+```bash
+phase6_started_at="$(date --iso-8601=seconds)"
+
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00"}' \
+  http://127.0.0.1:8000/api/v1/cng/ranked-candidates \
+  -o /tmp/compass-phase6-ranked-default.json
+
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00","include_closed":true}' \
+  http://127.0.0.1:8000/api/v1/cng/ranked-candidates \
+  -o /tmp/compass-phase6-ranked-with-closed.json
+```
+
+Run the checked-in verifier below. It performs the count, network-batching, detour-leg,
+timezone, opening-state, price-age, score-contribution and deterministic-order checks, then prints
+only compact human-reviewable samples. Keeping this logic in the repository avoids copying a long
+inline Python heredoc and makes the acceptance procedure versioned with the implementation.
+
+Fetch the live OpenAPI document before invoking it:
+
+```bash
+curl --fail --silent --show-error \
+  http://127.0.0.1:8000/openapi.json \
+  -o /tmp/compass-phase6-openapi.json
+
+python3 scripts/validate-phase6-live.py \
+  --default /tmp/compass-phase6-ranked-default.json \
+  --with-closed /tmp/compass-phase6-ranked-with-closed.json \
+  --openapi /tmp/compass-phase6-openapi.json \
+  --require-closed
+
+docker compose exec -T api python -c \
+  'from importlib.metadata import version; print("opening-hours-py", version("opening-hours-py")); print("tzdata", version("tzdata"))'
+docker compose exec -T api python -c \
+  'from datetime import datetime; from compass.ranking.opening_hours import evaluate_opening_hours; result=evaluate_opening_hours("Mo-Sa 06:30-12:30, 14:30-19:00; Su, PH off", eta=datetime.fromisoformat("2026-08-30T11:48:13+02:00"), latitude=44.492256, longitude=11.262711, timezone_name="Europe/Rome", country="IT", source_confidence=1.0); print(result); assert result.state == "closed"'
+
+docker compose --profile routing logs --no-color --since="$phase6_started_at" valhalla \
+  | grep -E 'POST /route|POST /sources_to_targets'
+docker compose --profile routing logs --no-color --since="$phase6_started_at" api \
+  | grep 'ranked-candidates'
+docker compose exec -T api alembic current
+```
+
+Expected invariants:
+
+- readiness and both ranked requests return HTTP 200;
+- the default response contains no `closed` candidate, but preserves `unknown`; the opt-in response
+  contains at least one visibly closed Sunday candidate with multiplier `0.25`;
+- all state, validation, price and ranking counts reconcile exactly as the verifier asserts;
+- every opening state is evaluated at the offset-aware station ETA in `Europe/Rome`;
+- a comma-separated `Su, PH off` selector remains closed on Sunday even when the OSM value contains
+  whitespace after the comma; the direct parser check must print `state='closed'`;
+- missing/invalid hours are `unknown`, never open, and price absence does not remove a candidate;
+- price values are explicit EUR/kg unit prices with source times and ETA-relative freshness;
+- ranks are contiguous and total scores descend; the returned components reproduce each total;
+- `enrichment_queries=1` confirms one joined enrichment read over eligible IDs;
+- each API request retains one base route, batched matrices and zero per-candidate route calls. With
+  the previously accepted 200-candidate / batch-40 route, two ranked requests normally produce two
+  `/route` lines and twenty `/sources_to_targets` lines, unless observable fallback splits occur;
+- the image reports `opening-hours-py=2.1.4`, `tzdata=2026.3`, and OpenAPI exposes the strict request;
+- Alembic remains `0002 (head)`.
+
+### Phase 6 diagnostics
+
+If an endpoint or assertion fails, keep the `/tmp` response files and return these diagnostics:
+
+```bash
+curl --silent --show-error -i \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00","include_closed":true}' \
+  http://127.0.0.1:8000/api/v1/cng/ranked-candidates
+docker compose --profile routing logs --no-color --tail=500 api valhalla db
+docker compose exec -T api python -c \
+  'from importlib.metadata import version; print(version("opening-hours-py"), version("tzdata"))'
+docker compose exec -T api python -c \
+  'from datetime import datetime; from compass.ranking.opening_hours import evaluate_opening_hours; print(evaluate_opening_hours("Mo-Sa 06:30-12:30, 14:30-19:00; Su, PH off", eta=datetime.fromisoformat("2026-08-30T11:48:13+02:00"), latitude=44.492256, longitude=11.262711, timezone_name="Europe/Rome", country="IT", source_confidence=1.0))'
+docker compose exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT count(*) AS active, count(*) FILTER (WHERE l.station_id IS NOT NULL) AS linked, count(*) FILTER (WHERE o.opening_hours IS NOT NULL) AS with_hours, count(*) FILTER (WHERE cp.station_price_id IS NOT NULL) AS with_current_cng_price FROM stations s LEFT JOIN station_osm_links l ON l.station_id=s.id LEFT JOIN osm_cng_features o ON o.id=l.osm_feature_id LEFT JOIN station_current_prices cp ON cp.station_id=s.id AND cp.fuel_type='\''cng'\'' WHERE s.is_active;"'
+docker compose exec -T api alembic current
+```
+
+Return the compact verifier JSON, package-version lines, filtered Valhalla/API request logs and
+Alembic output. If anything fails, also return the HTTP response and diagnostics above. Do not paste
+the complete 2+ GB graph, `.env`, credentials, or the unabridged ranked response unless a specific
+candidate must be debugged. Stop at this gate; do not begin Phase 7 until these invariants pass or
+the operator explicitly waives them.

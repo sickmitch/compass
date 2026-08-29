@@ -12,9 +12,9 @@ Compass uses six explicit server/domain boundaries and one first-class device cl
    and reconciliation evidence.
 4. **Routing provider** exposes a provider-neutral async interface. Its Valhalla adapter owns HTTP
    translation, response validation and failure classification.
-5. **Routing intelligence** owns corridor policy, spatial pruning and batched road detour math;
-   later phases add arrival-time opening status, ranking and predictive reachability. It does not
-   live in the Android UI or raw ETL adapters.
+5. **Routing intelligence** owns corridor policy, spatial pruning, batched road detour math,
+   arrival-time opening status and explainable ranking; later phases add predictive reachability.
+   It does not live in the Android UI or raw ETL adapters.
 6. **FastAPI** exposes strict versioned mobile contracts without exposing provider response shapes.
 7. **Android (Kotlin, Jetpack Compose, MapLibre Native)** owns presentation and interaction state.
 
@@ -163,6 +163,49 @@ batch/call/fallback counts and the absence of per-candidate route calls.
 - Refuelling dwell time is not included in detour duration.
 - A Phase 4 candidate limit can make evaluation non-exhaustive; that state remains visible.
 - Selecting a station and returning a full route through it is not part of this endpoint.
+
+## Phase 6 availability and ranking flow
+
+```text
+Phase 5 eligible tuple ───────────────┬─> one relational enrichment query
+                                     │      ├─ accepted OSM opening/phone/brand/operator
+station ETA in Europe/Rome ──────────┤      └─ current MIMIT CNG price modes
+                                     │
+OSM opening_hours parser ────────────┼─> open / closed / unknown at ETA
+price observation time ──────────────┼─> fresh / stale / future / unknown
+explicit fixed weights ──────────────┴─> score components + deterministic ranked list
+```
+
+`POST /api/v1/cng/ranked-candidates` composes the accepted Phase 4 and Phase 5 stages; it does not
+re-query the all-Italy inventory after detour eligibility. Only eligible station IDs enter one
+outer-joined enrichment query; no query is issued for an empty eligible tuple. Accepted OSM links
+supply enrichment without overwriting the MIMIT-anchored station. Across the current CNG price
+pointers, the lowest unit price is selected; equal prices prefer the newest observation and then a
+stable service-mode order.
+
+Opening expressions are evaluated at each road-network station ETA after converting the instant to
+the configured IANA timezone (`Europe/Rome` by default). A missing expression is `unknown/missing`,
+a parser failure is `unknown/invalid`, and a valid expression can itself evaluate to `unknown`.
+None of those states is silently treated as open.
+
+The score is a documented weighted sum of normalized detour, opening, unit-price and price-freshness
+components. Missing prices remain eligible with zero price contributions. Future observations are
+exposed but excluded from price scoring. Closed stations are excluded by default; the opt-in
+`include_closed` diagnostic mode retains them with zero opening score and a configurable availability
+multiplier. Rank, raw component scores, contributions and multiplier are all returned. Stable
+tie-breakers are detour duration, price presence/value and internal station ID.
+
+## Deliberate Phase 6 limits
+
+- Opening evaluation uses OSM expressions attached through accepted reconciliation links; unmatched
+  stations correctly remain `unknown`.
+- The configured timezone is national (`Europe/Rome`), appropriate to the current Italy-only scope;
+  per-station timezone lookup is deferred until the geographic scope expands.
+- The ranking weights are a transparent baseline policy, not a personalized model or opaque score.
+- Current MIMIT prices are ranked as unit prices; refill quantity/cost requires a future vehicle and
+  tank-state model.
+- Graph-speed durations still have no external traffic overlay and remain explicitly non-traffic-aware.
+- Selecting a candidate and recomputing the route through it remains outside this phase.
 
 ## Runtime
 

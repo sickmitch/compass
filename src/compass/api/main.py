@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from compass import __version__
+from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
 from compass.config import get_settings
 from compass.db import get_session
@@ -24,6 +25,7 @@ app = FastAPI(
     description="CNG-aware navigation API foundations for Italy.",
 )
 app.include_router(routes_router)
+app.include_router(ranking_router)
 
 
 @app.exception_handler(RequestValidationError)

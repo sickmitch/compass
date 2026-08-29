@@ -1,5 +1,7 @@
 from functools import lru_cache
+from math import isclose
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +32,14 @@ class Settings(BaseSettings):
     cng_corridor_maximum_radius_km: float = Field(default=50, gt=0)
     cng_corridor_candidate_limit: int = Field(default=200, gt=0, le=1000)
     route_geometry_max_points: int = Field(default=200_000, ge=2)
+    opening_hours_timezone: str = "Europe/Rome"
+    cng_ranking_detour_weight: float = Field(default=0.50, ge=0, le=1)
+    cng_ranking_opening_weight: float = Field(default=0.25, ge=0, le=1)
+    cng_ranking_price_weight: float = Field(default=0.15, ge=0, le=1)
+    cng_ranking_price_freshness_weight: float = Field(default=0.10, ge=0, le=1)
+    cng_ranking_unknown_opening_score: float = Field(default=0.25, ge=0, le=1)
+    cng_ranking_closed_score_multiplier: float = Field(default=0.25, ge=0, le=1)
+    cng_price_freshness_hours: float = Field(default=168, gt=0)
     reconciliation_max_distance_meters: float = Field(default=250, gt=0)
     reconciliation_auto_match_distance_meters: float = Field(default=50, gt=0)
     reconciliation_named_match_distance_meters: float = Field(default=150, gt=0)
@@ -46,6 +56,15 @@ class Settings(BaseSettings):
         if not parsed.hostname:
             raise ValueError("valhalla_url must include a host")
         return normalized
+
+    @field_validator("opening_hours_timezone")
+    @classmethod
+    def validate_opening_hours_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("opening_hours_timezone must be a valid IANA timezone") from error
+        return value
 
     @model_validator(mode="after")
     def validate_reconciliation_distances(self) -> "Settings":
@@ -65,6 +84,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "cng corridor minimum radius must not exceed its maximum radius"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_ranking_weights(self) -> "Settings":
+        total = (
+            self.cng_ranking_detour_weight
+            + self.cng_ranking_opening_weight
+            + self.cng_ranking_price_weight
+            + self.cng_ranking_price_freshness_weight
+        )
+        if not isclose(total, 1.0, abs_tol=1e-9):
+            raise ValueError("CNG ranking weights must sum to one")
         return self
 
 
