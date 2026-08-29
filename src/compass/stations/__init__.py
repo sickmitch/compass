@@ -1,0 +1,1 @@
+"""Public station-query domain."""

@@ -1,0 +1,3012 @@
+{
+  "components": {
+    "schemas": {
+      "BaseRouteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination"
+        ],
+        "title": "BaseRouteRequest",
+        "type": "object"
+      },
+      "BaseRouteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/RouteGeometry"
+          },
+          "maneuvers": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverResponse"
+            },
+            "title": "Maneuvers",
+            "type": "array"
+          },
+          "provider": {
+            "const": "valhalla",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "distance_meters",
+          "duration_seconds",
+          "geometry",
+          "maneuvers",
+          "provider"
+        ],
+        "title": "BaseRouteResponse",
+        "type": "object"
+      },
+      "CoordinateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "CoordinateRequest",
+        "type": "object"
+      },
+      "CorridorCandidatesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "effective_cng_range_km": {
+            "description": "Usable CNG range after the caller's reserve/safety allowance. It controls spatial corridor width only.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "effective_cng_range_km"
+        ],
+        "title": "CorridorCandidatesRequest",
+        "type": "object"
+      },
+      "CorridorCandidatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_route": {
+            "$ref": "#/components/schemas/BaseRouteResponse"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SpatialCandidateResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "corridor": {
+            "$ref": "#/components/schemas/CorridorPolicyResponse"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/SpatialPruningMetricsResponse"
+          },
+          "stage": {
+            "const": "spatial_pruning",
+            "default": "spatial_pruning",
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_route",
+          "corridor",
+          "metrics",
+          "candidates"
+        ],
+        "title": "CorridorCandidatesResponse",
+        "type": "object"
+      },
+      "CorridorPolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cap_applied": {
+            "enum": [
+              "minimum",
+              "maximum",
+              "none"
+            ],
+            "title": "Cap Applied",
+            "type": "string"
+          },
+          "effective_cng_range_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "radius_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "range_fraction": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Range Fraction",
+            "type": "number"
+          },
+          "uncapped_radius_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Uncapped Radius Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "effective_cng_range_km",
+          "range_fraction",
+          "uncapped_radius_km",
+          "radius_km",
+          "cap_applied"
+        ],
+        "title": "CorridorPolicyResponse",
+        "type": "object"
+      },
+      "CurrentCngPriceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "freshness_state": {
+            "enum": [
+              "fresh",
+              "stale",
+              "future_observation",
+              "unknown"
+            ],
+            "title": "Freshness State",
+            "type": "string"
+          },
+          "ingested_at": {
+            "format": "date-time",
+            "title": "Ingested At",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "service_mode": {
+            "enum": [
+              "self",
+              "served"
+            ],
+            "title": "Service Mode",
+            "type": "string"
+          },
+          "source_name": {
+            "minLength": 1,
+            "title": "Source Name",
+            "type": "string"
+          },
+          "unit": {
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "exclusiveMinimum": 0.0,
+            "title": "Unit Price",
+            "type": "number"
+          }
+        },
+        "required": [
+          "unit_price",
+          "currency",
+          "unit",
+          "service_mode",
+          "observed_at",
+          "ingested_at",
+          "source_name",
+          "age_seconds",
+          "freshness_state"
+        ],
+        "title": "CurrentCngPriceResponse",
+        "type": "object"
+      },
+      "DataFreshnessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "overall_state": {
+            "enum": [
+              "ready",
+              "degraded",
+              "unavailable"
+            ],
+            "title": "Overall State",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/DataSourceFreshnessResponse"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Sources",
+            "type": "array"
+          },
+          "traffic_state": {
+            "const": "not_configured",
+            "title": "Traffic State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluated_at",
+          "overall_state",
+          "sources",
+          "traffic_state"
+        ],
+        "title": "DataFreshnessResponse",
+        "type": "object"
+      },
+      "DataSourceFreshnessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "freshness_threshold_seconds": {
+            "exclusiveMinimum": 0.0,
+            "title": "Freshness Threshold Seconds",
+            "type": "number"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Observed At"
+          },
+          "state": {
+            "enum": [
+              "fresh",
+              "stale",
+              "future_observation",
+              "missing"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_name",
+          "state",
+          "source_observed_at",
+          "completed_at",
+          "freshness_threshold_seconds"
+        ],
+        "title": "DataSourceFreshnessResponse",
+        "type": "object"
+      },
+      "DetourCandidatesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "departure_at": {
+            "description": "Timezone-aware departure instant used to calculate station and destination ETAs.",
+            "format": "date-time",
+            "title": "Departure At",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "effective_cng_range_km": {
+            "description": "Usable CNG range after the caller's reserve/safety allowance. It controls spatial corridor width only.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "maximum_detour_minutes": {
+            "description": "Inclusive maximum added road-network travel time.",
+            "maximum": 240.0,
+            "minimum": 0.0,
+            "title": "Maximum Detour Minutes",
+            "type": "number"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "effective_cng_range_km",
+          "maximum_detour_minutes",
+          "departure_at"
+        ],
+        "title": "DetourCandidatesRequest",
+        "type": "object"
+      },
+      "DetourCandidatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_route": {
+            "$ref": "#/components/schemas/BaseRouteResponse"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/EligibleDetourCandidateResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "corridor": {
+            "$ref": "#/components/schemas/CorridorPolicyResponse"
+          },
+          "cost_basis": {
+            "$ref": "#/components/schemas/NetworkCostBasisResponse"
+          },
+          "departure_at": {
+            "format": "date-time",
+            "title": "Departure At",
+            "type": "string"
+          },
+          "maximum_detour_minutes": {
+            "minimum": 0.0,
+            "title": "Maximum Detour Minutes",
+            "type": "number"
+          },
+          "network_evaluation": {
+            "$ref": "#/components/schemas/NetworkEvaluationMetricsResponse"
+          },
+          "spatial_pruning": {
+            "$ref": "#/components/schemas/SpatialPruningMetricsResponse"
+          },
+          "stage": {
+            "const": "network_detour",
+            "default": "network_detour",
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "departure_at",
+          "maximum_detour_minutes",
+          "base_route",
+          "corridor",
+          "spatial_pruning",
+          "cost_basis",
+          "network_evaluation",
+          "candidates"
+        ],
+        "title": "DetourCandidatesResponse",
+        "type": "object"
+      },
+      "EligibleDetourCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_eta": {
+            "format": "date-time",
+            "title": "Destination Eta",
+            "type": "string"
+          },
+          "detour_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Detour Duration Seconds",
+            "type": "number"
+          },
+          "detour_minutes": {
+            "minimum": 0.0,
+            "title": "Detour Minutes",
+            "type": "number"
+          },
+          "distance_from_previous_waypoint_meters": {
+            "description": "Road-network distance from the request origin/previous waypoint.",
+            "minimum": 0.0,
+            "title": "Distance From Previous Waypoint Meters",
+            "type": "number"
+          },
+          "duration_from_previous_waypoint_seconds": {
+            "minimum": 0.0,
+            "title": "Duration From Previous Waypoint Seconds",
+            "type": "number"
+          },
+          "extra_distance_meters": {
+            "minimum": 0.0,
+            "title": "Extra Distance Meters",
+            "type": "number"
+          },
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "mimit_station_id": {
+            "minLength": 1,
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "route_fraction": {
+            "description": "Approximate projection position from route start (0) to end (1).",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Route Fraction",
+            "type": "number"
+          },
+          "route_via_station_distance_meters": {
+            "minimum": 0.0,
+            "title": "Route Via Station Distance Meters",
+            "type": "number"
+          },
+          "route_via_station_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Route Via Station Duration Seconds",
+            "type": "number"
+          },
+          "station_eta": {
+            "format": "date-time",
+            "title": "Station Eta",
+            "type": "string"
+          },
+          "station_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Station Id",
+            "type": "integer"
+          },
+          "station_to_destination_distance_meters": {
+            "minimum": 0.0,
+            "title": "Station To Destination Distance Meters",
+            "type": "number"
+          },
+          "station_to_destination_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Station To Destination Duration Seconds",
+            "type": "number"
+          },
+          "straight_line_distance_to_route_meters": {
+            "description": "Cheap geographic prefilter distance. This is not road distance or detour distance.",
+            "minimum": 0.0,
+            "title": "Straight Line Distance To Route Meters",
+            "type": "number"
+          }
+        },
+        "required": [
+          "station_id",
+          "mimit_station_id",
+          "name",
+          "municipality",
+          "province",
+          "latitude",
+          "longitude",
+          "straight_line_distance_to_route_meters",
+          "route_fraction",
+          "distance_from_previous_waypoint_meters",
+          "duration_from_previous_waypoint_seconds",
+          "station_to_destination_distance_meters",
+          "station_to_destination_duration_seconds",
+          "route_via_station_distance_meters",
+          "route_via_station_duration_seconds",
+          "extra_distance_meters",
+          "detour_duration_seconds",
+          "detour_minutes",
+          "station_eta",
+          "destination_eta"
+        ],
+        "title": "EligibleDetourCandidateResponse",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "data": {
+            "enum": [
+              "not_checked",
+              "ready",
+              "degraded",
+              "unavailable"
+            ],
+            "title": "Data",
+            "type": "string"
+          },
+          "database": {
+            "enum": [
+              "not_checked",
+              "ready",
+              "unavailable"
+            ],
+            "title": "Database",
+            "type": "string"
+          },
+          "routing": {
+            "enum": [
+              "not_checked",
+              "ready",
+              "unavailable"
+            ],
+            "title": "Routing",
+            "type": "string"
+          },
+          "service": {
+            "default": "compass-api",
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "not_ready"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "traffic": {
+            "enum": [
+              "not_checked",
+              "not_configured"
+            ],
+            "title": "Traffic",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "database",
+          "routing",
+          "data",
+          "traffic"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "ManeuverResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bearing_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bearing After"
+          },
+          "bearing_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bearing Before"
+          },
+          "begin_shape_index": {
+            "minimum": 0.0,
+            "title": "Begin Shape Index",
+            "type": "integer"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "end_shape_index": {
+            "minimum": 0.0,
+            "title": "End Shape Index",
+            "type": "integer"
+          },
+          "instruction": {
+            "minLength": 1,
+            "title": "Instruction",
+            "type": "string"
+          },
+          "street_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Street Names",
+            "type": "array"
+          },
+          "travel_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Travel Mode"
+          },
+          "travel_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Travel Type"
+          },
+          "type": {
+            "minimum": 0.0,
+            "title": "Type",
+            "type": "integer"
+          },
+          "verbal_post_transition_instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verbal Post Transition Instruction"
+          },
+          "verbal_pre_transition_instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verbal Pre Transition Instruction"
+          },
+          "verbal_transition_alert_instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verbal Transition Alert Instruction"
+          }
+        },
+        "required": [
+          "type",
+          "instruction",
+          "distance_meters",
+          "duration_seconds",
+          "begin_shape_index",
+          "end_shape_index",
+          "street_names",
+          "verbal_transition_alert_instruction",
+          "verbal_pre_transition_instruction",
+          "verbal_post_transition_instruction",
+          "bearing_before",
+          "bearing_after",
+          "travel_mode",
+          "travel_type"
+        ],
+        "title": "ManeuverResponse",
+        "type": "object"
+      },
+      "NetworkCostBasisResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_model": {
+            "const": "road_network",
+            "title": "Distance Model",
+            "type": "string"
+          },
+          "duration_model": {
+            "const": "valhalla_graph_speeds",
+            "title": "Duration Model",
+            "type": "string"
+          },
+          "provider": {
+            "const": "valhalla",
+            "title": "Provider",
+            "type": "string"
+          },
+          "traffic_aware": {
+            "const": false,
+            "title": "Traffic Aware",
+            "type": "boolean"
+          },
+          "traffic_state": {
+            "const": "not_configured",
+            "title": "Traffic State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "traffic_state",
+          "traffic_aware",
+          "duration_model",
+          "distance_model"
+        ],
+        "title": "NetworkCostBasisResponse",
+        "type": "object"
+      },
+      "NetworkEvaluationMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_route_calls": {
+            "const": 1,
+            "title": "Base Route Calls",
+            "type": "integer"
+          },
+          "eligible_candidate_count": {
+            "minimum": 0.0,
+            "title": "Eligible Candidate Count",
+            "type": "integer"
+          },
+          "excluded_by_detour_count": {
+            "minimum": 0.0,
+            "title": "Excluded By Detour Count",
+            "type": "integer"
+          },
+          "matrix_batch_size": {
+            "exclusiveMinimum": 0.0,
+            "title": "Matrix Batch Size",
+            "type": "integer"
+          },
+          "matrix_calls": {
+            "minimum": 0.0,
+            "title": "Matrix Calls",
+            "type": "integer"
+          },
+          "matrix_candidate_count": {
+            "minimum": 0.0,
+            "title": "Matrix Candidate Count",
+            "type": "integer"
+          },
+          "matrix_fallback_splits": {
+            "description": "Binary batch splits used to isolate uncorrelatable locations.",
+            "minimum": 0.0,
+            "title": "Matrix Fallback Splits",
+            "type": "integer"
+          },
+          "matrix_location_failures": {
+            "description": "Isolated candidate locations with no suitable routing edge.",
+            "minimum": 0.0,
+            "title": "Matrix Location Failures",
+            "type": "integer"
+          },
+          "per_candidate_route_calls": {
+            "const": 0,
+            "title": "Per Candidate Route Calls",
+            "type": "integer"
+          },
+          "reachable_candidate_count": {
+            "minimum": 0.0,
+            "title": "Reachable Candidate Count",
+            "type": "integer"
+          },
+          "spatial_candidate_count": {
+            "minimum": 0.0,
+            "title": "Spatial Candidate Count",
+            "type": "integer"
+          },
+          "unreachable_candidate_count": {
+            "minimum": 0.0,
+            "title": "Unreachable Candidate Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "spatial_candidate_count",
+          "matrix_candidate_count",
+          "reachable_candidate_count",
+          "unreachable_candidate_count",
+          "eligible_candidate_count",
+          "excluded_by_detour_count",
+          "matrix_batch_size",
+          "matrix_calls",
+          "matrix_fallback_splits",
+          "matrix_location_failures",
+          "base_route_calls",
+          "per_candidate_route_calls"
+        ],
+        "title": "NetworkEvaluationMetricsResponse",
+        "type": "object"
+      },
+      "OpeningHoursEvaluationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "next_change_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Change At"
+          },
+          "opening_hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opening Hours"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "const": "osm",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "source_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Confidence"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "validation": {
+            "enum": [
+              "valid",
+              "missing",
+              "invalid"
+            ],
+            "title": "Validation",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "state",
+          "validation",
+          "opening_hours",
+          "source",
+          "evaluated_at",
+          "timezone",
+          "next_change_at",
+          "comment",
+          "warnings"
+        ],
+        "title": "OpeningHoursEvaluationResponse",
+        "type": "object"
+      },
+      "RankedCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "destination_eta": {
+            "format": "date-time",
+            "title": "Destination Eta",
+            "type": "string"
+          },
+          "detour_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Detour Duration Seconds",
+            "type": "number"
+          },
+          "detour_minutes": {
+            "minimum": 0.0,
+            "title": "Detour Minutes",
+            "type": "number"
+          },
+          "distance_from_previous_waypoint_meters": {
+            "description": "Road-network distance from the request origin/previous waypoint.",
+            "minimum": 0.0,
+            "title": "Distance From Previous Waypoint Meters",
+            "type": "number"
+          },
+          "duration_from_previous_waypoint_seconds": {
+            "minimum": 0.0,
+            "title": "Duration From Previous Waypoint Seconds",
+            "type": "number"
+          },
+          "extra_distance_meters": {
+            "minimum": 0.0,
+            "title": "Extra Distance Meters",
+            "type": "number"
+          },
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "mimit_station_id": {
+            "minLength": 1,
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "opening": {
+            "$ref": "#/components/schemas/OpeningHoursEvaluationResponse"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "osm_match_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Osm Match Confidence"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrentCngPriceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "ranking": {
+            "$ref": "#/components/schemas/RankingBreakdownResponse"
+          },
+          "route_fraction": {
+            "description": "Approximate projection position from route start (0) to end (1).",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Route Fraction",
+            "type": "number"
+          },
+          "route_via_station_distance_meters": {
+            "minimum": 0.0,
+            "title": "Route Via Station Distance Meters",
+            "type": "number"
+          },
+          "route_via_station_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Route Via Station Duration Seconds",
+            "type": "number"
+          },
+          "station_eta": {
+            "format": "date-time",
+            "title": "Station Eta",
+            "type": "string"
+          },
+          "station_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Station Id",
+            "type": "integer"
+          },
+          "station_to_destination_distance_meters": {
+            "minimum": 0.0,
+            "title": "Station To Destination Distance Meters",
+            "type": "number"
+          },
+          "station_to_destination_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Station To Destination Duration Seconds",
+            "type": "number"
+          },
+          "straight_line_distance_to_route_meters": {
+            "description": "Cheap geographic prefilter distance. This is not road distance or detour distance.",
+            "minimum": 0.0,
+            "title": "Straight Line Distance To Route Meters",
+            "type": "number"
+          }
+        },
+        "required": [
+          "station_id",
+          "mimit_station_id",
+          "name",
+          "municipality",
+          "province",
+          "latitude",
+          "longitude",
+          "straight_line_distance_to_route_meters",
+          "route_fraction",
+          "distance_from_previous_waypoint_meters",
+          "duration_from_previous_waypoint_seconds",
+          "station_to_destination_distance_meters",
+          "station_to_destination_duration_seconds",
+          "route_via_station_distance_meters",
+          "route_via_station_duration_seconds",
+          "extra_distance_meters",
+          "detour_duration_seconds",
+          "detour_minutes",
+          "station_eta",
+          "destination_eta",
+          "opening",
+          "phone",
+          "brand",
+          "operator",
+          "price",
+          "ranking"
+        ],
+        "title": "RankedCandidateResponse",
+        "type": "object"
+      },
+      "RankedCandidatesApiRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "departure_at": {
+            "description": "Timezone-aware departure instant used to calculate station and destination ETAs.",
+            "format": "date-time",
+            "title": "Departure At",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "effective_cng_range_km": {
+            "description": "Usable CNG range after the caller's reserve/safety allowance. It controls spatial corridor width only.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "include_closed": {
+            "default": false,
+            "description": "Include stations evaluated as closed at ETA with a zero opening score. Unknown opening state remains included regardless of this option.",
+            "title": "Include Closed",
+            "type": "boolean"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "maximum_detour_minutes": {
+            "description": "Inclusive maximum added road-network travel time.",
+            "maximum": 240.0,
+            "minimum": 0.0,
+            "title": "Maximum Detour Minutes",
+            "type": "number"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "effective_cng_range_km",
+          "maximum_detour_minutes",
+          "departure_at"
+        ],
+        "title": "RankedCandidatesApiRequest",
+        "type": "object"
+      },
+      "RankedCandidatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_route": {
+            "$ref": "#/components/schemas/BaseRouteResponse"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RankedCandidateResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "corridor": {
+            "$ref": "#/components/schemas/CorridorPolicyResponse"
+          },
+          "cost_basis": {
+            "$ref": "#/components/schemas/NetworkCostBasisResponse"
+          },
+          "departure_at": {
+            "format": "date-time",
+            "title": "Departure At",
+            "type": "string"
+          },
+          "maximum_detour_minutes": {
+            "minimum": 0.0,
+            "title": "Maximum Detour Minutes",
+            "type": "number"
+          },
+          "network_evaluation": {
+            "$ref": "#/components/schemas/NetworkEvaluationMetricsResponse"
+          },
+          "ranking_evaluation": {
+            "$ref": "#/components/schemas/RankingMetricsResponse"
+          },
+          "ranking_policy": {
+            "$ref": "#/components/schemas/RankingPolicyResponse"
+          },
+          "spatial_pruning": {
+            "$ref": "#/components/schemas/SpatialPruningMetricsResponse"
+          },
+          "stage": {
+            "const": "ranking",
+            "default": "ranking",
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "departure_at",
+          "maximum_detour_minutes",
+          "base_route",
+          "corridor",
+          "spatial_pruning",
+          "cost_basis",
+          "network_evaluation",
+          "ranking_policy",
+          "ranking_evaluation",
+          "candidates"
+        ],
+        "title": "RankedCandidatesResponse",
+        "type": "object"
+      },
+      "RankingBreakdownResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "availability_multiplier": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Availability Multiplier",
+            "type": "number"
+          },
+          "detour_contribution": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Detour Contribution",
+            "type": "number"
+          },
+          "detour_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Detour Score",
+            "type": "number"
+          },
+          "opening_contribution": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Opening Contribution",
+            "type": "number"
+          },
+          "opening_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Opening Score",
+            "type": "number"
+          },
+          "price_contribution": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Price Contribution",
+            "type": "number"
+          },
+          "price_freshness_contribution": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Price Freshness Contribution",
+            "type": "number"
+          },
+          "price_freshness_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Price Freshness Score",
+            "type": "number"
+          },
+          "price_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Price Score",
+            "type": "number"
+          },
+          "rank": {
+            "exclusiveMinimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "total_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Total Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rank",
+          "total_score",
+          "detour_score",
+          "opening_score",
+          "price_score",
+          "price_freshness_score",
+          "detour_contribution",
+          "opening_contribution",
+          "price_contribution",
+          "price_freshness_contribution",
+          "availability_multiplier"
+        ],
+        "title": "RankingBreakdownResponse",
+        "type": "object"
+      },
+      "RankingMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detour_eligible_candidate_count": {
+            "minimum": 0.0,
+            "title": "Detour Eligible Candidate Count",
+            "type": "integer"
+          },
+          "enrichment_queries": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Enrichment Queries",
+            "type": "integer"
+          },
+          "excluded_closed_count": {
+            "minimum": 0.0,
+            "title": "Excluded Closed Count",
+            "type": "integer"
+          },
+          "opening_closed_count": {
+            "minimum": 0.0,
+            "title": "Opening Closed Count",
+            "type": "integer"
+          },
+          "opening_invalid_count": {
+            "minimum": 0.0,
+            "title": "Opening Invalid Count",
+            "type": "integer"
+          },
+          "opening_missing_count": {
+            "minimum": 0.0,
+            "title": "Opening Missing Count",
+            "type": "integer"
+          },
+          "opening_open_count": {
+            "minimum": 0.0,
+            "title": "Opening Open Count",
+            "type": "integer"
+          },
+          "opening_unknown_count": {
+            "minimum": 0.0,
+            "title": "Opening Unknown Count",
+            "type": "integer"
+          },
+          "opening_valid_count": {
+            "minimum": 0.0,
+            "title": "Opening Valid Count",
+            "type": "integer"
+          },
+          "price_available_count": {
+            "minimum": 0.0,
+            "title": "Price Available Count",
+            "type": "integer"
+          },
+          "price_missing_count": {
+            "minimum": 0.0,
+            "title": "Price Missing Count",
+            "type": "integer"
+          },
+          "ranked_candidate_count": {
+            "minimum": 0.0,
+            "title": "Ranked Candidate Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "detour_eligible_candidate_count",
+          "opening_open_count",
+          "opening_closed_count",
+          "opening_unknown_count",
+          "opening_valid_count",
+          "opening_missing_count",
+          "opening_invalid_count",
+          "excluded_closed_count",
+          "price_available_count",
+          "price_missing_count",
+          "ranked_candidate_count",
+          "enrichment_queries"
+        ],
+        "title": "RankingMetricsResponse",
+        "type": "object"
+      },
+      "RankingPolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "closed_candidate_policy": {
+            "enum": [
+              "exclude",
+              "include_with_zero_opening_score"
+            ],
+            "title": "Closed Candidate Policy",
+            "type": "string"
+          },
+          "closed_score_multiplier": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Closed Score Multiplier",
+            "type": "number"
+          },
+          "detour_weight": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Detour Weight",
+            "type": "number"
+          },
+          "opening_hours_country": {
+            "title": "Opening Hours Country",
+            "type": "string"
+          },
+          "opening_hours_timezone": {
+            "title": "Opening Hours Timezone",
+            "type": "string"
+          },
+          "opening_weight": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Opening Weight",
+            "type": "number"
+          },
+          "price_freshness_hours": {
+            "exclusiveMinimum": 0.0,
+            "title": "Price Freshness Hours",
+            "type": "number"
+          },
+          "price_freshness_weight": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Price Freshness Weight",
+            "type": "number"
+          },
+          "price_selection": {
+            "const": "lowest_current_cng_unit_price",
+            "title": "Price Selection",
+            "type": "string"
+          },
+          "price_weight": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Price Weight",
+            "type": "number"
+          },
+          "unknown_opening_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Unknown Opening Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "detour_weight",
+          "opening_weight",
+          "price_weight",
+          "price_freshness_weight",
+          "unknown_opening_score",
+          "closed_score_multiplier",
+          "price_freshness_hours",
+          "opening_hours_timezone",
+          "opening_hours_country",
+          "price_selection",
+          "closed_candidate_policy"
+        ],
+        "title": "RankingPolicyResponse",
+        "type": "object"
+      },
+      "RouteGeometry": {
+        "additionalProperties": false,
+        "properties": {
+          "encoded_polyline": {
+            "minLength": 1,
+            "title": "Encoded Polyline",
+            "type": "string"
+          },
+          "format": {
+            "const": "polyline6",
+            "default": "polyline6",
+            "title": "Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "encoded_polyline"
+        ],
+        "title": "RouteGeometry",
+        "type": "object"
+      },
+      "RouteLegResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/RouteGeometry"
+          },
+          "kind": {
+            "enum": [
+              "origin_to_cng_station",
+              "cng_station_to_destination"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "maneuvers": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverResponse"
+            },
+            "title": "Maneuvers",
+            "type": "array"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "kind",
+          "origin",
+          "destination",
+          "distance_meters",
+          "duration_seconds",
+          "geometry",
+          "maneuvers"
+        ],
+        "title": "RouteLegResponse",
+        "type": "object"
+      },
+      "RouteWithCngStopRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "mimit_station_id": {
+            "pattern": "^[0-9]{1,32}$",
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "mimit_station_id"
+        ],
+        "title": "RouteWithCngStopRequest",
+        "type": "object"
+      },
+      "RouteWithCngStopResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/RouteLegResponse"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Legs",
+            "type": "array"
+          },
+          "provider": {
+            "const": "valhalla",
+            "title": "Provider",
+            "type": "string"
+          },
+          "selected_stop": {
+            "$ref": "#/components/schemas/SelectedCngStopResponse"
+          }
+        },
+        "required": [
+          "selected_stop",
+          "distance_meters",
+          "duration_seconds",
+          "legs",
+          "provider"
+        ],
+        "title": "RouteWithCngStopResponse",
+        "type": "object"
+      },
+      "SelectedCngStopResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "mimit_station_id": {
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          }
+        },
+        "required": [
+          "mimit_station_id",
+          "name",
+          "municipality",
+          "province",
+          "location"
+        ],
+        "title": "SelectedCngStopResponse",
+        "type": "object"
+      },
+      "SpatialCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "mimit_station_id": {
+            "minLength": 1,
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "route_fraction": {
+            "description": "Approximate projection position from route start (0) to end (1).",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Route Fraction",
+            "type": "number"
+          },
+          "station_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Station Id",
+            "type": "integer"
+          },
+          "straight_line_distance_to_route_meters": {
+            "description": "Cheap geographic prefilter distance. This is not road distance or detour distance.",
+            "minimum": 0.0,
+            "title": "Straight Line Distance To Route Meters",
+            "type": "number"
+          }
+        },
+        "required": [
+          "station_id",
+          "mimit_station_id",
+          "name",
+          "municipality",
+          "province",
+          "latitude",
+          "longitude",
+          "straight_line_distance_to_route_meters",
+          "route_fraction"
+        ],
+        "title": "SpatialCandidateResponse",
+        "type": "object"
+      },
+      "SpatialPruningMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_station_count": {
+            "minimum": 0.0,
+            "title": "Active Station Count",
+            "type": "integer"
+          },
+          "active_station_with_location_count": {
+            "minimum": 0.0,
+            "title": "Active Station With Location Count",
+            "type": "integer"
+          },
+          "candidate_limit_applied": {
+            "title": "Candidate Limit Applied",
+            "type": "boolean"
+          },
+          "corridor_candidate_count": {
+            "minimum": 0.0,
+            "title": "Corridor Candidate Count",
+            "type": "integer"
+          },
+          "excluded_missing_location_count": {
+            "minimum": 0.0,
+            "title": "Excluded Missing Location Count",
+            "type": "integer"
+          },
+          "pruned_with_location_count": {
+            "minimum": 0.0,
+            "title": "Pruned With Location Count",
+            "type": "integer"
+          },
+          "reduction_ratio": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Reduction Ratio",
+            "type": "number"
+          },
+          "returned_candidate_count": {
+            "minimum": 0.0,
+            "title": "Returned Candidate Count",
+            "type": "integer"
+          },
+          "routing_calls": {
+            "const": 1,
+            "title": "Routing Calls",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active_station_count",
+          "active_station_with_location_count",
+          "excluded_missing_location_count",
+          "corridor_candidate_count",
+          "returned_candidate_count",
+          "pruned_with_location_count",
+          "reduction_ratio",
+          "candidate_limit_applied",
+          "routing_calls"
+        ],
+        "title": "SpatialPruningMetricsResponse",
+        "type": "object"
+      },
+      "StationCurrentCngPriceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "freshness_state": {
+            "enum": [
+              "fresh",
+              "stale",
+              "future_observation",
+              "unknown"
+            ],
+            "title": "Freshness State",
+            "type": "string"
+          },
+          "fuel_type": {
+            "const": "cng",
+            "default": "cng",
+            "title": "Fuel Type",
+            "type": "string"
+          },
+          "ingested_at": {
+            "format": "date-time",
+            "title": "Ingested At",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "service_mode": {
+            "enum": [
+              "self",
+              "served"
+            ],
+            "title": "Service Mode",
+            "type": "string"
+          },
+          "source_name": {
+            "minLength": 1,
+            "title": "Source Name",
+            "type": "string"
+          },
+          "unit": {
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "exclusiveMinimum": 0.0,
+            "title": "Unit Price",
+            "type": "number"
+          }
+        },
+        "required": [
+          "unit_price",
+          "currency",
+          "unit",
+          "service_mode",
+          "observed_at",
+          "ingested_at",
+          "source_name",
+          "age_seconds",
+          "freshness_state"
+        ],
+        "title": "StationCurrentCngPriceResponse",
+        "type": "object"
+      },
+      "StationDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "current_cng_prices": {
+            "items": {
+              "$ref": "#/components/schemas/StationCurrentCngPriceResponse"
+            },
+            "title": "Current Cng Prices",
+            "type": "array"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StationLocationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manager": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager"
+          },
+          "mimit_station_id": {
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "opening_at_arrival": {
+            "$ref": "#/components/schemas/StationOpeningAtArrivalResponse"
+          },
+          "osm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StationOsmResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_reference_at": {
+            "format": "date-time",
+            "title": "Price Reference At",
+            "type": "string"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "source_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Observed At"
+          },
+          "station_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station Type"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mimit_station_id",
+          "name",
+          "address",
+          "municipality",
+          "province",
+          "brand",
+          "manager",
+          "station_type",
+          "is_active",
+          "location",
+          "source_observed_at",
+          "updated_at",
+          "price_reference_at",
+          "current_cng_prices",
+          "osm",
+          "opening_at_arrival"
+        ],
+        "title": "StationDetailResponse",
+        "type": "object"
+      },
+      "StationLocationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "source"
+        ],
+        "title": "StationLocationResponse",
+        "type": "object"
+      },
+      "StationOpeningAtArrivalResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "evaluation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpeningHoursEvaluationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "not_requested",
+              "evaluated",
+              "location_unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "evaluation"
+        ],
+        "title": "StationOpeningAtArrivalResponse",
+        "type": "object"
+      },
+      "StationOsmResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "distance_meters": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Meters"
+          },
+          "is_manual": {
+            "title": "Is Manual",
+            "type": "boolean"
+          },
+          "match_method": {
+            "title": "Match Method",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "opening_hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opening Hours"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "osm_id": {
+            "title": "Osm Id",
+            "type": "integer"
+          },
+          "osm_type": {
+            "title": "Osm Type",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "source_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Observed At"
+          }
+        },
+        "required": [
+          "osm_type",
+          "osm_id",
+          "name",
+          "opening_hours",
+          "phone",
+          "brand",
+          "operator",
+          "source_observed_at",
+          "match_method",
+          "confidence",
+          "is_manual"
+        ],
+        "title": "StationOsmResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "CNG-aware navigation API foundations for Italy.",
+    "title": "Compass CNG API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/cng/corridor-candidates": {
+      "post": {
+        "operationId": "corridor_candidates_api_v1_cng_corridor_candidates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorridorCandidatesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request or no route."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database or routing unavailable."
+          }
+        },
+        "summary": "Corridor Candidates",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/cng/detour-candidates": {
+      "post": {
+        "operationId": "detour_candidates_api_v1_cng_detour_candidates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetourCandidatesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetourCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request or no route."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database or routing unavailable."
+          }
+        },
+        "summary": "Detour Candidates",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/cng/ranked-candidates": {
+      "post": {
+        "operationId": "ranked_candidates_api_v1_cng_ranked_candidates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RankedCandidatesApiRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankedCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request or no route."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database or routing unavailable."
+          }
+        },
+        "summary": "Ranked Candidates",
+        "tags": [
+          "ranking"
+        ]
+      }
+    },
+    "/api/v1/cng/stations/{mimit_station_id}": {
+      "get": {
+        "operationId": "station_detail_api_v1_cng_stations__mimit_station_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mimit_station_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9]{1,32}$",
+              "title": "Mimit Station Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional timezone-aware arrival instant for opening evaluation.",
+            "in": "query",
+            "name": "arrival_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional timezone-aware arrival instant for opening evaluation.",
+              "title": "Arrival At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Station not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid station ID or arrival time."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Station database unavailable."
+          }
+        },
+        "summary": "Station Detail",
+        "tags": [
+          "stations"
+        ]
+      }
+    },
+    "/api/v1/data-freshness": {
+      "get": {
+        "operationId": "data_freshness_api_v1_data_freshness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataFreshnessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Freshness data unavailable."
+          }
+        },
+        "summary": "Data Freshness",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/routes": {
+      "post": {
+        "operationId": "base_route_api_v1_routes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseRouteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseRouteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No route was found."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Routing provider unavailable."
+          }
+        },
+        "summary": "Base Route",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/routes/with-cng-stop": {
+      "post": {
+        "operationId": "route_with_cng_stop_api_v1_routes_with_cng_stop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteWithCngStopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteWithCngStopResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Station not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Station cannot be routed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request or no route."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database or routing unavailable."
+          }
+        },
+        "summary": "Route With Cng Stop",
+        "tags": [
+          "stations"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "live_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Live",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  }
+}

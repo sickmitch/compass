@@ -87,3 +87,21 @@ Parser warnings and the original expression remain visible in API results. Missi
 unparseable syntax and a valid expression whose state is unknown are separate cases. OSM remains the
 source and retains its ODbL attribution requirements; parser output does not change source ownership
 or authoritative MIMIT station/price fields.
+
+## Public freshness semantics
+
+`GET /api/v1/data-freshness` reports freshness separately for `mimit_cng`, `osm_cng` and the latest
+completed reconciliation. MIMIT and OSM age use the source observation timestamp when present;
+reconciliation age uses its completion timestamp. The API also exposes the evaluation instant and
+configured threshold, so `fresh`, `stale`, `future_observation` and `missing` are reproducible rather
+than opaque labels.
+
+The defaults are 48 hours for MIMIT, 168 hours for OSM and 48 hours for reconciliation. They are
+operational policy and can be changed with `MIMIT_DATA_FRESHNESS_HOURS`,
+`OSM_DATA_FRESHNESS_HOURS` and `RECONCILIATION_DATA_FRESHNESS_HOURS`. A stale source degrades the
+reported data state but does not conceal or delete the last successfully normalized records. Missing
+required MIMIT or reconciliation data prevents readiness. Missing/stale OSM affects optional
+enrichment and does not invalidate authoritative MIMIT station identity or prices.
+
+Traffic remains a separate future provider domain. Its Phase 7 state is explicitly
+`not_configured`; Valhalla graph speeds are not presented as live traffic.

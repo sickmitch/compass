@@ -45,3 +45,24 @@ def test_ranking_weights_must_sum_to_one() -> None:
 def test_closed_station_multiplier_is_bounded(value: float) -> None:
     with pytest.raises(ValidationError, match="closed_score_multiplier"):
         Settings(_env_file=None, cng_ranking_closed_score_multiplier=value)
+
+
+def test_phase7_freshness_threshold_defaults_are_explicit() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.mimit_data_freshness_hours == 48
+    assert settings.osm_data_freshness_hours == 168
+    assert settings.reconciliation_data_freshness_hours == 48
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "mimit_data_freshness_hours",
+        "osm_data_freshness_hours",
+        "reconciliation_data_freshness_hours",
+    ],
+)
+def test_phase7_freshness_thresholds_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError, match=field):
+        Settings(_env_file=None, **{field: 0})

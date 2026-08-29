@@ -8,19 +8,17 @@ from pydantic import Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from compass.api.contracts import ErrorResponse, StrictModel, error_response
 from compass.api.routes import (
     BaseRouteResponse,
     CorridorPolicyResponse,
     DetourCandidatesRequest,
     EligibleDetourCandidateResponse,
-    ErrorResponse,
     NetworkCostBasisResponse,
     NetworkEvaluationMetricsResponse,
     SpatialPruningMetricsResponse,
-    StrictModel,
     _base_route_response,
     _detour_candidate_response,
-    _error,
 )
 from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.config import Settings, get_api_settings
@@ -206,17 +204,17 @@ async def ranked_candidates(
             max_route_geometry_points=settings.route_geometry_max_points,
         )
     except NoRouteError:
-        return _error(422, "route_not_found", "No route was found between the locations.")
+        return error_response(422, "route_not_found", "No route was found between the locations.")
     except RoutingUnavailableError:
-        return _error(503, "routing_unavailable", "The routing service is unavailable.")
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
     except RoutingProviderError:
-        return _error(
+        return error_response(
             502,
             "routing_provider_error",
             "The routing service returned an invalid response.",
         )
     except SQLAlchemyError:
-        return _error(503, "database_unavailable", "The station database is unavailable.")
+        return error_response(503, "database_unavailable", "The station database is unavailable.")
 
     network = result.network_result
     spatial = network.spatial_result

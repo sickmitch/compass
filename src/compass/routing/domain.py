@@ -17,6 +17,19 @@ class RouteRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class WaypointRouteRequest:
+    origin: Coordinate
+    destination: Coordinate
+    waypoints: tuple[Coordinate, ...]
+    costing: str = "auto"
+    language: str = "it-IT"
+
+    def __post_init__(self) -> None:
+        if not self.waypoints:
+            raise ValueError("waypoint route must contain at least one waypoint")
+
+
+@dataclass(frozen=True, slots=True)
 class Maneuver:
     type: int
     instruction: str
@@ -40,6 +53,22 @@ class BaseRoute:
     duration_seconds: float
     encoded_polyline: str
     maneuvers: tuple[Maneuver, ...]
+    provider: str
+
+
+@dataclass(frozen=True, slots=True)
+class RouteLeg:
+    distance_meters: float
+    duration_seconds: float
+    encoded_polyline: str
+    maneuvers: tuple[Maneuver, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WaypointRoute:
+    distance_meters: float
+    duration_seconds: float
+    legs: tuple[RouteLeg, ...]
     provider: str
 
 
@@ -91,6 +120,8 @@ class MatrixLocationError(RoutingProviderError):
 
 class RoutingProvider(Protocol):
     async def route(self, request: RouteRequest) -> BaseRoute: ...
+
+    async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute: ...
 
     async def matrix(self, request: MatrixRequest) -> MatrixResult: ...
 

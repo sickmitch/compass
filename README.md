@@ -4,7 +4,8 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–6** foundation:
+This repository implements the accepted **Phases 0–6** foundation and the locally validated
+**Phase 7** public API contract:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -32,10 +33,13 @@ This repository implements the accepted **Phases 0–6** foundation:
 - distinct `open`, `closed` and `unknown` availability with missing/invalid validation state;
 - deterministic ranking from detour, availability, MIMIT CNG unit price and price freshness;
 - explicit score components, price/source timestamps and at-most-one-query candidate enrichment.
+- stable station detail keyed by the official MIMIT identifier;
+- selected-stop route recomputation with two explicit polyline6/maneuver legs;
+- source-by-source freshness metadata and data-aware readiness;
+- a checked-in OpenAPI artifact, shared machine error envelope and live contract verifier.
 
-It intentionally does **not** yet ingest traffic, recompute a selected route through a station,
-publish the broader Phase 7 mobile API, or implement predictive refuelling. Those remain later
-gated phases.
+It intentionally does **not** yet ingest traffic, implement predictive refuelling, or provide the
+Android client. Those remain later gated phases.
 
 ## Quick local validation
 
@@ -147,6 +151,25 @@ explicit zero opening score and configurable score multiplier. Missing or invali
 freshness at station ETA. See the
 [Phase 6 live gate](docs/deployment.md#phase-6-arrival-time-availability-and-ranking-validation).
 
+## Phase 7 public API contract
+
+Phase 7 makes the completed routing/ranking domain usable through stable mobile-facing resources:
+
+- `GET /api/v1/cng/stations/{mimit_station_id}` returns authoritative station fields, current CNG
+  prices with freshness, accepted OSM enrichment and optional opening evaluation at `arrival_at`;
+- `POST /api/v1/routes/with-cng-stop` resolves the official station ID and returns exactly two route
+  legs with independent polyline6 geometry and maneuvers;
+- `GET /api/v1/data-freshness` reports MIMIT, OSM and reconciliation ages/thresholds without
+  pretending that traffic is configured;
+- `/health/ready` distinguishes ready, degraded-but-usable data and missing required data.
+
+The canonical machine-readable contract is [docs/openapi.json](docs/openapi.json), with compact
+[request/response examples](docs/api.md). Regenerate or
+verify it with `python scripts/export-openapi.py` and `python scripts/export-openapi.py --check`.
+See the [Phase 7 live gate](docs/deployment.md#phase-7-public-api-contract-validation). After the
+image and services are restarted, the checked-in `scripts/run-phase7-live.sh` runner executes the
+complete gate without requiring inline JSON or chained shell commands.
+
 ## Repository layout
 
 ```text
@@ -158,6 +181,8 @@ src/compass/routing/   provider boundary and Valhalla HTTP adapter
 src/compass/candidates/ corridor policy, geometry decoding and PostGIS pruning
 src/compass/detours/  batched network-cost evaluation and deterministic detour math
 src/compass/ranking/  arrival-time opening evaluation, price freshness and explainable ranking
+src/compass/stations/ public station detail reads and provenance
+src/compass/freshness/ ingestion/reconciliation freshness policy
 migrations/            Alembic schema history
 tests/fixtures/        small network-free source fixtures
 docs/adr/              accepted architecture decisions
@@ -166,7 +191,7 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phases 2–6 have passed repository-local checks and their documented operator-run live tests.
+Phases 2–7 have passed repository-local checks and their documented operator-run live tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
 representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
 a Milan-to-Bologna route against the full 1,512-station inventory. Phase 5 validated batched
@@ -177,6 +202,9 @@ matrix calls, with an independent known-station route comparison. Evidence is re
 `docs/phases/phase-5-acceptance.md` and `docs/phases/phase-6-acceptance.md`. Phase 6 validated
 arrival-time opening states and explainable ranking over the same full-Italy bounded matrix pipeline,
 including the real-world `Su, PH off` Sunday case.
+Phase 7 validated the stable public API, official-ID station detail, two-leg selected-stop routing,
+data-aware health/freshness, shared 404/422 errors and the published OpenAPI contract through the
+checked-in live-gate runner.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;

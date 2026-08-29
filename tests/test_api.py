@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -20,6 +21,7 @@ from compass.detours.domain import (
     NetworkEvaluationMetrics,
     calculate_detour_candidate,
 )
+from compass.freshness.domain import DataFreshnessReport, DataSourceFreshness
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import (
     BaseRoute,
@@ -90,7 +92,19 @@ def test_liveness_does_not_claim_dependency_readiness() -> None:
     assert response.json()["routing"] == "not_checked"
 
 
-def test_readiness_checks_database() -> None:
+def _freshness_report(state: str = "ready") -> DataFreshnessReport:
+    now = datetime.now(UTC)
+    source = DataSourceFreshness("fixture", "fresh", now, now, 0, 3600)
+    return DataFreshnessReport(
+        evaluated_at=now,
+        overall_state=state,
+        mimit=source,
+        osm=source,
+        reconciliation=source,
+    )
+
+
+def test_readiness_checks_database(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     provider = FakeRoutingProvider()
 
@@ -103,6 +117,9 @@ def test_readiness_checks_database() -> None:
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_routing_provider] = override_provider
+    monkeypatch.setattr(
+        "compass.api.main.load_data_freshness", lambda *args, **kwargs: _freshness_report()
+    )
     try:
         response = _get("/health/ready")
     finally:
@@ -112,9 +129,11 @@ def test_readiness_checks_database() -> None:
     assert response.status_code == 200
     assert response.json()["database"] == "ready"
     assert response.json()["routing"] == "ready"
+    assert response.json()["data"] == "ready"
+    assert response.json()["traffic"] == "not_configured"
 
 
-def test_readiness_reports_routing_unavailable() -> None:
+def test_readiness_reports_routing_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
 
     async def override_session() -> AsyncIterator[Session]:
@@ -126,6 +145,9 @@ def test_readiness_reports_routing_unavailable() -> None:
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_routing_provider] = override_provider
+    monkeypatch.setattr(
+        "compass.api.main.load_data_freshness", lambda *args, **kwargs: _freshness_report()
+    )
     try:
         response = _get("/health/ready")
     finally:
@@ -136,6 +158,45 @@ def test_readiness_reports_routing_unavailable() -> None:
     assert response.json()["status"] == "not_ready"
     assert response.json()["database"] == "ready"
     assert response.json()["routing"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("data_state", "expected_status", "expected_service_status"),
+    [
+        ("degraded", 200, "ok"),
+        ("unavailable", 503, "not_ready"),
+    ],
+)
+def test_readiness_distinguishes_stale_from_missing_required_data(
+    monkeypatch: pytest.MonkeyPatch,
+    data_state: str,
+    expected_status: int,
+    expected_service_status: str,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+
+    async def override_session() -> AsyncIterator[Session]:
+        with Session(engine) as session:
+            yield session
+
+    async def override_provider() -> FakeRoutingProvider:
+        return FakeRoutingProvider()
+
+    monkeypatch.setattr(
+        "compass.api.main.load_data_freshness",
+        lambda *args, **kwargs: _freshness_report(data_state),
+    )
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_routing_provider] = override_provider
+    try:
+        response = _get("/health/ready")
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == expected_status
+    assert response.json()["status"] == expected_service_status
+    assert response.json()["data"] == data_state
 
 
 def test_base_route_contract_is_provider_independent() -> None:

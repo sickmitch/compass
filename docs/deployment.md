@@ -655,3 +655,110 @@ Alembic output. If anything fails, also return the HTTP response and diagnostics
 the complete 2+ GB graph, `.env`, credentials, or the unabridged ranked response unless a specific
 candidate must be debugged. Stop at this gate; do not begin Phase 7 until these invariants pass or
 the operator explicitly waives them.
+
+## Phase 7 public API contract validation
+
+Run this gate from the repository root after synchronizing Phase 7. Reuse the accepted normalized
+full-Italy database and Valhalla tiles. No migration is added, so Alembic must remain at `0002`.
+
+The complete gate is automated by `scripts/run-phase7-live.sh`. It creates the request JSON files,
+runs every HTTP request separately, checks the expected 404 and 422 responses, runs the contract
+verifier and prints bounded service evidence. Do not join these commands onto one line and do not
+pipe them through `tr`.
+
+### Step 1: build the application image
+
+```bash
+docker compose build api
+```
+
+Wait for this command to finish before continuing.
+
+### Step 2: restart the Phase 7 services
+
+```bash
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+```
+
+Wait for this command to finish before continuing.
+
+### Step 3: inspect service state
+
+```bash
+docker compose --profile routing ps -a
+```
+
+`db`, `api` and `valhalla` must be healthy. `migrate` must have exited with status 0.
+
+### Step 4: run the complete live gate
+
+```bash
+bash scripts/run-phase7-live.sh
+```
+
+That is one command. Do not copy the contents of the script into the terminal. The script prints
+progress from `[1/9]` through `[9/9]` and stops immediately if a request or assertion fails. Large
+route responses are saved under `/tmp` instead of being printed.
+
+Expected invariants:
+
+- readiness is HTTP 200 with database/routing ready, data `ready` or explicitly `degraded`, and
+  traffic `not_configured`;
+- the normal and ranked route capabilities still work, with one base route and bounded matrices for
+  ranking rather than per-candidate route calls;
+- station `43690` is active, geocoded and has explicit current EUR/kg price timestamps/freshness;
+- optional `arrival_at` produces an evaluated open/closed/unknown state rather than `open_now`;
+- selected-stop routing makes one provider request and returns exactly two ordered legs whose
+  distance/time sums reproduce the total within provider rounding tolerance;
+- every leg has separate polyline6 geometry and maneuver indices;
+- freshness contains exactly MIMIT, OSM and reconciliation; required MIMIT/reconciliation are not
+  missing, and stale data is visible rather than hidden;
+- unknown station and invalid request bodies return the shared 404/422 `{code,message}` contracts;
+- live OpenAPI contains all seven verifier-required paths and the shared `ErrorResponse` schema;
+- the filtered workload normally contains three `/route` calls (normal, ranking base, selected stop)
+  and ten `/sources_to_targets` calls for the accepted 200-candidate/batch-40 ranking path, unless
+  observable matrix fallback splits occur;
+- Alembic is `0002 (head)` and the built package reports `GPL-3.0-only`.
+
+### Phase 7 diagnostics
+
+If the runner fails, first capture container state:
+
+```bash
+docker compose --profile routing ps -a
+```
+
+Then capture recent logs:
+
+```bash
+docker compose --profile routing logs --no-color --tail=500 api valhalla db migrate
+```
+
+Then inspect readiness:
+
+```bash
+curl --silent --show-error -i http://127.0.0.1:8000/health/ready
+```
+
+Then inspect freshness:
+
+```bash
+curl --silent --show-error -i http://127.0.0.1:8000/api/v1/data-freshness
+```
+
+The following station-detail command is safe to paste as one block:
+
+```bash
+curl --silent --show-error -i --get --data-urlencode 'arrival_at=2026-08-30T10:19:11+02:00' http://127.0.0.1:8000/api/v1/cng/stations/43690
+```
+
+Finally inspect the migration revision:
+
+```bash
+docker compose exec -T api alembic current
+```
+
+Return the runner output and these diagnostics. The failed response body remains in the matching
+`/tmp/compass-phase7-*.json` file; return that file only when the failing `[N/9]` step identifies it.
+Do not return `.env`, credentials, full large polylines or Valhalla tile contents. Stop at this gate;
+do not begin Phase 8 until it passes or the operator explicitly waives it.

@@ -207,6 +207,48 @@ tie-breakers are detour duration, price presence/value and internal station ID.
 - Graph-speed durations still have no external traffic overlay and remain explicitly non-traffic-aware.
 - Selecting a candidate and recomputing the route through it remains outside this phase.
 
+## Phase 7 public contract boundary
+
+Phase 7 exposes completed domain behavior without coupling the client to database primary keys or
+Valhalla payloads:
+
+```text
+MIMIT station ID ──> one joined normalized detail read ──> provenance + price freshness
+origin + MIMIT ID + destination ──> station resolution ──> one Valhalla waypoint route
+ingestion/reconciliation runs ──> freshness policy ──> detailed report + readiness data state
+domain/API schemas ──> FastAPI OpenAPI ──> checked docs/openapi.json contract
+```
+
+`mimit_station_id` is the public station identity because MIMIT is authoritative and the internal
+database ID is an implementation detail. Station detail performs one joined query for the station,
+accepted OSM link and all current CNG service modes. Optional `arrival_at` uses the same explicit
+opening-hours evaluator as ranking; omission is `not_requested`, not an implicit open state.
+
+Selected-stop routing sends origin, resolved station point and destination as three Valhalla break
+locations in one request. The response retains two separate legs, each with its own polyline6 and
+maneuver indices. Compass therefore does not concatenate independently encoded geometry or leak the
+provider response shape to clients. Inactive stations and missing station coordinates are distinct
+409 domain conflicts; an unknown ID is 404.
+
+Freshness compares source observation time (or completion time where no source observation exists)
+with configurable thresholds. Missing required MIMIT or reconciliation data makes readiness 503.
+Present but stale/future data is explicitly `degraded` and remains queryable with readiness HTTP 200.
+OSM freshness can degrade enrichment quality without erasing authoritative MIMIT data. Traffic is
+reported as `not_configured` and never inferred from graph speeds.
+
+All public request models reject unknown fields. Validation and operational failures use a shared
+`{code,message}` JSON envelope; health responses intentionally use their dependency-state schema.
+The generated OpenAPI document is checked into `docs/openapi.json` and tests require byte-equivalent
+semantic content to the runtime schema.
+
+## Deliberate Phase 7 limits
+
+- The selected stop is supplied explicitly; predictive fuel reachability remains a later phase.
+- Route alternatives, navigation session state and rerouting are not introduced by this contract.
+- Data freshness is observed on request; no scheduler/alerting infrastructure is added without an
+  operational requirement.
+- Stale data thresholds are operator policy, not claims about upstream publication guarantees.
+
 ## Runtime
 
 The default Compose graph contains:

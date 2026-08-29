@@ -86,7 +86,7 @@ async def rank_cng_candidates(
         else:
             invalid_count += 1
 
-        price = _evaluate_price(
+        price = evaluate_price(
             enrichment.current_price,
             eta=candidate.station_eta,
             freshness_seconds=ranking_policy.price_freshness_seconds,
@@ -225,7 +225,7 @@ def _price_selection_key(price: CurrentCngPrice) -> tuple[Decimal, float, str]:
     return (price.unit_price, newest_first, price.service_mode)
 
 
-def _evaluate_price(
+def evaluate_price(
     price: CurrentCngPrice | None, *, eta: datetime, freshness_seconds: float
 ) -> EvaluatedCngPrice | None:
     if price is None:

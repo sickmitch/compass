@@ -29,8 +29,8 @@ from compass.ranking.domain import (
     RankingPolicy,
 )
 from compass.ranking.service import (
-    _evaluate_price,
     _price_selection_key,
+    evaluate_price,
     rank_cng_candidates,
 )
 from compass.routing.domain import BaseRoute, Coordinate, RouteRequest
@@ -280,7 +280,7 @@ def test_no_eligible_candidate_skips_enrichment_query(
 def test_price_freshness_is_evaluated_against_station_eta(
     observed_at: str, expected_state: str, expected_age: float
 ) -> None:
-    result = _evaluate_price(
+    result = evaluate_price(
         _price("1.499", observed_at),
         eta=datetime.fromisoformat("2026-08-28T20:00:00+02:00"),
         freshness_seconds=7 * 24 * 60 * 60,

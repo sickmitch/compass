@@ -11,8 +11,11 @@ from sqlalchemy.orm import Session
 from compass import __version__
 from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
-from compass.config import get_settings
+from compass.api.stations import router as stations_router
+from compass.api.system import router as system_router
+from compass.config import Settings, get_api_settings, get_settings
 from compass.db import get_session
+from compass.freshness.service import load_data_freshness
 from compass.logging import configure_logging
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import RoutingProvider
@@ -26,6 +29,8 @@ app = FastAPI(
 )
 app.include_router(routes_router)
 app.include_router(ranking_router)
+app.include_router(stations_router)
+app.include_router(system_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -44,11 +49,19 @@ class HealthResponse(BaseModel):
     version: str = __version__
     database: Literal["not_checked", "ready", "unavailable"]
     routing: Literal["not_checked", "ready", "unavailable"]
+    data: Literal["not_checked", "ready", "degraded", "unavailable"]
+    traffic: Literal["not_checked", "not_configured"]
 
 
 @app.get("/health/live", response_model=HealthResponse, tags=["health"])
 async def live() -> HealthResponse:
-    return HealthResponse(status="ok", database="not_checked", routing="not_checked")
+    return HealthResponse(
+        status="ok",
+        database="not_checked",
+        routing="not_checked",
+        data="not_checked",
+        traffic="not_checked",
+    )
 
 
 @app.get("/health/ready", response_model=HealthResponse, tags=["health"])
@@ -56,6 +69,7 @@ async def ready(
     response: Response,
     session: Annotated[Session, Depends(get_session)],
     routing_provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> HealthResponse:
     database_state: Literal["ready", "unavailable"] = "ready"
     try:
@@ -66,11 +80,37 @@ async def ready(
     routing_state: Literal["ready", "unavailable"] = (
         "ready" if await routing_provider.is_ready() else "unavailable"
     )
-    if database_state == "unavailable" or routing_state == "unavailable":
+    data_state: Literal["ready", "degraded", "unavailable"] = "unavailable"
+    if database_state == "ready":
+        try:
+            freshness = load_data_freshness(
+                session,
+                mimit_threshold_seconds=settings.mimit_data_freshness_hours * 3600,
+                osm_threshold_seconds=settings.osm_data_freshness_hours * 3600,
+                reconciliation_threshold_seconds=(
+                    settings.reconciliation_data_freshness_hours * 3600
+                ),
+            )
+            data_state = freshness.overall_state
+        except SQLAlchemyError:
+            data_state = "unavailable"
+    if (
+        database_state == "unavailable"
+        or routing_state == "unavailable"
+        or data_state == "unavailable"
+    ):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(
             status="not_ready",
             database=database_state,
             routing=routing_state,
+            data=data_state,
+            traffic="not_configured",
         )
-    return HealthResponse(status="ok", database="ready", routing="ready")
+    return HealthResponse(
+        status="ok",
+        database="ready",
+        routing="ready",
+        data=data_state,
+        traffic="not_configured",
+    )

@@ -13,6 +13,7 @@ from compass.routing.domain import (
     RouteRequest,
     RoutingProviderError,
     RoutingUnavailableError,
+    WaypointRouteRequest,
 )
 from compass.routing.valhalla import ValhallaRoutingAdapter, _parse_matrix
 
@@ -74,6 +75,66 @@ def test_route_translates_request_and_normalizes_response() -> None:
     assert len(route.maneuvers) == 2
     assert route.maneuvers[0].distance_meters == 2100
     assert route.maneuvers[1].street_names == ("Via Milano",)
+
+
+def test_waypoint_route_preserves_leg_boundaries() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    first_leg = fixture["trip"]["legs"][0]
+    second_leg = json.loads(json.dumps(first_leg))
+    second_leg["summary"] = {"length": 3.5, "time": 400}
+    second_leg["shape"] = "second-leg-polyline"
+    fixture["trip"]["summary"] = {"length": 6.0, "time": 720}
+    fixture["trip"]["legs"] = [first_leg, second_leg]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["locations"] == [
+            {"lat": 45.4642, "lon": 9.19, "type": "break"},
+            {"lat": 45.2, "lon": 9.7, "type": "break"},
+            {"lat": 44.4949, "lon": 11.3426, "type": "break"},
+        ]
+        return httpx.Response(200, json=fixture)
+
+    adapter, client = _adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(
+            adapter.route_with_waypoints(
+                WaypointRouteRequest(
+                    origin=Coordinate(45.4642, 9.19),
+                    destination=Coordinate(44.4949, 11.3426),
+                    waypoints=(Coordinate(45.2, 9.7),),
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.distance_meters == 6000
+    assert route.duration_seconds == 720
+    assert len(route.legs) == 2
+    assert route.legs[0].distance_meters == 2500
+    assert route.legs[1].distance_meters == 3500
+    assert route.legs[1].encoded_polyline == "second-leg-polyline"
+
+
+def test_waypoint_route_rejects_wrong_leg_count() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    adapter, client = _adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json=fixture))
+    )
+    try:
+        with pytest.raises(RoutingProviderError, match="number of legs"):
+            asyncio.run(
+                adapter.route_with_waypoints(
+                    WaypointRouteRequest(
+                        origin=Coordinate(45.4642, 9.19),
+                        destination=Coordinate(44.4949, 11.3426),
+                        waypoints=(Coordinate(45.2, 9.7),),
+                    )
+                )
+            )
+    finally:
+        asyncio.run(client.aclose())
 
 
 @pytest.mark.parametrize(
@@ -193,9 +254,7 @@ def test_matrix_translates_request_and_preserves_unreachable_pairs() -> None:
 def test_matrix_maps_no_path_response_to_unreachable_cells() -> None:
     adapter, client = _adapter(
         httpx.MockTransport(
-            lambda _request: httpx.Response(
-                400, json={"error_code": 442, "error": "No path"}
-            )
+            lambda _request: httpx.Response(400, json={"error_code": 442, "error": "No path"})
         )
     )
     try:

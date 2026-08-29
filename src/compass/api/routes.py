@@ -4,10 +4,11 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from compass.api.contracts import ErrorResponse, StrictModel, error_response
 from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.candidates.service import find_corridor_candidates
 from compass.config import Settings, get_api_settings
@@ -30,10 +31,6 @@ from compass.routing.domain import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["routing"])
-
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 class CoordinateRequest(StrictModel):
@@ -111,11 +108,6 @@ class BaseRouteResponse(StrictModel):
     geometry: RouteGeometry
     maneuvers: list[ManeuverResponse]
     provider: Literal["valhalla"]
-
-
-class ErrorResponse(StrictModel):
-    code: str
-    message: str
 
 
 class CorridorPolicyResponse(StrictModel):
@@ -254,11 +246,11 @@ async def base_route(
     try:
         route = await provider.route(domain_request)
     except NoRouteError:
-        return _error(422, "route_not_found", "No route was found between the locations.")
+        return error_response(422, "route_not_found", "No route was found between the locations.")
     except RoutingUnavailableError:
-        return _error(503, "routing_unavailable", "The routing service is unavailable.")
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
     except RoutingProviderError:
-        return _error(
+        return error_response(
             502,
             "routing_provider_error",
             "The routing service returned an invalid response.",
@@ -312,17 +304,17 @@ async def corridor_candidates(
             max_route_geometry_points=settings.route_geometry_max_points,
         )
     except NoRouteError:
-        return _error(422, "route_not_found", "No route was found between the locations.")
+        return error_response(422, "route_not_found", "No route was found between the locations.")
     except RoutingUnavailableError:
-        return _error(503, "routing_unavailable", "The routing service is unavailable.")
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
     except RoutingProviderError:
-        return _error(
+        return error_response(
             502,
             "routing_provider_error",
             "The routing service returned an invalid response.",
         )
     except SQLAlchemyError:
-        return _error(503, "database_unavailable", "The station database is unavailable.")
+        return error_response(503, "database_unavailable", "The station database is unavailable.")
 
     return CorridorCandidatesResponse(
         base_route=_base_route_response(result.base_route),
@@ -388,17 +380,17 @@ async def detour_candidates(
             max_route_geometry_points=settings.route_geometry_max_points,
         )
     except NoRouteError:
-        return _error(422, "route_not_found", "No route was found between the locations.")
+        return error_response(422, "route_not_found", "No route was found between the locations.")
     except RoutingUnavailableError:
-        return _error(503, "routing_unavailable", "The routing service is unavailable.")
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
     except RoutingProviderError:
-        return _error(
+        return error_response(
             502,
             "routing_provider_error",
             "The routing service returned an invalid response.",
         )
     except SQLAlchemyError:
-        return _error(503, "database_unavailable", "The station database is unavailable.")
+        return error_response(503, "database_unavailable", "The station database is unavailable.")
 
     spatial = result.spatial_result
     return DetourCandidatesResponse(
@@ -459,11 +451,4 @@ def _detour_candidate_response(
             "station_eta": candidate.station_eta,
             "destination_eta": candidate.destination_eta,
         }
-    )
-
-
-def _error(status_code: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content=ErrorResponse(code=code, message=message).model_dump(),
     )

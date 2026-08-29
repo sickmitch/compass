@@ -6,15 +6,19 @@ import httpx
 
 from compass.routing.domain import (
     BaseRoute,
+    Coordinate,
     Maneuver,
     MatrixCost,
     MatrixLocationError,
     MatrixRequest,
     MatrixResult,
     NoRouteError,
+    RouteLeg,
     RouteRequest,
     RoutingProviderError,
     RoutingUnavailableError,
+    WaypointRoute,
+    WaypointRouteRequest,
 )
 
 VALHALLA_NO_ROUTE_ERROR_CODES = {442}
@@ -44,43 +48,29 @@ class ValhallaRoutingAdapter:
         self._client = client
 
     async def route(self, request: RouteRequest) -> BaseRoute:
-        payload = {
-            "locations": [
-                {
-                    "lat": request.origin.latitude,
-                    "lon": request.origin.longitude,
-                    "type": "break",
-                },
-                {
-                    "lat": request.destination.latitude,
-                    "lon": request.destination.longitude,
-                    "type": "break",
-                },
-            ],
-            "costing": request.costing,
-            "units": "kilometers",
-            "language": request.language,
-            "directions_type": "instructions",
-            "shape_format": "polyline6",
-        }
+        payload = _route_payload(
+            (request.origin, request.destination),
+            costing=request.costing,
+            language=request.language,
+        )
         response = await self._request("POST", "/route", json=payload)
-        if response.status_code >= 500:
-            raise RoutingUnavailableError(
-                f"Valhalla returned HTTP {response.status_code}"
-            )
-        if response.status_code >= 400:
-            error_code = _optional_int(_json_mapping(response).get("error_code"))
-            if error_code in VALHALLA_NO_ROUTE_ERROR_CODES:
-                raise NoRouteError("Valhalla could not find a route between the locations")
-            raise RoutingProviderError(
-                f"Valhalla rejected the route request with HTTP {response.status_code}"
-            )
-        if response.status_code >= 300:
-            raise RoutingProviderError(
-                f"Valhalla returned unexpected HTTP {response.status_code}"
-            )
+        _raise_route_http_error(response)
 
         return _parse_route(_json_mapping(response))
+
+    async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute:
+        locations = (request.origin, *request.waypoints, request.destination)
+        response = await self._request(
+            "POST",
+            "/route",
+            json=_route_payload(
+                locations,
+                costing=request.costing,
+                language=request.language,
+            ),
+        )
+        _raise_route_http_error(response)
+        return _parse_waypoint_route(_json_mapping(response), expected_leg_count=len(locations) - 1)
 
     async def matrix(self, request: MatrixRequest) -> MatrixResult:
         payload = {
@@ -99,9 +89,7 @@ class ValhallaRoutingAdapter:
         }
         response = await self._request("POST", "/sources_to_targets", json=payload)
         if response.status_code >= 500:
-            raise RoutingUnavailableError(
-                f"Valhalla returned HTTP {response.status_code}"
-            )
+            raise RoutingUnavailableError(f"Valhalla returned HTTP {response.status_code}")
         if response.status_code >= 400:
             error_code = _optional_int(_json_mapping(response).get("error_code"))
             if error_code in VALHALLA_MATRIX_LOCATION_ERROR_CODES:
@@ -111,8 +99,7 @@ class ValhallaRoutingAdapter:
             if error_code in VALHALLA_NO_ROUTE_ERROR_CODES:
                 return MatrixResult(
                     costs=tuple(
-                        tuple(None for _target in request.targets)
-                        for _source in request.sources
+                        tuple(None for _target in request.targets) for _source in request.sources
                     ),
                     provider="valhalla",
                     algorithm="no_route",
@@ -121,9 +108,7 @@ class ValhallaRoutingAdapter:
                 f"Valhalla rejected the matrix request with HTTP {response.status_code}"
             )
         if response.status_code >= 300:
-            raise RoutingProviderError(
-                f"Valhalla returned unexpected HTTP {response.status_code}"
-            )
+            raise RoutingProviderError(f"Valhalla returned unexpected HTTP {response.status_code}")
 
         return _parse_matrix(
             _json_mapping(response),
@@ -173,6 +158,40 @@ def _json_mapping(response: httpx.Response) -> Mapping[str, Any]:
     return payload
 
 
+def _route_payload(
+    locations: tuple[Coordinate, ...], *, costing: str, language: str
+) -> dict[str, Any]:
+    return {
+        "locations": [
+            {
+                "lat": coordinate.latitude,
+                "lon": coordinate.longitude,
+                "type": "break",
+            }
+            for coordinate in locations
+        ],
+        "costing": costing,
+        "units": "kilometers",
+        "language": language,
+        "directions_type": "instructions",
+        "shape_format": "polyline6",
+    }
+
+
+def _raise_route_http_error(response: httpx.Response) -> None:
+    if response.status_code >= 500:
+        raise RoutingUnavailableError(f"Valhalla returned HTTP {response.status_code}")
+    if response.status_code >= 400:
+        error_code = _optional_int(_json_mapping(response).get("error_code"))
+        if error_code in VALHALLA_NO_ROUTE_ERROR_CODES:
+            raise NoRouteError("Valhalla could not find a route between the locations")
+        raise RoutingProviderError(
+            f"Valhalla rejected the route request with HTTP {response.status_code}"
+        )
+    if response.status_code >= 300:
+        raise RoutingProviderError(f"Valhalla returned unexpected HTTP {response.status_code}")
+
+
 def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
     try:
         trip = _mapping(payload["trip"], "trip")
@@ -183,27 +202,70 @@ def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
         legs = _list(trip["legs"], "trip.legs")
         if len(legs) != 1:
             raise RoutingProviderError("A base route must contain exactly one leg")
-        leg = _mapping(legs[0], "trip.legs[0]")
-        shape = leg["shape"]
-        if not isinstance(shape, str) or not shape:
-            raise RoutingProviderError("trip.legs[0].shape must be a non-empty string")
-
-        maneuvers = tuple(
-            _parse_maneuver(_mapping(value, f"trip.legs[0].maneuvers[{index}]"), index)
-            for index, value in enumerate(_list(leg["maneuvers"], "trip.legs[0].maneuvers"))
-        )
-        if not maneuvers:
-            raise RoutingProviderError("A base route must contain at least one maneuver")
+        leg = _parse_leg(_mapping(legs[0], "trip.legs[0]"), leg_index=0)
         return BaseRoute(
             distance_meters=_number(summary["length"], "trip.summary.length") * 1000,
             duration_seconds=_number(summary["time"], "trip.summary.time"),
-            encoded_polyline=shape,
-            maneuvers=maneuvers,
+            encoded_polyline=leg.encoded_polyline,
+            maneuvers=leg.maneuvers,
             provider="valhalla",
         )
     except KeyError as error:
+        raise RoutingProviderError(f"Valhalla response is missing {error.args[0]}") from error
+
+
+def _parse_waypoint_route(payload: Mapping[str, Any], *, expected_leg_count: int) -> WaypointRoute:
+    try:
+        trip = _mapping(payload["trip"], "trip")
+        status = _number(trip["status"], "trip.status")
+        if status != 0:
+            raise RoutingProviderError(f"Valhalla returned route status {status:g}")
+        summary = _mapping(trip["summary"], "trip.summary")
+        raw_legs = _list(trip["legs"], "trip.legs")
+        if len(raw_legs) != expected_leg_count:
+            raise RoutingProviderError(
+                "Valhalla waypoint route contains an unexpected number of legs"
+            )
+        legs = tuple(
+            _parse_leg(_mapping(value, f"trip.legs[{index}]"), leg_index=index)
+            for index, value in enumerate(raw_legs)
+        )
+        return WaypointRoute(
+            distance_meters=_number(summary["length"], "trip.summary.length") * 1000,
+            duration_seconds=_number(summary["time"], "trip.summary.time"),
+            legs=legs,
+            provider="valhalla",
+        )
+    except KeyError as error:
+        raise RoutingProviderError(f"Valhalla response is missing {error.args[0]}") from error
+
+
+def _parse_leg(value: Mapping[str, Any], *, leg_index: int) -> RouteLeg:
+    field = f"trip.legs[{leg_index}]"
+    try:
+        summary = _mapping(value["summary"], f"{field}.summary")
+        shape = value["shape"]
+        if not isinstance(shape, str) or not shape:
+            raise RoutingProviderError(f"{field}.shape must be a non-empty string")
+        maneuvers = tuple(
+            _parse_maneuver(
+                _mapping(maneuver, f"{field}.maneuvers[{index}]"),
+                index,
+                leg_index=leg_index,
+            )
+            for index, maneuver in enumerate(_list(value["maneuvers"], f"{field}.maneuvers"))
+        )
+        if not maneuvers:
+            raise RoutingProviderError(f"{field} must contain at least one maneuver")
+        return RouteLeg(
+            distance_meters=_number(summary["length"], f"{field}.summary.length") * 1000,
+            duration_seconds=_number(summary["time"], f"{field}.summary.time"),
+            encoded_polyline=shape,
+            maneuvers=maneuvers,
+        )
+    except KeyError as error:
         raise RoutingProviderError(
-            f"Valhalla response is missing {error.args[0]}"
+            f"Valhalla response is missing {field}.{error.args[0]}"
         ) from error
 
 
@@ -259,8 +321,8 @@ def _parse_matrix(
         ) from error
 
 
-def _parse_maneuver(value: Mapping[str, Any], index: int) -> Maneuver:
-    field = f"trip.legs[0].maneuvers[{index}]"
+def _parse_maneuver(value: Mapping[str, Any], index: int, *, leg_index: int = 0) -> Maneuver:
+    field = f"trip.legs[{leg_index}].maneuvers[{index}]"
     try:
         street_names_value = value.get("street_names", [])
         if not isinstance(street_names_value, list) or not all(
@@ -272,9 +334,7 @@ def _parse_maneuver(value: Mapping[str, Any], index: int) -> Maneuver:
             instruction=_string(value["instruction"], f"{field}.instruction"),
             distance_meters=_number(value["length"], f"{field}.length") * 1000,
             duration_seconds=_number(value["time"], f"{field}.time"),
-            begin_shape_index=_integer(
-                value["begin_shape_index"], f"{field}.begin_shape_index"
-            ),
+            begin_shape_index=_integer(value["begin_shape_index"], f"{field}.begin_shape_index"),
             end_shape_index=_integer(value["end_shape_index"], f"{field}.end_shape_index"),
             street_names=tuple(street_names_value),
             verbal_transition_alert_instruction=_optional_string(
