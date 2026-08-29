@@ -1,0 +1,75 @@
+{
+  "selected_stop": {
+    "mimit_station_id": "43690",
+    "name": "S.ZENONE OVEST",
+    "municipality": "SAN ZENONE AL LAMBRO",
+    "province": "MI",
+    "location": {
+      "latitude": 45.321004,
+      "longitude": 9.376063
+    }
+  },
+  "distance_meters": 210931.0,
+  "duration_seconds": 6839.0,
+  "legs": [
+    {
+      "kind": "origin_to_cng_station",
+      "origin": {"latitude": 45.4642, "longitude": 9.19},
+      "destination": {"latitude": 45.321004, "longitude": 9.376063},
+      "distance_meters": 23106.0,
+      "duration_seconds": 1151.0,
+      "geometry": {
+        "format": "polyline6",
+        "encoded_polyline": "_izlhA~rlgdF_{geC~ywl@"
+      },
+      "maneuvers": [
+        {
+          "type": 1,
+          "instruction": "Parti verso sud.",
+          "distance_meters": 23106.0,
+          "duration_seconds": 1151.0,
+          "begin_shape_index": 0,
+          "end_shape_index": 1,
+          "street_names": ["A1"],
+          "verbal_transition_alert_instruction": null,
+          "verbal_pre_transition_instruction": null,
+          "verbal_post_transition_instruction": null,
+          "bearing_before": null,
+          "bearing_after": 180,
+          "travel_mode": "drive",
+          "travel_type": "car"
+        }
+      ]
+    },
+    {
+      "kind": "cng_station_to_destination",
+      "origin": {"latitude": 45.321004, "longitude": 9.376063},
+      "destination": {"latitude": 44.4949, "longitude": 11.3426},
+      "distance_meters": 187824.0,
+      "duration_seconds": 5688.0,
+      "geometry": {
+        "format": "polyline6",
+        "encoded_polyline": "_kwzCn`{nI_{geC~ywl@"
+      },
+      "maneuvers": [
+        {
+          "type": 1,
+          "instruction": "Riparti dalla stazione.",
+          "distance_meters": 187824.0,
+          "duration_seconds": 5688.0,
+          "begin_shape_index": 0,
+          "end_shape_index": 1,
+          "street_names": ["A1"],
+          "verbal_transition_alert_instruction": null,
+          "verbal_pre_transition_instruction": null,
+          "verbal_post_transition_instruction": null,
+          "bearing_before": null,
+          "bearing_after": 120,
+          "travel_mode": "drive",
+          "travel_type": "car"
+        }
+      ]
+    }
+  ],
+  "provider": "valhalla"
+}

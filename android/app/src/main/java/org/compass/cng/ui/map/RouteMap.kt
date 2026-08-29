@@ -13,6 +13,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RankedCngStation
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
@@ -32,6 +33,7 @@ import org.maplibre.android.style.layers.PropertyFactory.lineJoin
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
@@ -40,6 +42,8 @@ fun RouteMap(
     route: RoutePreview,
     mapStyleUrl: String,
     modifier: Modifier = Modifier,
+    candidateStations: List<RankedCngStation> = emptyList(),
+    cngStop: org.compass.cng.domain.model.Coordinate? = null,
 ) {
     val mapView = rememberMapViewWithLifecycle()
 
@@ -48,7 +52,7 @@ fun RouteMap(
         modifier = modifier,
     )
 
-    LaunchedEffect(mapView, route, mapStyleUrl) {
+    LaunchedEffect(mapView, route, mapStyleUrl, candidateStations, cngStop) {
         mapView.getMapAsync { map ->
             map.setStyle(Style.Builder().fromUri(mapStyleUrl)) { style ->
                 val routePoints = route.geometry.map {
@@ -82,11 +86,51 @@ fun RouteMap(
                     coordinate = route.destination,
                     color = Color.rgb(183, 48, 36),
                 )
+                if (candidateStations.isNotEmpty()) {
+                    val candidateFeatures = candidateStations.map { station ->
+                        Feature.fromGeometry(
+                            Point.fromLngLat(
+                                station.location.longitude,
+                                station.location.latitude,
+                            ),
+                        ).also { feature ->
+                            feature.addStringProperty("mimit_station_id", station.mimitStationId)
+                        }
+                    }
+                    style.addSource(
+                        GeoJsonSource(
+                            CNG_CANDIDATES_SOURCE_ID,
+                            FeatureCollection.fromFeatures(candidateFeatures),
+                        ),
+                    )
+                    style.addLayer(
+                        CircleLayer(CNG_CANDIDATES_LAYER_ID, CNG_CANDIDATES_SOURCE_ID).withProperties(
+                            circleRadius(5.5f),
+                            circleColor(Color.rgb(0, 132, 122)),
+                            circleStrokeColor(Color.WHITE),
+                            circleStrokeWidth(1.5f),
+                        ),
+                    )
+                }
+                cngStop?.let { stop ->
+                    addEndpointLayer(
+                        style = style,
+                        idPrefix = "cng-stop",
+                        coordinate = stop,
+                        color = Color.rgb(0, 132, 122),
+                    )
+                }
 
                 val boundsBuilder = LatLngBounds.Builder()
                     .include(LatLng(route.origin.latitude, route.origin.longitude))
                     .include(LatLng(route.destination.latitude, route.destination.longitude))
                 route.geometry.forEach { boundsBuilder.include(LatLng(it.latitude, it.longitude)) }
+                candidateStations.forEach { station ->
+                    boundsBuilder.include(
+                        LatLng(station.location.latitude, station.location.longitude),
+                    )
+                }
+                cngStop?.let { boundsBuilder.include(LatLng(it.latitude, it.longitude)) }
                 map.animateCamera(
                     CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 72),
                 )
@@ -149,3 +193,5 @@ private fun rememberMapViewWithLifecycle(): MapView {
 
 private const val ROUTE_SOURCE_ID = "route-source"
 private const val ROUTE_LAYER_ID = "route-layer"
+private const val CNG_CANDIDATES_SOURCE_ID = "cng-candidates-source"
+private const val CNG_CANDIDATES_LAYER_ID = "cng-candidates-layer"

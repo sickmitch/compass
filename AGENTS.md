@@ -604,7 +604,7 @@ Before ending an implementation iteration, report:
 1. **Changed:** concise list of files/components changed.
 2. **Why:** important design choices.
 3. **Validated locally:** commands/tests actually run and results.
-4. **Live test handoff:** exact server commands for the human.
+4. **Live test handoff:** script to be executed, guide if preparation needed.
 5. **Expected result:** concrete outputs/invariants.
 6. **If it fails:** targeted diagnostic commands.
 7. **Next step:** only the next smallest step, not an unrequested implementation.

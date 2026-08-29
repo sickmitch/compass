@@ -1,14 +1,16 @@
 # Android client development
 
-## Phase 8 scope
+## Android scope
 
 The Android app is a native Kotlin/Jetpack Compose client in `android/`. It calls the accepted
 `POST /api/v1/routes` backend operation, decodes its polyline6 geometry and renders a fixed
 Milan-to-Bologna route preview with MapLibre. The screen also shows distance, duration, provider and
 the backend maneuver list.
 
-Phase 8 intentionally has no destination editor, CNG candidate workflow, route-stop selection,
-navigation session, background location or rerouting. Those are later gated phases.
+Phase 9 retains that fixed endpoint pair and adds the manual `Aggiungi tappa → Metano` workflow. It
+collects maximum detour and effective range, displays arrival-aware ranked station markers/cards,
+and recalculates the route through a selected official MIMIT station. It still has no destination
+editor, predictive fuel model, navigation session, background location or rerouting.
 
 ## Required toolchain
 
@@ -79,7 +81,7 @@ Debug HTTP in cleartext is limited to `127.0.0.1` and `10.0.2.2`. Use HTTPS for 
 hostname or IP. A physical-device gate can retain the backend's safe loopback-only bind by using
 `adb reverse`, which the checked-in runner configures automatically.
 
-## Physical-device live gate
+## Phase 9 physical-device live gate
 
 The runner must execute on the machine that has the repository, Android SDK, one authorized Android
 device and access to the backend. The simplest setup is a device attached to the test server. If the
@@ -97,7 +99,7 @@ cd /path/to/compass
 export JAVA_HOME=/home/mike/toolchains/jdk17
 export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
 export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
-bash scripts/run-phase8-live.sh
+bash scripts/run-phase9-live.sh
 ```
 
 When multiple devices are connected, select one before starting:
@@ -106,19 +108,25 @@ When multiple devices are connected, select one before starting:
 export COMPASS_ADB_SERIAL=DEVICE_SERIAL
 ```
 
-The script performs six separate gates:
+The script performs eight separate gates:
 
 1. backend readiness;
-2. a real base-route API preflight;
-3. device authorization and `adb reverse` when using loopback;
-4. unit tests, lint and APK assembly with the selected API URL;
-5. APK installation;
-6. application launch with Android's `Status: ok` invariant.
+2. a real full-Italy ranked-candidate request with an offset-aware departure instant;
+3. top-ranked official-ID selection and independent two-leg route validation;
+4. device authorization and `adb reverse` when using loopback;
+5. unit tests, lint and APK assembly with the selected API URL;
+6. APK installation;
+7. application launch with Android's `Status: ok` invariant;
+8. an immediate fatal-exception check.
 
-Automated completion is not the live acceptance result. On the device confirm all four items printed
-by the runner: rendered route and endpoint markers, non-zero distance/duration with Valhalla,
-scrollable maneuver list, and no crash after rotate/background/resume. Return the complete script
-output and one screenshot.
+Automated completion is not by itself a live acceptance result. On the device follow the five short
+items printed by the runner: open the Metano form, run the ranked search, inspect the required card
+fields, select a station and exercise change/remove plus lifecycle behavior. Return the complete
+script output and screenshots of both the candidate list and selected-stop route. The initial gate
+was accepted on 2026-08-29; this procedure remains the reproducible regression check.
+
+The accepted historical Phase 8 preview-only gate remains reproducible with
+`bash scripts/run-phase8-live.sh`; new acceptance runs should use the Phase 9 runner.
 
 ## Diagnostics
 
@@ -133,6 +141,21 @@ If the app reports that Compass is unreachable, confirm the host API and reverse
 ```bash
 curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
 "$ANDROID_SDK_ROOT/platform-tools/adb" reverse --list
+```
+
+If the API preflight fails, inspect the unambiguous saved artifacts before rerunning anything:
+
+```bash
+python3 -m json.tool /tmp/compass-phase9-ranked-request.json
+python3 -m json.tool /tmp/compass-phase9-ranked-response.json
+python3 -m json.tool /tmp/compass-phase9-selected-request.json
+python3 -m json.tool /tmp/compass-phase9-selected-response.json
+```
+
+Return the failing artifact plus bounded service logs:
+
+```bash
+docker compose --profile routing logs --no-color --tail=200 api valhalla db
 ```
 
 If install or launch fails, collect package/activity state and recent logs:

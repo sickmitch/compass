@@ -284,6 +284,42 @@ backend, builds, installs and launches the app but leaves visual rendering as an
 - Physical-device rendering and lifecycle behavior require operator evidence before Phase 8 is
   accepted.
 
+## Phase 9 Android manual CNG-stop workflow
+
+Phase 9 extends the same data/domain/UI boundary without moving route policy to the device:
+
+```text
+Base preview ─> Add stop ─> Metano + detour/range ─> ranked-candidates
+                                                        │
+                                                        ├─> route + station markers
+                                                        └─> ranked cards
+                                                               │ MIMIT ID
+                                                               v
+                                                routes/with-cng-stop
+                                                               │
+                                                               └─> two legs + CNG waypoint
+```
+
+One lifecycle-preserved planner ViewModel owns the explicit preview, configuration, candidate and
+selected-route stages. The device supplies an offset-aware departure instant but does not evaluate
+OSM hours, calculate detours or rescore stations. Complete strict DTOs are translated into domain
+models before Compose sees them. Candidate cards expose road distance, detour, ETA, opening state,
+hours, phone, current CNG price/freshness and score components; missing price and unknown opening
+state remain explicit.
+
+MapLibre receives only decoded domain geometry and coordinates. Candidate markers remain a visual
+index to the ranked list. A selected station is routed by official MIMIT ID and produces one
+combined map line while retaining the two maneuver legs and their station boundary.
+
+## Deliberate Phase 9 limits
+
+- Milan and Bologna remain the deterministic endpoint pair; endpoint search/editing is not bundled
+  into the CNG workflow.
+- Manual Add Stop does not estimate remaining tank state or proactively suggest a reachable stop.
+- `traffic=not_configured` remains visible; graph-speed duration is not presented as live traffic.
+- No location permission, navigation session, voice instruction, background tracking or rerouting
+  service is introduced.
+
 ## Runtime
 
 The default Compose graph contains:

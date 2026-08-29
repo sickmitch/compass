@@ -4,7 +4,8 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–8** server and Android client foundation:
+This repository implements the accepted **Phases 0–9** foundation, including the Android Add CNG
+Stop workflow validated against the live full-Italy stack on a physical device:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -40,9 +41,15 @@ This repository implements the accepted **Phases 0–8** server and Android clie
 - a strict Phase 7 API client, validated polyline6 decoder and lifecycle-aware route state;
 - a MapLibre route preview with endpoint layers, route summary and backend maneuvers;
 - pinned Android/Gradle dependencies, JVM tests, lint/APK validation and an executable device gate.
+- an Android `Aggiungi tappa → Metano` form with effective-range and maximum-detour policy inputs;
+- arrival-aware ranked CNG markers/cards with road distance, ETA, hours, phone, price freshness and
+  explainable score components;
+- selected-stop Valhalla route recomputation by official MIMIT ID with a visible CNG waypoint and
+  two preserved maneuver legs;
+- strict mobile workflow state, contract tests and an executable Phase 9 API/device gate.
 
-It intentionally does **not** yet ingest traffic, implement predictive refuelling, or provide the
-Android CNG Add-Stop workflow and navigation session. Those remain later gated phases.
+It intentionally does **not** yet ingest traffic, implement predictive refuelling, edit route
+endpoints, or provide an active navigation session. Those remain later gated phases.
 
 ## Quick local validation
 
@@ -177,8 +184,8 @@ complete gate without requiring inline JSON or chained shell commands.
 
 The native app in `android/` consumes `POST /api/v1/routes` and displays the fixed accepted
 Milan-to-Bologna preview: MapLibre road geometry and endpoints, distance, duration, provider and a
-scrollable maneuver list. HTTP DTOs, domain route models and Compose state are separate; the Phase 9
-CNG workflow is not implemented early.
+scrollable maneuver list. HTTP DTOs, domain route models and Compose state are separate. Phase 8
+deliberately stopped at that boundary; Phase 9 extends it with the CNG workflow described below.
 
 Repository-local Android validation uses the checked-in Gradle wrapper:
 
@@ -194,6 +201,29 @@ The reusable physical-device procedure is documented in
 [Android client development](docs/android.md) and automated by `scripts/run-phase8-live.sh`.
 The completed operator-run gate and device evidence are recorded in the
 [Phase 8 acceptance record](docs/phases/phase-8-acceptance.md).
+
+## Phase 9 Android Add CNG Stop
+
+The Android app now connects the accepted ranking and selected-stop APIs into the manual core flow:
+
+1. open `Aggiungi tappa` from the Milan-to-Bologna preview;
+2. choose the Metano form and provide maximum detour plus effective CNG range;
+3. inspect ranked route markers and station cards with detour, road distance, ETA, opening state,
+   hours, phone, price freshness and score explanation;
+4. select a station by official MIMIT ID;
+5. inspect the recalculated route, CNG waypoint and two maneuver sections.
+
+Repository-local tests, lint and APK assembly passed, followed by the accepted full-Italy
+API/physical-device gate. The same operator-run gate remains reproducible with one command:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+bash scripts/run-phase9-live.sh
+```
+
+See the [Phase 9 acceptance record](docs/phases/phase-9-acceptance.md) for the exact local and live
+evidence plus the reusable device checklist.
 
 ## Repository layout
 
@@ -236,7 +266,10 @@ checked-in live-gate runner.
 Phase 8 passed repository-local JVM tests, Android lint and debug APK assembly. Its executable
 handoff then preflighted the real backend, built and installed the APK, launched it successfully on
 the operator's device, and produced the accepted MapLibre Milan-to-Bologna route preview with
-endpoint markers, Valhalla summary and maneuvers. Phase 9 has not started.
+endpoint markers, Valhalla summary and maneuvers.
+Phase 9 passed 17 repository-local JVM tests, Android lint and debug APK assembly. The operator then
+validated the real full-Italy API/device flow: 16 eligible ranked stations, explainable station
+cards and a selected ARDA OVEST route with an explicit CNG waypoint and two maneuver sections.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;

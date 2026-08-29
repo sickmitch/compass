@@ -1,0 +1,162 @@
+{
+  "stage": "ranking",
+  "departure_at": "2026-08-30T10:00:00+02:00",
+  "maximum_detour_minutes": 10.0,
+  "base_route": {
+    "distance_meters": 210925.0,
+    "duration_seconds": 6773.406,
+    "geometry": {
+      "format": "polyline6",
+      "encoded_polyline": "_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"
+    },
+    "maneuvers": [
+      {
+        "type": 1,
+        "instruction": "Parti verso sud.",
+        "distance_meters": 100.0,
+        "duration_seconds": 18.0,
+        "begin_shape_index": 0,
+        "end_shape_index": 2,
+        "street_names": ["Via Roma"],
+        "verbal_transition_alert_instruction": null,
+        "verbal_pre_transition_instruction": null,
+        "verbal_post_transition_instruction": null,
+        "bearing_before": null,
+        "bearing_after": 181,
+        "travel_mode": "drive",
+        "travel_type": "car"
+      }
+    ],
+    "provider": "valhalla"
+  },
+  "corridor": {
+    "effective_cng_range_km": 300.0,
+    "range_fraction": 0.2,
+    "uncapped_radius_km": 60.0,
+    "radius_km": 50.0,
+    "cap_applied": "maximum"
+  },
+  "spatial_pruning": {
+    "active_station_count": 1512,
+    "active_station_with_location_count": 1505,
+    "excluded_missing_location_count": 7,
+    "corridor_candidate_count": 325,
+    "returned_candidate_count": 200,
+    "pruned_with_location_count": 1180,
+    "reduction_ratio": 0.784,
+    "candidate_limit_applied": true,
+    "routing_calls": 1
+  },
+  "cost_basis": {
+    "provider": "valhalla",
+    "traffic_state": "not_configured",
+    "traffic_aware": false,
+    "duration_model": "valhalla_graph_speeds",
+    "distance_model": "road_network"
+  },
+  "network_evaluation": {
+    "spatial_candidate_count": 325,
+    "matrix_candidate_count": 200,
+    "reachable_candidate_count": 183,
+    "unreachable_candidate_count": 17,
+    "eligible_candidate_count": 20,
+    "excluded_by_detour_count": 163,
+    "matrix_batch_size": 40,
+    "matrix_calls": 10,
+    "matrix_fallback_splits": 0,
+    "matrix_location_failures": 0,
+    "base_route_calls": 1,
+    "per_candidate_route_calls": 0
+  },
+  "ranking_policy": {
+    "detour_weight": 0.5,
+    "opening_weight": 0.25,
+    "price_weight": 0.15,
+    "price_freshness_weight": 0.1,
+    "unknown_opening_score": 0.25,
+    "closed_score_multiplier": 0.25,
+    "price_freshness_hours": 168.0,
+    "opening_hours_timezone": "Europe/Rome",
+    "opening_hours_country": "IT",
+    "price_selection": "lowest_current_cng_unit_price",
+    "closed_candidate_policy": "exclude"
+  },
+  "ranking_evaluation": {
+    "detour_eligible_candidate_count": 1,
+    "opening_open_count": 1,
+    "opening_closed_count": 0,
+    "opening_unknown_count": 0,
+    "opening_valid_count": 1,
+    "opening_missing_count": 0,
+    "opening_invalid_count": 0,
+    "excluded_closed_count": 0,
+    "price_available_count": 1,
+    "price_missing_count": 0,
+    "ranked_candidate_count": 1,
+    "enrichment_queries": 1
+  },
+  "candidates": [
+    {
+      "station_id": 716,
+      "mimit_station_id": "43690",
+      "name": "S.ZENONE OVEST",
+      "municipality": "SAN ZENONE AL LAMBRO",
+      "province": "MI",
+      "latitude": 45.321004,
+      "longitude": 9.376063,
+      "straight_line_distance_to_route_meters": 22.89,
+      "route_fraction": 0.1035,
+      "distance_from_previous_waypoint_meters": 23106.0,
+      "duration_from_previous_waypoint_seconds": 1151.0,
+      "station_to_destination_distance_meters": 187825.0,
+      "station_to_destination_duration_seconds": 5687.0,
+      "route_via_station_distance_meters": 210931.0,
+      "route_via_station_duration_seconds": 6838.0,
+      "extra_distance_meters": 6.0,
+      "detour_duration_seconds": 64.594,
+      "detour_minutes": 1.0766,
+      "station_eta": "2026-08-30T10:19:11+02:00",
+      "destination_eta": "2026-08-30T11:53:58+02:00",
+      "opening": {
+        "state": "open",
+        "validation": "valid",
+        "opening_hours": "24/7",
+        "source": "osm",
+        "source_confidence": 0.95,
+        "evaluated_at": "2026-08-30T10:19:11+02:00",
+        "timezone": "Europe/Rome",
+        "next_change_at": null,
+        "comment": null,
+        "warnings": []
+      },
+      "phone": "+39 02 1234567",
+      "brand": "Enilive",
+      "operator": null,
+      "osm_match_confidence": 0.95,
+      "price": {
+        "unit_price": 1.599,
+        "currency": "EUR",
+        "unit": "kg",
+        "service_mode": "served",
+        "observed_at": "2026-08-29T04:00:00Z",
+        "ingested_at": "2026-08-29T06:00:00Z",
+        "source_name": "mimit",
+        "age_seconds": 100000.0,
+        "freshness_state": "fresh"
+      },
+      "ranking": {
+        "rank": 1,
+        "total_score": 0.91,
+        "detour_score": 0.89,
+        "opening_score": 1.0,
+        "price_score": 0.8,
+        "price_freshness_score": 0.9,
+        "detour_contribution": 0.445,
+        "opening_contribution": 0.25,
+        "price_contribution": 0.12,
+        "price_freshness_contribution": 0.09,
+        "availability_multiplier": 1.0
+      }
+    }
+  ]
+}
