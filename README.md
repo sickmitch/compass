@@ -4,8 +4,8 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–9** foundation, including the Android Add CNG
-Stop workflow validated against the live full-Italy stack on a physical device:
+This repository implements the accepted **Phases 0–10** foundation, including the predictive CNG
+reachability increment:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -47,9 +47,15 @@ Stop workflow validated against the live full-Italy stack on a physical device:
 - selected-stop Valhalla route recomputation by official MIMIT ID with a visible CNG waypoint and
   two preserved maneuver legs;
 - strict mobile workflow state, contract tests and an executable Phase 9 API/device gate.
+- a strict predictive API using caller-estimated remaining range and an explicit safety reserve;
+- complete road-network refuelling-chain search with explicit suggestion/no-suggestion states, a
+  full-refill assumption and an optimized destination-reachable fast path;
+- an independently range-validated multi-waypoint route through ordered official MIMIT IDs;
+- an Android predictive form whose remaining-range input starts empty, ordered stop/leg reserve
+  margins and an executable Phase 10 API/device gate.
 
-It intentionally does **not** yet ingest traffic, implement predictive refuelling, edit route
-endpoints, or provide an active navigation session. Those remain later gated phases.
+It intentionally does **not** yet ingest traffic, read vehicle telemetry, edit route endpoints, or
+provide an active navigation session. Those remain later gated phases.
 
 ## Quick local validation
 
@@ -225,6 +231,25 @@ bash scripts/run-phase9-live.sh
 See the [Phase 9 acceptance record](docs/phases/phase-9-acceptance.md) for the exact local and live
 evidence plus the reusable device checklist.
 
+## Phase 10 predictive CNG reachability
+
+Phase 10 adds a separate `Valuta autonomia CNG` flow. The driver supplies remaining range, reserve,
+effective full range and maximum detour; no tank value is invented or presented as telemetry. The
+backend returns one of `not_needed`, `suggested`, `no_reachable_station`, `no_eligible_station` or
+`no_complete_itinerary`. A suggestion is a complete ordered
+origin→refuelling-stop(s)→destination plan; returning only a reachable first stop is explicitly not
+success. The first road leg preserves reserve using the supplied remaining range, and every later
+leg preserves reserve assuming a full refill to the effective range.
+
+If the destination is already reachable with reserve, the backend uses one base-route request and
+skips station queries, matrices and enrichment. Android exposes the assumptions and range arithmetic,
+shows remaining range/reserve margin for every planned leg, and sends the ordered official IDs to a
+multi-waypoint route endpoint that revalidates Valhalla's actual leg distances before display.
+
+Repository-local validation and the operator gate are documented in the
+[Phase 10 acceptance record](docs/phases/phase-10-acceptance.md). The accepted regression gate is
+reproducible with `bash scripts/run-phase10-live.sh` after the synchronized server image is rebuilt.
+
 ## Repository layout
 
 ```text
@@ -236,6 +261,7 @@ src/compass/routing/   provider boundary and Valhalla HTTP adapter
 src/compass/candidates/ corridor policy, geometry decoding and PostGIS pruning
 src/compass/detours/  batched network-cost evaluation and deterministic detour math
 src/compass/ranking/  arrival-time opening evaluation, price freshness and explainable ranking
+src/compass/predictive/ reserve-aware road reachability and predictive suggestion states
 src/compass/stations/ public station detail reads and provenance
 src/compass/freshness/ ingestion/reconciliation freshness policy
 android/               native Kotlin/Compose/MapLibre device client
@@ -248,7 +274,7 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phases 2–8 have passed repository-local checks and their documented operator-run live or device
+Phases 2–10 have passed repository-local checks and their documented operator-run live or device
 tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
 representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
@@ -270,6 +296,10 @@ endpoint markers, Valhalla summary and maneuvers.
 Phase 9 passed 17 repository-local JVM tests, Android lint and debug APK assembly. The operator then
 validated the real full-Italy API/device flow: 16 eligible ranked stations, explainable station
 cards and a selected ARDA OVEST route with an explicit CNG waypoint and two maneuver sections.
+Phase 10 passed the corrected full-Italy/device gate. The mandatory 65 km remaining, 30 km reserve
+and 100 km full-range regression now produces a complete three-stop refuelling chain, validates the
+actual multi-waypoint route with reserve preserved on every leg, and renders on device without
+system-bar overlap.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;

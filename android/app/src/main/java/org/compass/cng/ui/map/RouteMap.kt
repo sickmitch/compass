@@ -14,6 +14,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RankedCngStation
+import org.compass.cng.domain.model.Coordinate
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
@@ -43,7 +44,7 @@ fun RouteMap(
     mapStyleUrl: String,
     modifier: Modifier = Modifier,
     candidateStations: List<RankedCngStation> = emptyList(),
-    cngStop: org.compass.cng.domain.model.Coordinate? = null,
+    cngStops: List<Coordinate> = emptyList(),
 ) {
     val mapView = rememberMapViewWithLifecycle()
 
@@ -52,7 +53,7 @@ fun RouteMap(
         modifier = modifier,
     )
 
-    LaunchedEffect(mapView, route, mapStyleUrl, candidateStations, cngStop) {
+    LaunchedEffect(mapView, route, mapStyleUrl, candidateStations, cngStops) {
         mapView.getMapAsync { map ->
             map.setStyle(Style.Builder().fromUri(mapStyleUrl)) { style ->
                 val routePoints = route.geometry.map {
@@ -112,10 +113,10 @@ fun RouteMap(
                         ),
                     )
                 }
-                cngStop?.let { stop ->
+                cngStops.forEachIndexed { index, stop ->
                     addEndpointLayer(
                         style = style,
-                        idPrefix = "cng-stop",
+                        idPrefix = "cng-stop-$index",
                         coordinate = stop,
                         color = Color.rgb(0, 132, 122),
                     )
@@ -130,7 +131,9 @@ fun RouteMap(
                         LatLng(station.location.latitude, station.location.longitude),
                     )
                 }
-                cngStop?.let { boundsBuilder.include(LatLng(it.latitude, it.longitude)) }
+                cngStops.forEach { stop ->
+                    boundsBuilder.include(LatLng(stop.latitude, stop.longitude))
+                }
                 map.animateCamera(
                     CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 72),
                 )
@@ -142,7 +145,7 @@ fun RouteMap(
 private fun addEndpointLayer(
     style: Style,
     idPrefix: String,
-    coordinate: org.compass.cng.domain.model.Coordinate,
+    coordinate: Coordinate,
     color: Int,
 ) {
     val sourceId = "$idPrefix-source"

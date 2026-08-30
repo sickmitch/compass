@@ -10,6 +10,7 @@ import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.CngPrice
+import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
@@ -18,11 +19,19 @@ import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.OpeningValidation
 import org.compass.cng.domain.model.PriceFreshness
+import org.compass.cng.domain.model.PredictiveCngStation
+import org.compass.cng.domain.model.PredictiveCngItinerary
+import org.compass.cng.domain.model.PredictiveDestinationLeg
+import org.compass.cng.domain.model.PredictiveItineraryStop
+import org.compass.cng.domain.model.PredictiveCngSuggestion
+import org.compass.cng.domain.model.PredictiveRangeBasis
+import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RankingBreakdown
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
+import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.SelectedCngStop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -79,6 +88,137 @@ class RoutePlannerViewModelTest {
             "Inserisci un tempo massimo di deviazione tra 0 e 240 minuti.",
             viewModel.uiState.value.message,
         )
+    }
+
+    @Test
+    fun predictiveConfigurationRequiresCallerEstimatedRemainingRange() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository)
+
+        viewModel.openPredictiveRange()
+
+        assertEquals(PlannerStage.CONFIGURE_PREDICTIVE, viewModel.uiState.value.stage)
+        assertEquals("", viewModel.uiState.value.estimatedRemainingRangeKmInput)
+        assertEquals("30", viewModel.uiState.value.reserveRangeKmInput)
+
+        viewModel.evaluatePredictiveRange()
+
+        assertEquals(0, repository.predictiveCalls)
+        assertEquals(
+            "Inserisci l'autonomia CNG residua stimata, maggiore di 0 km.",
+            viewModel.uiState.value.message,
+        )
+    }
+
+    @Test
+    fun exposesOnlyReachablePredictiveSuggestionsAndRangeBasis() = runTest {
+        val suggestion = samplePredictiveSuggestion(PredictiveSuggestionState.SUGGESTED)
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
+            predictiveResult = Result.success(suggestion),
+        )
+        val clock = Clock.fixed(Instant.parse("2026-08-30T08:00:00Z"), ZoneOffset.ofHours(2))
+        val viewModel = RoutePlannerViewModel(repository, clock = clock)
+        viewModel.openPredictiveRange()
+        viewModel.updateEffectiveRange("300")
+        viewModel.updateEstimatedRemainingRange("120,5")
+        viewModel.updateReserveRange("30")
+        viewModel.updateMaximumDetour("10")
+
+        viewModel.evaluatePredictiveRange()
+
+        assertEquals(1, repository.predictiveCalls)
+        assertEquals(120.5, repository.lastRemainingRangeKm, 0.0)
+        assertEquals(30.0, repository.lastReserveRangeKm, 0.0)
+        assertEquals("2026-08-30T10:00+02:00", repository.lastDepartureAt.toString())
+        assertEquals(PlannerStage.PREDICTIVE_ITINERARY, viewModel.uiState.value.stage)
+        assertEquals(CngWorkflowMode.PREDICTIVE, viewModel.uiState.value.workflowMode)
+        assertSame(suggestion, viewModel.uiState.value.predictiveSuggestion)
+        assertNull(viewModel.uiState.value.rankedStations)
+        assertEquals("43690", viewModel.uiState.value.predictiveSuggestion?.itinerary?.stops?.single()?.station?.mimitStationId)
+
+        viewModel.navigateBack()
+        assertEquals(PlannerStage.CONFIGURE_PREDICTIVE, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun calculatesCompleteThreeStopRouteForTheSixtyFiveKilometerEdgeCase() = runTest {
+        val suggestion = sampleMultiStopPredictiveSuggestion()
+        val routed = sampleMultiStopSelectedRoute()
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
+            predictiveResult = Result.success(suggestion),
+            selectedItineraryResult = Result.success(routed),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openPredictiveRange()
+        viewModel.updateEffectiveRange("100")
+        viewModel.updateEstimatedRemainingRange("65")
+        viewModel.updateReserveRange("30")
+
+        viewModel.evaluatePredictiveRange()
+        assertEquals(PlannerStage.PREDICTIVE_ITINERARY, viewModel.uiState.value.stage)
+        assertEquals(
+            listOf("43690", "3473", "3618"),
+            viewModel.uiState.value.predictiveSuggestion
+                ?.itinerary
+                ?.stops
+                ?.map { it.station.mimitStationId },
+        )
+
+        viewModel.acceptPredictiveItinerary()
+
+        assertEquals(listOf("43690", "3473", "3618"), repository.lastItineraryStationIds)
+        assertEquals(100.0, repository.lastItineraryEffectiveRangeKm, 0.0)
+        assertEquals(65.0, repository.lastRemainingRangeKm, 0.0)
+        assertEquals(30.0, repository.lastReserveRangeKm, 0.0)
+        assertEquals(PlannerStage.SELECTED_ROUTE, viewModel.uiState.value.stage)
+        assertSame(routed, viewModel.uiState.value.selectedItineraryRoute)
+        assertNull(viewModel.uiState.value.selectedRoute)
+
+        viewModel.navigateBack()
+        assertEquals(PlannerStage.PREDICTIVE_ITINERARY, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun destinationReachableProducesExplicitNoSuggestionStatus() = runTest {
+        val suggestion = samplePredictiveSuggestion(PredictiveSuggestionState.NOT_NEEDED)
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(
+                baseResult = Result.success(sampleRoute()),
+                predictiveResult = Result.success(suggestion),
+            ),
+        )
+        viewModel.openPredictiveRange()
+        viewModel.updateEstimatedRemainingRange("300")
+
+        viewModel.evaluatePredictiveRange()
+
+        assertEquals(PlannerStage.PREDICTIVE_STATUS, viewModel.uiState.value.stage)
+        assertEquals(PredictiveSuggestionState.NOT_NEEDED, viewModel.uiState.value.predictiveSuggestion?.state)
+        assertNull(viewModel.uiState.value.rankedStations)
+    }
+
+    @Test
+    fun noReachableStationProducesSafetyStatusInsteadOfCandidates() = runTest {
+        val suggestion = samplePredictiveSuggestion(PredictiveSuggestionState.NO_REACHABLE_STATION)
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(
+                baseResult = Result.success(sampleRoute()),
+                predictiveResult = Result.success(suggestion),
+            ),
+        )
+        viewModel.openPredictiveRange()
+        viewModel.updateEstimatedRemainingRange("40")
+
+        viewModel.evaluatePredictiveRange()
+
+        assertEquals(PlannerStage.PREDICTIVE_STATUS, viewModel.uiState.value.stage)
+        assertEquals(
+            PredictiveSuggestionState.NO_REACHABLE_STATION,
+            viewModel.uiState.value.predictiveSuggestion?.state,
+        )
+        assertNull(viewModel.uiState.value.rankedStations)
     }
 
     @Test
@@ -177,12 +317,23 @@ class RoutePlannerViewModelTest {
         private val selectedRouteResult: Result<RouteWithCngStop> = Result.failure(
             AssertionError("routeWithCngStop was not expected"),
         ),
+        private val predictiveResult: Result<PredictiveCngSuggestion> = Result.failure(
+            AssertionError("predictiveCngStations was not expected"),
+        ),
+        private val selectedItineraryResult: Result<RouteWithCngItinerary> = Result.failure(
+            AssertionError("routeWithCngItinerary was not expected"),
+        ),
     ) : RoutingRepository {
         var candidateCalls = 0
+        var predictiveCalls = 0
         var lastRangeKm = 0.0
+        var lastRemainingRangeKm = 0.0
+        var lastReserveRangeKm = 0.0
         var lastDetourMinutes = 0.0
         lateinit var lastDepartureAt: OffsetDateTime
         var lastSelectedStationId: String? = null
+        var lastItineraryStationIds: List<String>? = null
+        var lastItineraryEffectiveRangeKm = 0.0
 
         override suspend fun previewRoute(
             origin: Coordinate,
@@ -210,6 +361,39 @@ class RoutePlannerViewModelTest {
         ): RouteWithCngStop {
             lastSelectedStationId = mimitStationId
             return selectedRouteResult.getOrThrow()
+        }
+
+        override suspend fun predictiveCngStations(
+            origin: Coordinate,
+            destination: Coordinate,
+            effectiveCngRangeKm: Double,
+            estimatedRemainingCngRangeKm: Double,
+            reserveCngRangeKm: Double,
+            maximumDetourMinutes: Double,
+            departureAt: OffsetDateTime,
+        ): PredictiveCngSuggestion {
+            predictiveCalls += 1
+            lastRangeKm = effectiveCngRangeKm
+            lastRemainingRangeKm = estimatedRemainingCngRangeKm
+            lastReserveRangeKm = reserveCngRangeKm
+            lastDetourMinutes = maximumDetourMinutes
+            lastDepartureAt = departureAt
+            return predictiveResult.getOrThrow()
+        }
+
+        override suspend fun routeWithCngItinerary(
+            origin: Coordinate,
+            destination: Coordinate,
+            mimitStationIds: List<String>,
+            effectiveCngRangeKm: Double,
+            estimatedRemainingCngRangeKm: Double,
+            reserveCngRangeKm: Double,
+        ): RouteWithCngItinerary {
+            lastItineraryStationIds = mimitStationIds
+            lastItineraryEffectiveRangeKm = effectiveCngRangeKm
+            lastRemainingRangeKm = estimatedRemainingCngRangeKm
+            lastReserveRangeKm = reserveCngRangeKm
+            return selectedItineraryResult.getOrThrow()
         }
     }
 
@@ -319,6 +503,238 @@ class RoutePlannerViewModelTest {
                 ),
             ),
             provider = "valhalla",
+        )
+    }
+
+    private fun samplePredictiveSuggestion(
+        state: PredictiveSuggestionState,
+    ): PredictiveCngSuggestion {
+        val isNotNeeded = state == PredictiveSuggestionState.NOT_NEEDED
+        val ranked = sampleRankedStations()
+        val candidates = if (state == PredictiveSuggestionState.SUGGESTED) {
+            listOf(
+                PredictiveCngStation(
+                    station = ranked.candidates.single(),
+                    estimatedRemainingRangeAtArrivalKm = 96.9,
+                    reserveMarginAtArrivalKm = 66.9,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+        val itinerary = if (state == PredictiveSuggestionState.SUGGESTED) {
+            PredictiveCngItinerary(
+                stops = listOf(
+                    samplePredictiveStop(
+                        sequence = 1,
+                        station = SelectedCngStop(
+                            mimitStationId = "43690",
+                            name = "S.ZENONE OVEST",
+                            municipality = "SAN ZENONE AL LAMBRO",
+                            province = "MI",
+                            location = ranked.candidates.single().location,
+                        ),
+                        legDistanceMeters = 23_106.0,
+                        legDurationSeconds = 1_151.0,
+                        availableRangeKm = 120.0,
+                        remainingRangeKm = 96.894,
+                        reserveMarginKm = 66.894,
+                    ),
+                ),
+                destinationLeg = PredictiveDestinationLeg(
+                    distanceMeters = 187_824.0,
+                    durationSeconds = 5_688.0,
+                    availableRangeAtDepartureKm = 300.0,
+                    estimatedRemainingRangeAtArrivalKm = 112.176,
+                    reserveMarginAtArrivalKm = 82.176,
+                    destinationEta = OffsetDateTime.parse("2026-08-30T11:53:59+02:00"),
+                ),
+                totalDistanceMeters = 210_930.0,
+                totalDurationSeconds = 6_839.0,
+                refuelAssumption = "full_effective_range_after_each_stop",
+                distanceModel = "road_network",
+            )
+        } else {
+            null
+        }
+        return PredictiveCngSuggestion(
+            state = state,
+            departureAt = ranked.departureAt,
+            maximumDetourMinutes = ranked.maximumDetourMinutes,
+            baseRoute = ranked.baseRoute,
+            rangeBasis = PredictiveRangeBasis(
+                effectiveCngRangeKm = 300.0,
+                estimatedRemainingCngRangeKm = if (isNotNeeded) 300.0 else 120.0,
+                reserveCngRangeKm = 30.0,
+                usableRangeBeforeReserveKm = if (isNotNeeded) 270.0 else 90.0,
+                remainingRouteDistanceKm = 210.925,
+                rangeShortfallToDestinationKm = if (isNotNeeded) 0.0 else 120.925,
+                destinationReachableWithReserve = isNotNeeded,
+                consumptionModel = "caller_estimated_remaining_range",
+                trafficState = "not_configured",
+                trafficAdjusted = false,
+            ),
+            candidates = candidates,
+            itinerary = itinerary,
+        )
+    }
+
+    private fun sampleMultiStopPredictiveSuggestion(): PredictiveCngSuggestion {
+        val firstRanked = sampleRankedStations().candidates.single().copy(
+            distanceFromPreviousWaypointMeters = 20_000.0,
+        )
+        val stops = listOf(
+            samplePredictiveStop(
+                sequence = 1,
+                station = SelectedCngStop(
+                    "43690",
+                    "S.ZENONE OVEST",
+                    "SAN ZENONE AL LAMBRO",
+                    "MI",
+                    Coordinate(45.321004, 9.376063),
+                ),
+                legDistanceMeters = 20_000.0,
+                legDurationSeconds = 600.0,
+                availableRangeKm = 65.0,
+                remainingRangeKm = 45.0,
+                reserveMarginKm = 15.0,
+            ),
+            samplePredictiveStop(
+                sequence = 2,
+                station = SelectedCngStop(
+                    "3473",
+                    "SOMAGLIA OVEST",
+                    "SOMAGLIA",
+                    "LO",
+                    Coordinate(45.14197, 9.634009),
+                ),
+                legDistanceMeters = 60_000.0,
+                legDurationSeconds = 1_800.0,
+                availableRangeKm = 100.0,
+                remainingRangeKm = 40.0,
+                reserveMarginKm = 10.0,
+            ),
+            samplePredictiveStop(
+                sequence = 3,
+                station = SelectedCngStop(
+                    "3618",
+                    "S.MARTINO OVEST",
+                    "PARMA",
+                    "PR",
+                    Coordinate(44.825945, 10.37959),
+                ),
+                legDistanceMeters = 60_000.0,
+                legDurationSeconds = 1_800.0,
+                availableRangeKm = 100.0,
+                remainingRangeKm = 40.0,
+                reserveMarginKm = 10.0,
+            ),
+        )
+        return PredictiveCngSuggestion(
+            state = PredictiveSuggestionState.SUGGESTED,
+            departureAt = OffsetDateTime.parse("2026-08-30T10:00:00+02:00"),
+            maximumDetourMinutes = 10.0,
+            baseRoute = sampleRoute(distanceMeters = 210_000.0, durationSeconds = 6_300.0),
+            rangeBasis = PredictiveRangeBasis(
+                effectiveCngRangeKm = 100.0,
+                estimatedRemainingCngRangeKm = 65.0,
+                reserveCngRangeKm = 30.0,
+                usableRangeBeforeReserveKm = 35.0,
+                remainingRouteDistanceKm = 210.0,
+                rangeShortfallToDestinationKm = 175.0,
+                destinationReachableWithReserve = false,
+                consumptionModel = "caller_estimated_remaining_range",
+                trafficState = "not_configured",
+                trafficAdjusted = false,
+            ),
+            candidates = listOf(
+                PredictiveCngStation(
+                    station = firstRanked,
+                    estimatedRemainingRangeAtArrivalKm = 45.0,
+                    reserveMarginAtArrivalKm = 15.0,
+                ),
+            ),
+            itinerary = PredictiveCngItinerary(
+                stops = stops,
+                destinationLeg = PredictiveDestinationLeg(
+                    distanceMeters = 70_000.0,
+                    durationSeconds = 2_100.0,
+                    availableRangeAtDepartureKm = 100.0,
+                    estimatedRemainingRangeAtArrivalKm = 30.0,
+                    reserveMarginAtArrivalKm = 0.0,
+                    destinationEta = OffsetDateTime.parse("2026-08-30T11:45:00+02:00"),
+                ),
+                totalDistanceMeters = 210_000.0,
+                totalDurationSeconds = 6_300.0,
+                refuelAssumption = "full_effective_range_after_each_stop",
+                distanceModel = "road_network",
+            ),
+        )
+    }
+
+    private fun samplePredictiveStop(
+        sequence: Int,
+        station: SelectedCngStop,
+        legDistanceMeters: Double,
+        legDurationSeconds: Double,
+        availableRangeKm: Double,
+        remainingRangeKm: Double,
+        reserveMarginKm: Double,
+    ): PredictiveItineraryStop {
+        val ranked = sampleRankedStations().candidates.single()
+        return PredictiveItineraryStop(
+            sequence = sequence,
+            station = station,
+            arrivalAt = OffsetDateTime.parse("2026-08-30T10:30:00+02:00")
+                .plusMinutes((sequence - 1L) * 30),
+            legDistanceMeters = legDistanceMeters,
+            legDurationSeconds = legDurationSeconds,
+            availableRangeAtDepartureKm = availableRangeKm,
+            estimatedRemainingRangeAtArrivalKm = remainingRangeKm,
+            reserveMarginAtArrivalKm = reserveMarginKm,
+            opening = ranked.opening,
+            phone = ranked.phone,
+            brand = ranked.brand,
+            operator = ranked.operator,
+            osmMatchConfidence = ranked.osmMatchConfidence,
+            price = ranked.price,
+        )
+    }
+
+    private fun sampleMultiStopSelectedRoute(): RouteWithCngItinerary {
+        val suggestion = sampleMultiStopPredictiveSuggestion()
+        val stops = requireNotNull(suggestion.itinerary).stops.map { it.station }
+        val points = listOf(RoutePlannerViewModel.MILAN) +
+            stops.map(SelectedCngStop::location) + RoutePlannerViewModel.BOLOGNA
+        val distances = listOf(20_000.0, 60_000.0, 60_000.0, 70_000.0)
+        val durations = listOf(600.0, 1_800.0, 1_800.0, 2_100.0)
+        val remaining = listOf(45.0, 40.0, 40.0, 30.0)
+        val margins = listOf(15.0, 10.0, 10.0, 0.0)
+        return RouteWithCngItinerary(
+            selectedStops = stops,
+            distanceMeters = distances.sum(),
+            durationSeconds = durations.sum(),
+            legs = distances.indices.map { index ->
+                CngItineraryRouteLeg(
+                    sequence = index + 1,
+                    kind = when (index) {
+                        0 -> CngRouteLegKind.ORIGIN_TO_CNG_STATION
+                        distances.lastIndex -> CngRouteLegKind.CNG_STATION_TO_DESTINATION
+                        else -> CngRouteLegKind.CNG_STATION_TO_CNG_STATION
+                    },
+                    route = sampleRoute(
+                        origin = points[index],
+                        destination = points[index + 1],
+                        distanceMeters = distances[index],
+                        durationSeconds = durations[index],
+                    ),
+                    availableRangeAtDepartureKm = if (index == 0) 65.0 else 100.0,
+                    estimatedRemainingRangeAtArrivalKm = remaining[index],
+                    reserveMarginAtArrivalKm = margins[index],
+                )
+            },
+            provider = "valhalla",
+            rangeValidation = "all_legs_preserve_reserve",
         )
     }
 

@@ -25,7 +25,9 @@ class CompassApiClient(
     private val apiBaseUrl = baseUrl.toHttpUrl()
     private val routeUrl = resolve("api/v1/routes")
     private val rankedCandidatesUrl = resolve("api/v1/cng/ranked-candidates")
+    private val predictiveCandidatesUrl = resolve("api/v1/cng/predictive-candidates")
     private val routeWithCngStopUrl = resolve("api/v1/routes/with-cng-stop")
+    private val routeWithCngItineraryUrl = resolve("api/v1/routes/with-cng-itinerary")
 
     suspend fun getRoute(
         origin: Coordinate,
@@ -79,6 +81,57 @@ class CompassApiClient(
             routeWithCngStopUrl,
             json.encodeToString(payload),
         ).toApiRouteWithCngStop()
+    }
+
+    suspend fun getPredictiveCngCandidates(
+        origin: Coordinate,
+        destination: Coordinate,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: String,
+    ): ApiPredictiveCandidates {
+        val payload = PredictiveCandidatesRequestDto(
+            origin = origin.toDto(),
+            destination = destination.toDto(),
+            costing = "auto",
+            language = "it-IT",
+            effectiveCngRangeKm = effectiveCngRangeKm,
+            estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
+            reserveCngRangeKm = reserveCngRangeKm,
+            maximumDetourMinutes = maximumDetourMinutes,
+            departureAt = departureAt,
+            includeClosed = false,
+        )
+        return post<PredictiveCandidatesResponseDto>(
+            predictiveCandidatesUrl,
+            json.encodeToString(payload),
+        ).toApiPredictiveCandidates()
+    }
+
+    suspend fun getRouteWithCngItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        mimitStationIds: List<String>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+    ): ApiRouteWithCngItinerary {
+        val payload = RouteWithCngItineraryRequestDto(
+            origin = origin.toDto(),
+            destination = destination.toDto(),
+            costing = "auto",
+            language = "it-IT",
+            mimitStationIds = mimitStationIds,
+            effectiveCngRangeKm = effectiveCngRangeKm,
+            estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
+            reserveCngRangeKm = reserveCngRangeKm,
+        )
+        return post<RouteWithCngItineraryResponseDto>(
+            routeWithCngItineraryUrl,
+            json.encodeToString(payload),
+        ).toApiRouteWithCngItinerary()
     }
 
     private fun resolve(path: String): HttpUrl = apiBaseUrl.resolve(path)
@@ -162,12 +215,40 @@ private data class RankedCandidatesRequestDto(
 )
 
 @Serializable
+private data class PredictiveCandidatesRequestDto(
+    val origin: CoordinateDto,
+    val destination: CoordinateDto,
+    val costing: String,
+    val language: String,
+    @SerialName("effective_cng_range_km") val effectiveCngRangeKm: Double,
+    @SerialName("estimated_remaining_cng_range_km")
+    val estimatedRemainingCngRangeKm: Double,
+    @SerialName("reserve_cng_range_km") val reserveCngRangeKm: Double,
+    @SerialName("maximum_detour_minutes") val maximumDetourMinutes: Double,
+    @SerialName("departure_at") val departureAt: String,
+    @SerialName("include_closed") val includeClosed: Boolean,
+)
+
+@Serializable
 private data class RouteWithCngStopRequestDto(
     val origin: CoordinateDto,
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
     @SerialName("mimit_station_id") val mimitStationId: String,
+)
+
+@Serializable
+private data class RouteWithCngItineraryRequestDto(
+    val origin: CoordinateDto,
+    val destination: CoordinateDto,
+    val costing: String,
+    val language: String,
+    @SerialName("mimit_station_ids") val mimitStationIds: List<String>,
+    @SerialName("effective_cng_range_km") val effectiveCngRangeKm: Double,
+    @SerialName("estimated_remaining_cng_range_km")
+    val estimatedRemainingCngRangeKm: Double,
+    @SerialName("reserve_cng_range_km") val reserveCngRangeKm: Double,
 )
 
 @Serializable
@@ -378,6 +459,112 @@ private data class RankedCandidatesResponseDto(
 )
 
 @Serializable
+private data class PredictiveRangeBasisDto(
+    @SerialName("effective_cng_range_km") val effectiveCngRangeKm: Double,
+    @SerialName("estimated_remaining_cng_range_km")
+    val estimatedRemainingCngRangeKm: Double,
+    @SerialName("reserve_cng_range_km") val reserveCngRangeKm: Double,
+    @SerialName("usable_range_before_reserve_km") val usableRangeBeforeReserveKm: Double,
+    @SerialName("remaining_route_distance_km") val remainingRouteDistanceKm: Double,
+    @SerialName("range_shortfall_to_destination_km") val rangeShortfallToDestinationKm: Double,
+    @SerialName("destination_reachable_with_reserve")
+    val destinationReachableWithReserve: Boolean,
+    @SerialName("remaining_route_origin") val remainingRouteOrigin: String,
+    @SerialName("consumption_model") val consumptionModel: String,
+    @SerialName("traffic_state") val trafficState: String,
+    @SerialName("traffic_adjusted") val trafficAdjusted: Boolean,
+)
+
+@Serializable
+private data class PredictiveReachabilityMetricsDto(
+    @SerialName("detour_eligible_candidate_count") val detourEligibleCandidateCount: Int,
+    @SerialName("reachable_before_reserve_count") val reachableBeforeReserveCount: Int,
+    @SerialName("excluded_unreachable_before_reserve_count")
+    val excludedUnreachableBeforeReserveCount: Int,
+    @SerialName("ranked_reachable_candidate_count") val rankedReachableCandidateCount: Int,
+    @SerialName("furthest_reachable_route_fraction") val furthestReachableRouteFraction: Double?,
+    @SerialName("evaluation_skipped_destination_reachable")
+    val evaluationSkippedDestinationReachable: Boolean,
+    @SerialName("pairwise_matrix_calls") val pairwiseMatrixCalls: Int,
+    @SerialName("pairwise_matrix_fallback_splits") val pairwiseMatrixFallbackSplits: Int,
+    @SerialName("pairwise_matrix_location_failures") val pairwiseMatrixLocationFailures: Int,
+    @SerialName("itinerary_search_labels") val itinerarySearchLabels: Int,
+)
+
+@Serializable
+private data class PredictiveRankedCandidateDto(
+    val candidate: RankedCandidateDto,
+    @SerialName("estimated_remaining_range_at_arrival_km")
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    @SerialName("reserve_margin_at_arrival_km") val reserveMarginAtArrivalKm: Double,
+)
+
+@Serializable
+private data class PredictiveItineraryStopDto(
+    val sequence: Int,
+    @SerialName("station_id") val stationId: Long,
+    @SerialName("mimit_station_id") val mimitStationId: String,
+    val name: String?,
+    val municipality: String?,
+    val province: String?,
+    val location: CoordinateDto,
+    @SerialName("arrival_at") val arrivalAt: String,
+    @SerialName("leg_distance_meters") val legDistanceMeters: Double,
+    @SerialName("leg_duration_seconds") val legDurationSeconds: Double,
+    @SerialName("available_range_at_departure_km") val availableRangeAtDepartureKm: Double,
+    @SerialName("estimated_remaining_range_at_arrival_km")
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    @SerialName("reserve_margin_at_arrival_km") val reserveMarginAtArrivalKm: Double,
+    val opening: OpeningEvaluationDto,
+    val phone: String?,
+    val brand: String?,
+    val operator: String?,
+    @SerialName("osm_match_confidence") val osmMatchConfidence: Double?,
+    val price: CngPriceDto?,
+)
+
+@Serializable
+private data class PredictiveDestinationLegDto(
+    @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("duration_seconds") val durationSeconds: Double,
+    @SerialName("available_range_at_departure_km") val availableRangeAtDepartureKm: Double,
+    @SerialName("estimated_remaining_range_at_arrival_km")
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    @SerialName("reserve_margin_at_arrival_km") val reserveMarginAtArrivalKm: Double,
+    @SerialName("destination_eta") val destinationEta: String,
+)
+
+@Serializable
+private data class PredictiveItineraryDto(
+    val stops: List<PredictiveItineraryStopDto>,
+    @SerialName("destination_leg") val destinationLeg: PredictiveDestinationLegDto,
+    @SerialName("total_distance_meters") val totalDistanceMeters: Double,
+    @SerialName("total_duration_seconds") val totalDurationSeconds: Double,
+    @SerialName("refuel_assumption") val refuelAssumption: String,
+    @SerialName("distance_model") val distanceModel: String,
+)
+
+@Serializable
+private data class PredictiveCandidatesResponseDto(
+    val stage: String,
+    @SerialName("suggestion_state") val suggestionState: String,
+    @SerialName("departure_at") val departureAt: String,
+    @SerialName("maximum_detour_minutes") val maximumDetourMinutes: Double,
+    @SerialName("base_route") val baseRoute: RouteResponseDto,
+    val corridor: CorridorPolicyDto,
+    @SerialName("spatial_pruning") val spatialPruning: SpatialPruningMetricsDto,
+    @SerialName("cost_basis") val costBasis: NetworkCostBasisDto,
+    @SerialName("network_evaluation") val networkEvaluation: NetworkEvaluationMetricsDto,
+    @SerialName("range_basis") val rangeBasis: PredictiveRangeBasisDto,
+    @SerialName("reachability_evaluation")
+    val reachabilityEvaluation: PredictiveReachabilityMetricsDto,
+    @SerialName("ranking_policy") val rankingPolicy: RankingPolicyDto,
+    @SerialName("ranking_evaluation") val rankingEvaluation: RankingEvaluationMetricsDto,
+    val candidates: List<PredictiveRankedCandidateDto>,
+    val itinerary: PredictiveItineraryDto?,
+)
+
+@Serializable
 private data class SelectedCngStopDto(
     @SerialName("mimit_station_id") val mimitStationId: String,
     val name: String?,
@@ -404,6 +591,42 @@ private data class RouteWithCngStopResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<RouteLegDto>,
     val provider: String,
+)
+
+@Serializable
+private data class CngItineraryStopDto(
+    val sequence: Int,
+    @SerialName("mimit_station_id") val mimitStationId: String,
+    val name: String?,
+    val municipality: String?,
+    val province: String?,
+    val location: CoordinateDto,
+)
+
+@Serializable
+private data class CngItineraryRouteLegDto(
+    val sequence: Int,
+    val kind: String,
+    val origin: CoordinateDto,
+    val destination: CoordinateDto,
+    @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("duration_seconds") val durationSeconds: Double,
+    val geometry: RouteGeometryDto,
+    val maneuvers: List<ManeuverDto>,
+    @SerialName("available_range_at_departure_km") val availableRangeAtDepartureKm: Double,
+    @SerialName("estimated_remaining_range_at_arrival_km")
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    @SerialName("reserve_margin_at_arrival_km") val reserveMarginAtArrivalKm: Double,
+)
+
+@Serializable
+private data class RouteWithCngItineraryResponseDto(
+    @SerialName("selected_stops") val selectedStops: List<CngItineraryStopDto>,
+    @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("duration_seconds") val durationSeconds: Double,
+    val legs: List<CngItineraryRouteLegDto>,
+    val provider: String,
+    @SerialName("range_validation") val rangeValidation: String,
 )
 
 @Serializable
@@ -453,59 +676,182 @@ private fun RankedCandidatesResponseDto.toApiRankedCandidates(): ApiRankedCandid
         maximumDetourMinutes = maximumDetourMinutes,
         baseRoute = baseRoute.toApiRoute(),
         trafficState = costBasis.trafficState,
-        candidates = candidates.map { candidate ->
-            ApiRankedCandidate(
-                stationId = candidate.stationId,
-                mimitStationId = candidate.mimitStationId,
-                name = candidate.name,
-                municipality = candidate.municipality,
-                province = candidate.province,
-                latitude = candidate.latitude,
-                longitude = candidate.longitude,
-                distanceFromPreviousWaypointMeters = candidate.distanceFromPreviousWaypointMeters,
-                detourMinutes = candidate.detourMinutes,
-                stationEta = candidate.stationEta,
-                destinationEta = candidate.destinationEta,
-                opening = ApiOpeningEvaluation(
-                    state = candidate.opening.state,
-                    validation = candidate.opening.validation,
-                    openingHours = candidate.opening.openingHours,
-                    source = candidate.opening.source,
-                    sourceConfidence = candidate.opening.sourceConfidence,
-                    evaluatedAt = candidate.opening.evaluatedAt,
-                    timezone = candidate.opening.timezone,
-                    nextChangeAt = candidate.opening.nextChangeAt,
-                    warnings = candidate.opening.warnings,
-                ),
-                phone = candidate.phone,
-                brand = candidate.brand,
-                operator = candidate.operator,
-                osmMatchConfidence = candidate.osmMatchConfidence,
-                price = candidate.price?.let { price ->
-                    ApiCngPrice(
-                        unitPrice = price.unitPrice,
-                        currency = price.currency,
-                        unit = price.unit,
-                        serviceMode = price.serviceMode,
-                        observedAt = price.observedAt,
-                        ingestedAt = price.ingestedAt,
-                        sourceName = price.sourceName,
-                        ageSeconds = price.ageSeconds,
-                        freshnessState = price.freshnessState,
-                    )
-                },
-                ranking = ApiRankingBreakdown(
-                    rank = candidate.ranking.rank,
-                    totalScore = candidate.ranking.totalScore,
-                    detourScore = candidate.ranking.detourScore,
-                    openingScore = candidate.ranking.openingScore,
-                    priceScore = candidate.ranking.priceScore,
-                    priceFreshnessScore = candidate.ranking.priceFreshnessScore,
-                ),
-            )
-        },
+        candidates = candidates.map(RankedCandidateDto::toApiRankedCandidate),
     )
 }
+
+private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPredictiveCandidates {
+    require(stage == "predictive_ranking") { "unsupported predictive response stage" }
+    require(costBasis.provider == "valhalla") { "unsupported routing provider" }
+    require(!costBasis.trafficAware && !rangeBasis.trafficAdjusted) {
+        "unexpected traffic-aware predictive response"
+    }
+    require(rangeBasis.remainingRouteOrigin == "request_origin") {
+        "unsupported remaining-route origin"
+    }
+    require(rangeBasis.consumptionModel == "caller_estimated_remaining_range") {
+        "unsupported predictive consumption model"
+    }
+    require(candidates.size == reachabilityEvaluation.rankedReachableCandidateCount) {
+        "candidate count does not match reachability metrics"
+    }
+    require(candidates.size == rankingEvaluation.rankedCandidateCount) {
+        "candidate count does not match ranking metrics"
+    }
+    require(
+        suggestionState in setOf(
+            "not_needed",
+            "suggested",
+            "no_reachable_station",
+            "no_eligible_station",
+            "no_complete_itinerary",
+        ),
+    ) { "unsupported predictive suggestion state" }
+    require(suggestionState != "suggested" || candidates.size == 1) {
+        "suggested response must contain its selected first stop"
+    }
+    require(suggestionState == "suggested" || candidates.isEmpty()) {
+        "non-suggestion response must not contain candidates"
+    }
+    require(
+        suggestionState != "not_needed" || rangeBasis.destinationReachableWithReserve,
+    ) { "not-needed response must prove destination reachability" }
+    require((suggestionState == "suggested") == (itinerary != null)) {
+        "only a suggested response may contain a complete itinerary"
+    }
+    val usableMeters = rangeBasis.usableRangeBeforeReserveKm * 1_000
+    candidates.forEach { predictive ->
+        require(predictive.candidate.distanceFromPreviousWaypointMeters <= usableMeters + 1.0) {
+            "predictive candidate is unreachable before reserve"
+        }
+    }
+    return ApiPredictiveCandidates(
+        suggestionState = suggestionState,
+        departureAt = departureAt,
+        maximumDetourMinutes = maximumDetourMinutes,
+        baseRoute = baseRoute.toApiRoute(),
+        trafficState = rangeBasis.trafficState,
+        rangeBasis = ApiPredictiveRangeBasis(
+            effectiveCngRangeKm = rangeBasis.effectiveCngRangeKm,
+            estimatedRemainingCngRangeKm = rangeBasis.estimatedRemainingCngRangeKm,
+            reserveCngRangeKm = rangeBasis.reserveCngRangeKm,
+            usableRangeBeforeReserveKm = rangeBasis.usableRangeBeforeReserveKm,
+            remainingRouteDistanceKm = rangeBasis.remainingRouteDistanceKm,
+            rangeShortfallToDestinationKm = rangeBasis.rangeShortfallToDestinationKm,
+            destinationReachableWithReserve = rangeBasis.destinationReachableWithReserve,
+            consumptionModel = rangeBasis.consumptionModel,
+            trafficState = rangeBasis.trafficState,
+            trafficAdjusted = rangeBasis.trafficAdjusted,
+        ),
+        candidates = candidates.map { predictive ->
+            ApiPredictiveRankedCandidate(
+                candidate = predictive.candidate.toApiRankedCandidate(),
+                estimatedRemainingRangeAtArrivalKm = (
+                    predictive.estimatedRemainingRangeAtArrivalKm
+                ),
+                reserveMarginAtArrivalKm = predictive.reserveMarginAtArrivalKm,
+            )
+        },
+        itinerary = itinerary?.toApiPredictiveItinerary(),
+    )
+}
+
+private fun PredictiveItineraryDto.toApiPredictiveItinerary(): ApiPredictiveItinerary =
+    ApiPredictiveItinerary(
+        stops = stops.map { stop ->
+            ApiPredictiveItineraryStop(
+                sequence = stop.sequence,
+                stationId = stop.stationId,
+                mimitStationId = stop.mimitStationId,
+                name = stop.name,
+                municipality = stop.municipality,
+                province = stop.province,
+                latitude = stop.location.latitude,
+                longitude = stop.location.longitude,
+                arrivalAt = stop.arrivalAt,
+                legDistanceMeters = stop.legDistanceMeters,
+                legDurationSeconds = stop.legDurationSeconds,
+                availableRangeAtDepartureKm = stop.availableRangeAtDepartureKm,
+                estimatedRemainingRangeAtArrivalKm = (
+                    stop.estimatedRemainingRangeAtArrivalKm
+                ),
+                reserveMarginAtArrivalKm = stop.reserveMarginAtArrivalKm,
+                opening = stop.opening.toApiOpeningEvaluation(),
+                phone = stop.phone,
+                brand = stop.brand,
+                operator = stop.operator,
+                osmMatchConfidence = stop.osmMatchConfidence,
+                price = stop.price?.toApiCngPrice(),
+            )
+        },
+        destinationLeg = ApiPredictiveDestinationLeg(
+            distanceMeters = destinationLeg.distanceMeters,
+            durationSeconds = destinationLeg.durationSeconds,
+            availableRangeAtDepartureKm = destinationLeg.availableRangeAtDepartureKm,
+            estimatedRemainingRangeAtArrivalKm = (
+                destinationLeg.estimatedRemainingRangeAtArrivalKm
+            ),
+            reserveMarginAtArrivalKm = destinationLeg.reserveMarginAtArrivalKm,
+            destinationEta = destinationLeg.destinationEta,
+        ),
+        totalDistanceMeters = totalDistanceMeters,
+        totalDurationSeconds = totalDurationSeconds,
+        refuelAssumption = refuelAssumption,
+        distanceModel = distanceModel,
+    )
+
+private fun RankedCandidateDto.toApiRankedCandidate(): ApiRankedCandidate = ApiRankedCandidate(
+    stationId = stationId,
+    mimitStationId = mimitStationId,
+    name = name,
+    municipality = municipality,
+    province = province,
+    latitude = latitude,
+    longitude = longitude,
+    distanceFromPreviousWaypointMeters = distanceFromPreviousWaypointMeters,
+    detourMinutes = detourMinutes,
+    stationEta = stationEta,
+    destinationEta = destinationEta,
+    opening = opening.toApiOpeningEvaluation(),
+    phone = phone,
+    brand = brand,
+    operator = operator,
+    osmMatchConfidence = osmMatchConfidence,
+    price = price?.toApiCngPrice(),
+    ranking = ApiRankingBreakdown(
+        rank = ranking.rank,
+        totalScore = ranking.totalScore,
+        detourScore = ranking.detourScore,
+        openingScore = ranking.openingScore,
+        priceScore = ranking.priceScore,
+        priceFreshnessScore = ranking.priceFreshnessScore,
+    ),
+)
+
+private fun OpeningEvaluationDto.toApiOpeningEvaluation(): ApiOpeningEvaluation =
+    ApiOpeningEvaluation(
+        state = state,
+        validation = validation,
+        openingHours = openingHours,
+        source = source,
+        sourceConfidence = sourceConfidence,
+        evaluatedAt = evaluatedAt,
+        timezone = timezone,
+        nextChangeAt = nextChangeAt,
+        warnings = warnings,
+    )
+
+private fun CngPriceDto.toApiCngPrice(): ApiCngPrice = ApiCngPrice(
+    unitPrice = unitPrice,
+    currency = currency,
+    unit = unit,
+    serviceMode = serviceMode,
+    observedAt = observedAt,
+    ingestedAt = ingestedAt,
+    sourceName = sourceName,
+    ageSeconds = ageSeconds,
+    freshnessState = freshnessState,
+)
 
 private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCngStop {
     require(provider == "valhalla") { "unsupported routing provider" }
@@ -539,6 +885,61 @@ private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCng
             )
         },
         provider = provider,
+    )
+}
+
+private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
+    ApiRouteWithCngItinerary {
+    require(provider == "valhalla") { "unsupported routing provider" }
+    require(rangeValidation == "all_legs_preserve_reserve") {
+        "itinerary route has not preserved the reserve"
+    }
+    require(selectedStops.isNotEmpty() && legs.size == selectedStops.size + 1) {
+        "itinerary route stop and leg counts do not reconcile"
+    }
+    require(selectedStops.map(CngItineraryStopDto::sequence) == (1..selectedStops.size).toList()) {
+        "itinerary stop sequence is not contiguous"
+    }
+    require(legs.map(CngItineraryRouteLegDto::sequence) == (1..legs.size).toList()) {
+        "itinerary leg sequence is not contiguous"
+    }
+    return ApiRouteWithCngItinerary(
+        selectedStops = selectedStops.map { stop ->
+            ApiSelectedCngStop(
+                mimitStationId = stop.mimitStationId,
+                name = stop.name,
+                municipality = stop.municipality,
+                province = stop.province,
+                latitude = stop.location.latitude,
+                longitude = stop.location.longitude,
+            )
+        },
+        distanceMeters = distanceMeters,
+        durationSeconds = durationSeconds,
+        legs = legs.map { leg ->
+            require(leg.geometry.format == "polyline6") {
+                "unsupported route geometry format"
+            }
+            ApiCngItineraryRouteLeg(
+                sequence = leg.sequence,
+                kind = leg.kind,
+                originLatitude = leg.origin.latitude,
+                originLongitude = leg.origin.longitude,
+                destinationLatitude = leg.destination.latitude,
+                destinationLongitude = leg.destination.longitude,
+                distanceMeters = leg.distanceMeters,
+                durationSeconds = leg.durationSeconds,
+                encodedPolyline = leg.geometry.encodedPolyline,
+                maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
+                availableRangeAtDepartureKm = leg.availableRangeAtDepartureKm,
+                estimatedRemainingRangeAtArrivalKm = (
+                    leg.estimatedRemainingRangeAtArrivalKm
+                ),
+                reserveMarginAtArrivalKm = leg.reserveMarginAtArrivalKm,
+            )
+        },
+        provider = provider,
+        rangeValidation = rangeValidation,
     )
 }
 

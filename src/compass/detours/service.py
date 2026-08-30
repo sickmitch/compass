@@ -15,6 +15,7 @@ from compass.detours.domain import (
     calculate_detour_candidate,
 )
 from compass.routing.domain import (
+    BaseRoute,
     Coordinate,
     MatrixCost,
     MatrixLocationError,
@@ -33,6 +34,7 @@ async def evaluate_cng_detours(
     corridor_policy: CorridorPolicy,
     detour_policy: NetworkDetourPolicy,
     max_route_geometry_points: int,
+    base_route: BaseRoute | None = None,
 ) -> NetworkDetourResult:
     spatial = await find_corridor_candidates(
         session,
@@ -40,6 +42,7 @@ async def evaluate_cng_detours(
         request.corridor_request,
         policy=corridor_policy,
         max_route_geometry_points=max_route_geometry_points,
+        base_route=base_route,
     )
     route_request = request.corridor_request.route
     evaluated: list[EligibleDetourCandidate] = []

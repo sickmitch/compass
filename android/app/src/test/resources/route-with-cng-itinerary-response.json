@@ -1,0 +1,86 @@
+{
+  "selected_stops": [
+    {
+      "sequence": 1,
+      "mimit_station_id": "43690",
+      "name": "S.ZENONE OVEST",
+      "municipality": "SAN ZENONE AL LAMBRO",
+      "province": "MI",
+      "location": {"latitude": 45.321004, "longitude": 9.376063}
+    },
+    {
+      "sequence": 2,
+      "mimit_station_id": "3473",
+      "name": "SOMAGLIA OVEST",
+      "municipality": "SOMAGLIA",
+      "province": "LO",
+      "location": {"latitude": 45.14197, "longitude": 9.634009}
+    },
+    {
+      "sequence": 3,
+      "mimit_station_id": "3618",
+      "name": "S.MARTINO OVEST",
+      "municipality": "PARMA",
+      "province": "PR",
+      "location": {"latitude": 44.825945, "longitude": 10.37959}
+    }
+  ],
+  "distance_meters": 210000.0,
+  "duration_seconds": 6300.0,
+  "legs": [
+    {
+      "sequence": 1,
+      "kind": "origin_to_cng_station",
+      "origin": {"latitude": 45.4642, "longitude": 9.19},
+      "destination": {"latitude": 45.321004, "longitude": 9.376063},
+      "distance_meters": 20000.0,
+      "duration_seconds": 600.0,
+      "geometry": {"format": "polyline6", "encoded_polyline": "_izlhA~rlgdF_{geC~ywl@"},
+      "maneuvers": [],
+      "available_range_at_departure_km": 65.0,
+      "estimated_remaining_range_at_arrival_km": 45.0,
+      "reserve_margin_at_arrival_km": 15.0
+    },
+    {
+      "sequence": 2,
+      "kind": "cng_station_to_cng_station",
+      "origin": {"latitude": 45.321004, "longitude": 9.376063},
+      "destination": {"latitude": 45.14197, "longitude": 9.634009},
+      "distance_meters": 60000.0,
+      "duration_seconds": 1800.0,
+      "geometry": {"format": "polyline6", "encoded_polyline": "_izlhA~rlgdF_{geC~ywl@"},
+      "maneuvers": [],
+      "available_range_at_departure_km": 100.0,
+      "estimated_remaining_range_at_arrival_km": 40.0,
+      "reserve_margin_at_arrival_km": 10.0
+    },
+    {
+      "sequence": 3,
+      "kind": "cng_station_to_cng_station",
+      "origin": {"latitude": 45.14197, "longitude": 9.634009},
+      "destination": {"latitude": 44.825945, "longitude": 10.37959},
+      "distance_meters": 60000.0,
+      "duration_seconds": 1800.0,
+      "geometry": {"format": "polyline6", "encoded_polyline": "_izlhA~rlgdF_{geC~ywl@"},
+      "maneuvers": [],
+      "available_range_at_departure_km": 100.0,
+      "estimated_remaining_range_at_arrival_km": 40.0,
+      "reserve_margin_at_arrival_km": 10.0
+    },
+    {
+      "sequence": 4,
+      "kind": "cng_station_to_destination",
+      "origin": {"latitude": 44.825945, "longitude": 10.37959},
+      "destination": {"latitude": 44.4949, "longitude": 11.3426},
+      "distance_meters": 70000.0,
+      "duration_seconds": 2100.0,
+      "geometry": {"format": "polyline6", "encoded_polyline": "_izlhA~rlgdF_{geC~ywl@"},
+      "maneuvers": [],
+      "available_range_at_departure_km": 100.0,
+      "estimated_remaining_range_at_arrival_km": 30.0,
+      "reserve_margin_at_arrival_km": 0.0
+    }
+  ],
+  "provider": "valhalla",
+  "range_validation": "all_legs_preserve_reserve"
+}

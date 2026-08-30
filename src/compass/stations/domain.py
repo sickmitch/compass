@@ -50,3 +50,15 @@ class StationDetail:
     updated_at: datetime
     current_cng_prices: tuple[StationCurrentPriceRecord, ...]
     osm: StationOsmEnrichment | None
+
+
+@dataclass(frozen=True, slots=True)
+class StationRoutePoint:
+    station_id: int
+    mimit_station_id: str
+    name: str | None
+    municipality: str | None
+    province: str | None
+    latitude: float | None
+    longitude: float | None
+    is_active: bool

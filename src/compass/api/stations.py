@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from compass.api.routes import (
 )
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
+from compass.predictive.domain import MAX_CNG_ITINERARY_STOPS
 from compass.ranking.domain import CurrentCngPrice
 from compass.ranking.opening_hours import evaluate_opening_hours
 from compass.ranking.service import evaluate_price
@@ -32,7 +33,7 @@ from compass.routing.domain import (
     WaypointRouteRequest,
 )
 from compass.stations.domain import StationDetail
-from compass.stations.repository import load_station_detail
+from compass.stations.repository import load_station_detail, load_station_route_points
 
 router = APIRouter(prefix="/api/v1", tags=["stations"])
 MimitStationId = Annotated[str, Path(pattern=r"^[0-9]{1,32}$")]
@@ -115,6 +116,69 @@ class RouteWithCngStopResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     legs: list[RouteLegResponse] = Field(min_length=2, max_length=2)
     provider: Literal["valhalla"]
+
+
+class RouteWithCngItineraryRequest(BaseRouteRequest):
+    mimit_station_ids: list[str] = Field(
+        min_length=1,
+        max_length=MAX_CNG_ITINERARY_STOPS,
+    )
+    effective_cng_range_km: float = Field(gt=0, le=2000)
+    estimated_remaining_cng_range_km: float = Field(gt=0, le=2000)
+    reserve_cng_range_km: float = Field(ge=0, lt=2000)
+
+    @model_validator(mode="after")
+    def validate_itinerary_range(self) -> "RouteWithCngItineraryRequest":
+        if len(set(self.mimit_station_ids)) != len(self.mimit_station_ids):
+            raise ValueError("mimit_station_ids must not contain duplicates")
+        if any(
+            not station_id.isascii()
+            or not station_id.isdigit()
+            or len(station_id) > 32
+            for station_id in self.mimit_station_ids
+        ):
+            raise ValueError("mimit_station_ids must contain official numeric IDs")
+        if self.estimated_remaining_cng_range_km > self.effective_cng_range_km:
+            raise ValueError("estimated remaining range must not exceed effective range")
+        if self.reserve_cng_range_km >= self.estimated_remaining_cng_range_km:
+            raise ValueError("reserve range must be lower than estimated remaining range")
+        if self.reserve_cng_range_km >= self.effective_cng_range_km:
+            raise ValueError("reserve range must be lower than effective range")
+        return self
+
+
+class CngItineraryStopResponse(SelectedCngStopResponse):
+    sequence: int = Field(gt=0)
+
+
+class CngItineraryRouteLegResponse(StrictModel):
+    sequence: int = Field(gt=0)
+    kind: Literal[
+        "origin_to_cng_station",
+        "cng_station_to_cng_station",
+        "cng_station_to_destination",
+    ]
+    origin: CoordinateRequest
+    destination: CoordinateRequest
+    distance_meters: float = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    geometry: RouteGeometry
+    maneuvers: list[ManeuverResponse]
+    available_range_at_departure_km: float = Field(gt=0)
+    estimated_remaining_range_at_arrival_km: float = Field(ge=0)
+    reserve_margin_at_arrival_km: float = Field(ge=0)
+
+
+class RouteWithCngItineraryResponse(StrictModel):
+    selected_stops: list[CngItineraryStopResponse] = Field(
+        min_length=1,
+        max_length=MAX_CNG_ITINERARY_STOPS,
+    )
+    distance_meters: float = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    legs: list[CngItineraryRouteLegResponse] = Field(min_length=2, max_length=33)
+    provider: Literal["valhalla"]
+    range_validation: Literal["all_legs_preserve_reserve"] = "all_legs_preserve_reserve"
 
 
 @router.get(
@@ -237,6 +301,162 @@ async def route_with_cng_stop(
         distance_meters=route.distance_meters,
         duration_seconds=route.duration_seconds,
         legs=legs,
+        provider="valhalla",
+    )
+
+
+@router.post(
+    "/routes/with-cng-itinerary",
+    response_model=RouteWithCngItineraryResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "One or more stations were not found."},
+        409: {"model": ErrorResponse, "description": "The itinerary is unusable or unsafe."},
+        422: {"model": ErrorResponse, "description": "Invalid request or no route."},
+        502: {"model": ErrorResponse, "description": "Invalid routing provider response."},
+        503: {"model": ErrorResponse, "description": "Database or routing unavailable."},
+    },
+)
+async def route_with_cng_itinerary(
+    request: RouteWithCngItineraryRequest,
+    session: Annotated[Session, Depends(get_session)],
+    provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    settings: Annotated[Settings, Depends(get_api_settings)],
+) -> RouteWithCngItineraryResponse | JSONResponse:
+    station_ids = tuple(request.mimit_station_ids)
+    try:
+        stations_by_id = load_station_route_points(session, station_ids)
+    except SQLAlchemyError:
+        return error_response(503, "database_unavailable", "The station database is unavailable.")
+    missing_ids = [station_id for station_id in station_ids if station_id not in stations_by_id]
+    if missing_ids:
+        return error_response(
+            404,
+            "station_not_found",
+            "One or more CNG stations in the itinerary were not found.",
+        )
+    stations = [stations_by_id[station_id] for station_id in station_ids]
+    if any(not station.is_active for station in stations):
+        return error_response(
+            409,
+            "station_inactive",
+            "One or more CNG stations in the itinerary are inactive.",
+        )
+    if any(station.latitude is None or station.longitude is None for station in stations):
+        return error_response(
+            409,
+            "station_location_unavailable",
+            "One or more CNG stations in the itinerary have no usable location.",
+        )
+
+    origin = Coordinate(request.origin.latitude, request.origin.longitude)
+    destination = Coordinate(request.destination.latitude, request.destination.longitude)
+    stop_coordinates = tuple(
+        Coordinate(float(station.latitude), float(station.longitude)) for station in stations
+    )
+    try:
+        route = await provider.route_with_waypoints(
+            WaypointRouteRequest(
+                origin=origin,
+                destination=destination,
+                waypoints=stop_coordinates,
+                costing=request.costing,
+                language=request.language or settings.valhalla_route_language,
+            )
+        )
+    except NoRouteError:
+        return error_response(
+            422,
+            "route_not_found",
+            "No route was found through the complete CNG itinerary.",
+        )
+    except RoutingUnavailableError:
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
+    except RoutingProviderError:
+        return error_response(
+            502,
+            "routing_provider_error",
+            "The routing service returned an invalid response.",
+        )
+
+    coordinates = (origin, *stop_coordinates, destination)
+    response_legs: list[CngItineraryRouteLegResponse] = []
+    for index, leg in enumerate(route.legs):
+        available_range_km = (
+            request.estimated_remaining_cng_range_km
+            if index == 0
+            else request.effective_cng_range_km
+        )
+        remaining_range_km = available_range_km - leg.distance_meters / 1_000
+        reserve_margin_km = remaining_range_km - request.reserve_cng_range_km
+        if reserve_margin_km < 0:
+            return error_response(
+                409,
+                "cng_itinerary_out_of_range",
+                "At least one routed leg cannot preserve the requested CNG reserve.",
+            )
+        kind: Literal[
+            "origin_to_cng_station",
+            "cng_station_to_cng_station",
+            "cng_station_to_destination",
+        ]
+        if index == 0:
+            kind = "origin_to_cng_station"
+        elif index == len(route.legs) - 1:
+            kind = "cng_station_to_destination"
+        else:
+            kind = "cng_station_to_cng_station"
+        response_legs.append(
+            CngItineraryRouteLegResponse(
+                sequence=index + 1,
+                kind=kind,
+                origin=CoordinateRequest(
+                    latitude=coordinates[index].latitude,
+                    longitude=coordinates[index].longitude,
+                ),
+                destination=CoordinateRequest(
+                    latitude=coordinates[index + 1].latitude,
+                    longitude=coordinates[index + 1].longitude,
+                ),
+                distance_meters=leg.distance_meters,
+                duration_seconds=leg.duration_seconds,
+                geometry=RouteGeometry(encoded_polyline=leg.encoded_polyline),
+                maneuvers=[
+                    ManeuverResponse.model_validate(asdict(maneuver))
+                    for maneuver in leg.maneuvers
+                ],
+                available_range_at_departure_km=available_range_km,
+                estimated_remaining_range_at_arrival_km=remaining_range_km,
+                reserve_margin_at_arrival_km=reserve_margin_km,
+            )
+        )
+
+    # Valhalla serializes the trip summary and every leg summary independently.
+    # Their rounded totals can diverge by several metres once an itinerary has
+    # many stops, so expose the authoritative sum of the legs that were actually
+    # range-validated above.
+    distance_meters = sum(leg.distance_meters for leg in route.legs)
+    duration_seconds = sum(leg.duration_seconds for leg in route.legs)
+    return RouteWithCngItineraryResponse(
+        selected_stops=[
+            CngItineraryStopResponse(
+                sequence=index,
+                mimit_station_id=station.mimit_station_id,
+                name=station.name,
+                municipality=station.municipality,
+                province=station.province,
+                location=CoordinateRequest(
+                    latitude=stop.latitude,
+                    longitude=stop.longitude,
+                ),
+            )
+            for index, (station, stop) in enumerate(
+                zip(stations, stop_coordinates, strict=True),
+                start=1,
+            )
+        ],
+        distance_meters=distance_meters,
+        duration_seconds=duration_seconds,
+        legs=response_legs,
         provider="valhalla",
     )
 

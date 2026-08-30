@@ -9,8 +9,13 @@ the backend maneuver list.
 
 Phase 9 retains that fixed endpoint pair and adds the manual `Aggiungi tappa → Metano` workflow. It
 collects maximum detour and effective range, displays arrival-aware ranked station markers/cards,
-and recalculates the route through a selected official MIMIT station. It still has no destination
-editor, predictive fuel model, navigation session, background location or rerouting.
+and recalculates the route through a selected official MIMIT station.
+
+Phase 10 adds a separate predictive flow driven by a user-supplied remaining-range estimate and
+safety reserve. It shows a complete ordered reserve-preserving refuelling itinerary or an explicit
+no-refill/no-safe-itinerary state. Each planned stop assumes a full refill to the effective range.
+It still has no destination editor, vehicle telemetry, navigation session, background location,
+live traffic or rerouting.
 
 ## Required toolchain
 
@@ -126,7 +131,42 @@ script output and screenshots of both the candidate list and selected-stop route
 was accepted on 2026-08-29; this procedure remains the reproducible regression check.
 
 The accepted historical Phase 8 preview-only gate remains reproducible with
-`bash scripts/run-phase8-live.sh`; new acceptance runs should use the Phase 9 runner.
+`bash scripts/run-phase8-live.sh`; the accepted Phase 9 regression uses
+`bash scripts/run-phase9-live.sh`. New acceptance runs should use the Phase 10 procedure below.
+
+## Phase 10 predictive physical-device live gate
+
+Run this on the workstation attached to the Android device. If the backend is on a different test
+server, first open the tunnel in its own terminal and leave that terminal running:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
+```
+
+Then open a second terminal and run these commands from the repository root:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+```
+
+```bash
+bash scripts/run-phase10-live.sh
+```
+
+The runner prints the tunnel reminder before its first request. It first checks live OpenAPI so an
+old API image is rejected before the longer route scenarios. It then validates standard, not-needed,
+no-reachable and mandatory 65/30/100 multi-stop profiles. It recalculates one route through all
+ordered official MIMIT stops and rejects any actual Valhalla leg that consumes reserve. Finally it
+runs Android tests/lint/assembly, installs and cold-launches the APK, and checks for an immediate
+fatal exception. All request bodies are generated as named JSON artifacts; no inline JSON needs to
+be copied into the shell.
+
+The automated gate is not the device acceptance. The runner prints complete scenario instructions,
+including the exact meaning of each input and expected screen. Return the complete output plus its
+four requested screenshots: 65/30/100 multi-stop plan, selected multi-stop route, not-needed state
+and no-reachable safety state.
 
 ## Diagnostics
 
@@ -150,6 +190,23 @@ python3 -m json.tool /tmp/compass-phase9-ranked-request.json
 python3 -m json.tool /tmp/compass-phase9-ranked-response.json
 python3 -m json.tool /tmp/compass-phase9-selected-request.json
 python3 -m json.tool /tmp/compass-phase9-selected-response.json
+```
+
+For Phase 10 inspect each request and response independently:
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-standard-request.json
+python3 -m json.tool /tmp/compass-phase10-standard-response.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-not-needed-response.json
+python3 -m json.tool /tmp/compass-phase10-unreachable-response.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-multi-stop-response.json
+python3 -m json.tool /tmp/compass-phase10-itinerary-route-response.json
 ```
 
 Return the failing artifact plus bounded service logs:

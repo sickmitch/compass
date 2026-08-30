@@ -8,7 +8,7 @@ from compass.candidates.domain import (
 )
 from compass.candidates.geometry import decode_polyline6, route_linestring_wkt
 from compass.candidates.repository import PostgisCandidateRepository
-from compass.routing.domain import RoutingProvider
+from compass.routing.domain import BaseRoute, RoutingProvider
 
 
 async def find_corridor_candidates(
@@ -18,10 +18,12 @@ async def find_corridor_candidates(
     *,
     policy: CorridorPolicy,
     max_route_geometry_points: int,
+    base_route: BaseRoute | None = None,
 ) -> CorridorCandidateResult:
     """Route once, then perform only cheap PostGIS spatial candidate pruning."""
     corridor = policy.radius_for(request.effective_cng_range_km)
-    base_route = await provider.route(request.route)
+    if base_route is None:
+        base_route = await provider.route(request.route)
     route_coordinates = decode_polyline6(
         base_route.encoded_polyline,
         max_points=max_route_geometry_points,

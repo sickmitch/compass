@@ -217,3 +217,18 @@ def test_spatial_service_routes_once_and_exposes_pruning_metrics(
     assert result.metrics.reduction_ratio == pytest.approx(1 - 83 / 1505)
     assert result.metrics.candidate_limit_applied is True
     assert result.metrics.routing_calls == 1
+
+    provider.calls.clear()
+    precomputed = asyncio.run(
+        find_corridor_candidates(
+            session,  # type: ignore[arg-type]
+            provider,
+            request,
+            policy=CorridorPolicy(candidate_limit=1),
+            max_route_geometry_points=100,
+            base_route=provider.route_result,
+        )
+    )
+
+    assert provider.calls == []
+    assert precomputed.base_route is provider.route_result

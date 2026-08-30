@@ -3,15 +3,18 @@ package org.compass.cng.data.api
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -154,6 +157,151 @@ class CompassApiClientTest {
         assertEquals("/api/v1/routes/with-cng-stop", recorded.path)
         val requestJson = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
         assertEquals("43690", requestJson.getValue("mimit_station_id").jsonPrimitive.content)
+    }
+
+    @Test
+    fun postsPredictiveRangeStateAndMapsOnlyReachableCandidates() = runTest {
+        server.enqueue(
+            successResponse(
+                predictiveResponseFixture(resource("ranked-candidates-response.json")),
+            ),
+        )
+        val client = client()
+
+        val result = client.getPredictiveCngCandidates(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+            effectiveCngRangeKm = 300.0,
+            estimatedRemainingCngRangeKm = 120.0,
+            reserveCngRangeKm = 30.0,
+            maximumDetourMinutes = 10.0,
+            departureAt = "2026-08-30T10:00:00+02:00",
+        )
+
+        assertEquals("suggested", result.suggestionState)
+        assertEquals(90.0, result.rangeBasis.usableRangeBeforeReserveKm, 0.0)
+        assertFalse(result.rangeBasis.trafficAdjusted)
+        assertEquals("43690", result.candidates.single().candidate.mimitStationId)
+        assertEquals(96.894, result.candidates.single().estimatedRemainingRangeAtArrivalKm, 0.0)
+        assertEquals(66.894, result.candidates.single().reserveMarginAtArrivalKm, 0.0)
+        assertEquals("43690", result.itinerary?.stops?.single()?.mimitStationId)
+        assertEquals("road_network", result.itinerary?.distanceModel)
+
+        val recorded = server.takeRequest()
+        assertEquals("/api/v1/cng/predictive-candidates", recorded.path)
+        val requestJson = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
+        assertEquals(
+            "120.0",
+            requestJson.getValue("estimated_remaining_cng_range_km").jsonPrimitive.content,
+        )
+        assertEquals(
+            "30.0",
+            requestJson.getValue("reserve_cng_range_km").jsonPrimitive.content,
+        )
+        assertFalse(requestJson.getValue("include_closed").jsonPrimitive.content.toBoolean())
+    }
+
+    @Test
+    fun postsOrderedMultiStopRangeRequestAndMapsValidatedLegs() = runTest {
+        server.enqueue(successResponse(resource("route-with-cng-itinerary-response.json")))
+        val client = client()
+
+        val result = client.getRouteWithCngItinerary(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+            mimitStationIds = listOf("43690", "3473", "3618"),
+            effectiveCngRangeKm = 100.0,
+            estimatedRemainingCngRangeKm = 65.0,
+            reserveCngRangeKm = 30.0,
+        )
+
+        assertEquals(3, result.selectedStops.size)
+        assertEquals(4, result.legs.size)
+        assertEquals("cng_station_to_cng_station", result.legs[1].kind)
+        assertEquals(0.0, result.legs.last().reserveMarginAtArrivalKm, 0.0)
+        assertEquals("all_legs_preserve_reserve", result.rangeValidation)
+
+        val recorded = server.takeRequest()
+        assertEquals("/api/v1/routes/with-cng-itinerary", recorded.path)
+        val requestJson = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
+        assertEquals(
+            listOf("43690", "3473", "3618"),
+            requestJson.getValue("mimit_station_ids").jsonArray.map { it.jsonPrimitive.content },
+        )
+        assertEquals("100.0", requestJson.getValue("effective_cng_range_km").jsonPrimitive.content)
+        assertEquals(
+            "65.0",
+            requestJson.getValue("estimated_remaining_cng_range_km").jsonPrimitive.content,
+        )
+        assertEquals("30.0", requestJson.getValue("reserve_cng_range_km").jsonPrimitive.content)
+    }
+
+    @Test
+    fun mapsDestinationReachablePredictiveResponseWithoutCandidates() = runTest {
+        server.enqueue(
+            successResponse(
+                predictiveResponseFixture(
+                    resource("ranked-candidates-response.json"),
+                    suggestionState = "not_needed",
+                ),
+            ),
+        )
+
+        val result = client().getPredictiveCngCandidates(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+            effectiveCngRangeKm = 300.0,
+            estimatedRemainingCngRangeKm = 300.0,
+            reserveCngRangeKm = 30.0,
+            maximumDetourMinutes = 10.0,
+            departureAt = "2026-08-30T10:00:00+02:00",
+        )
+
+        assertEquals("not_needed", result.suggestionState)
+        assertEquals(true, result.rangeBasis.destinationReachableWithReserve)
+        assertTrue(result.candidates.isEmpty())
+    }
+
+    @Test
+    fun rejectsPredictiveCandidateBeyondUsableRoadRange() = runTest {
+        val response = predictiveResponseFixture(resource("ranked-candidates-response.json"))
+            .replace("\"distance_from_previous_waypoint_meters\":23106.0", "\"distance_from_previous_waypoint_meters\":93000.0")
+        server.enqueue(successResponse(response))
+
+        val error = runCatching {
+            client().getPredictiveCngCandidates(
+                origin = Coordinate(45.4642, 9.19),
+                destination = Coordinate(44.4949, 11.3426),
+                effectiveCngRangeKm = 300.0,
+                estimatedRemainingCngRangeKm = 120.0,
+                reserveCngRangeKm = 30.0,
+                maximumDetourMinutes = 10.0,
+                departureAt = "2026-08-30T10:00:00+02:00",
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+    }
+
+    @Test
+    fun rejectsUnknownFieldsInPredictiveResponse() = runTest {
+        val response = predictiveResponseFixture(resource("ranked-candidates-response.json"))
+            .replaceFirst("{", "{\"unexpected\":true,")
+        server.enqueue(successResponse(response))
+
+        val error = runCatching {
+            client().getPredictiveCngCandidates(
+                origin = Coordinate(45.4642, 9.19),
+                destination = Coordinate(44.4949, 11.3426),
+                effectiveCngRangeKm = 300.0,
+                estimatedRemainingCngRangeKm = 120.0,
+                reserveCngRangeKm = 30.0,
+                maximumDetourMinutes = 10.0,
+                departureAt = "2026-08-30T10:00:00+02:00",
+            )
+        }.exceptionOrNull()
+
+        assertEquals(ApiClientException.InvalidResponse::class.java, error?.javaClass)
     }
 
     @Test

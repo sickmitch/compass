@@ -181,16 +181,7 @@ async def ranked_candidates(
         maximum_radius_km=settings.cng_corridor_maximum_radius_km,
         candidate_limit=settings.cng_corridor_candidate_limit,
     )
-    ranking_policy = RankingPolicy(
-        detour_weight=settings.cng_ranking_detour_weight,
-        opening_weight=settings.cng_ranking_opening_weight,
-        price_weight=settings.cng_ranking_price_weight,
-        price_freshness_weight=settings.cng_ranking_price_freshness_weight,
-        unknown_opening_score=settings.cng_ranking_unknown_opening_score,
-        closed_score_multiplier=settings.cng_ranking_closed_score_multiplier,
-        price_freshness_seconds=settings.cng_price_freshness_hours * 60 * 60,
-        opening_hours_timezone=settings.opening_hours_timezone,
-    )
+    ranking_policy = _ranking_policy(settings)
     try:
         result = await rank_cng_candidates(
             session,
@@ -230,23 +221,7 @@ async def ranked_candidates(
         network_evaluation=NetworkEvaluationMetricsResponse.model_validate(
             asdict(network.metrics)
         ),
-        ranking_policy=RankingPolicyResponse(
-            detour_weight=result.policy.detour_weight,
-            opening_weight=result.policy.opening_weight,
-            price_weight=result.policy.price_weight,
-            price_freshness_weight=result.policy.price_freshness_weight,
-            unknown_opening_score=result.policy.unknown_opening_score,
-            closed_score_multiplier=result.policy.closed_score_multiplier,
-            price_freshness_hours=result.policy.price_freshness_seconds / 3600,
-            opening_hours_timezone=result.policy.opening_hours_timezone,
-            opening_hours_country=result.policy.opening_hours_country,
-            price_selection=result.policy.price_selection,
-            closed_candidate_policy=(
-                "include_with_zero_opening_score"
-                if result.include_closed
-                else "exclude"
-            ),
-        ),
+        ranking_policy=_ranking_policy_response(result.policy, result.include_closed),
         ranking_evaluation=RankingMetricsResponse.model_validate(asdict(result.metrics)),
         candidates=[_ranked_candidate_response(candidate) for candidate in result.candidates],
     )
@@ -272,4 +247,38 @@ def _ranked_candidate_response(candidate: RankedCandidate) -> RankedCandidateRes
             ),
             "ranking": asdict(candidate.ranking),
         }
+    )
+
+
+def _ranking_policy(settings: Settings) -> RankingPolicy:
+    return RankingPolicy(
+        detour_weight=settings.cng_ranking_detour_weight,
+        opening_weight=settings.cng_ranking_opening_weight,
+        price_weight=settings.cng_ranking_price_weight,
+        price_freshness_weight=settings.cng_ranking_price_freshness_weight,
+        unknown_opening_score=settings.cng_ranking_unknown_opening_score,
+        closed_score_multiplier=settings.cng_ranking_closed_score_multiplier,
+        price_freshness_seconds=settings.cng_price_freshness_hours * 60 * 60,
+        opening_hours_timezone=settings.opening_hours_timezone,
+    )
+
+
+def _ranking_policy_response(
+    policy: RankingPolicy,
+    include_closed: bool,
+) -> RankingPolicyResponse:
+    return RankingPolicyResponse(
+        detour_weight=policy.detour_weight,
+        opening_weight=policy.opening_weight,
+        price_weight=policy.price_weight,
+        price_freshness_weight=policy.price_freshness_weight,
+        unknown_opening_score=policy.unknown_opening_score,
+        closed_score_multiplier=policy.closed_score_multiplier,
+        price_freshness_hours=policy.price_freshness_seconds / 3600,
+        opening_hours_timezone=policy.opening_hours_timezone,
+        opening_hours_country=policy.opening_hours_country,
+        price_selection=policy.price_selection,
+        closed_candidate_policy=(
+            "include_with_zero_opening_score" if include_closed else "exclude"
+        ),
     )

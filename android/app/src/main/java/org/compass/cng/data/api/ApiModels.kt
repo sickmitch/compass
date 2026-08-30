@@ -28,6 +28,77 @@ data class ApiRankedCandidates(
     val candidates: List<ApiRankedCandidate>,
 )
 
+data class ApiPredictiveCandidates(
+    val suggestionState: String,
+    val departureAt: String,
+    val maximumDetourMinutes: Double,
+    val baseRoute: ApiRoute,
+    val trafficState: String,
+    val rangeBasis: ApiPredictiveRangeBasis,
+    val candidates: List<ApiPredictiveRankedCandidate>,
+    val itinerary: ApiPredictiveItinerary?,
+)
+
+data class ApiPredictiveRangeBasis(
+    val effectiveCngRangeKm: Double,
+    val estimatedRemainingCngRangeKm: Double,
+    val reserveCngRangeKm: Double,
+    val usableRangeBeforeReserveKm: Double,
+    val remainingRouteDistanceKm: Double,
+    val rangeShortfallToDestinationKm: Double,
+    val destinationReachableWithReserve: Boolean,
+    val consumptionModel: String,
+    val trafficState: String,
+    val trafficAdjusted: Boolean,
+)
+
+data class ApiPredictiveRankedCandidate(
+    val candidate: ApiRankedCandidate,
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    val reserveMarginAtArrivalKm: Double,
+)
+
+data class ApiPredictiveItineraryStop(
+    val sequence: Int,
+    val stationId: Long,
+    val mimitStationId: String,
+    val name: String?,
+    val municipality: String?,
+    val province: String?,
+    val latitude: Double,
+    val longitude: Double,
+    val arrivalAt: String,
+    val legDistanceMeters: Double,
+    val legDurationSeconds: Double,
+    val availableRangeAtDepartureKm: Double,
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    val reserveMarginAtArrivalKm: Double,
+    val opening: ApiOpeningEvaluation,
+    val phone: String?,
+    val brand: String?,
+    val operator: String?,
+    val osmMatchConfidence: Double?,
+    val price: ApiCngPrice?,
+)
+
+data class ApiPredictiveDestinationLeg(
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val availableRangeAtDepartureKm: Double,
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    val reserveMarginAtArrivalKm: Double,
+    val destinationEta: String,
+)
+
+data class ApiPredictiveItinerary(
+    val stops: List<ApiPredictiveItineraryStop>,
+    val destinationLeg: ApiPredictiveDestinationLeg,
+    val totalDistanceMeters: Double,
+    val totalDurationSeconds: Double,
+    val refuelAssumption: String,
+    val distanceModel: String,
+)
+
 data class ApiRankedCandidate(
     val stationId: Long,
     val mimitStationId: String,
@@ -88,6 +159,31 @@ data class ApiRouteWithCngStop(
     val durationSeconds: Double,
     val legs: List<ApiRouteLeg>,
     val provider: String,
+)
+
+data class ApiRouteWithCngItinerary(
+    val selectedStops: List<ApiSelectedCngStop>,
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val legs: List<ApiCngItineraryRouteLeg>,
+    val provider: String,
+    val rangeValidation: String,
+)
+
+data class ApiCngItineraryRouteLeg(
+    val sequence: Int,
+    val kind: String,
+    val originLatitude: Double,
+    val originLongitude: Double,
+    val destinationLatitude: Double,
+    val destinationLongitude: Double,
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val encodedPolyline: String,
+    val maneuvers: List<ApiManeuver>,
+    val availableRangeAtDepartureKm: Double,
+    val estimatedRemainingRangeAtArrivalKm: Double,
+    val reserveMarginAtArrivalKm: Double,
 )
 
 data class ApiSelectedCngStop(

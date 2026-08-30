@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -7,7 +7,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from compass.candidates.domain import CorridorPolicy
-from compass.detours.domain import NetworkDetourPolicy
+from compass.detours.domain import NetworkDetourPolicy, NetworkDetourResult
 from compass.detours.service import evaluate_cng_detours
 from compass.models import (
     OsmFeature,
@@ -49,10 +49,38 @@ async def rank_cng_candidates(
         detour_policy=detour_policy,
         max_route_geometry_points=max_route_geometry_points,
     )
-    enrichments = load_candidate_enrichments(
+    return rank_network_candidates(
         session,
-        (candidate.station.station_id for candidate in network_result.candidates),
+        network_result,
+        include_closed=request.include_closed,
+        ranking_policy=ranking_policy,
     )
+
+
+def rank_network_candidates(
+    session: Session,
+    network_result: NetworkDetourResult,
+    *,
+    include_closed: bool,
+    ranking_policy: RankingPolicy,
+    enrichments: Mapping[int, CandidateEnrichment] | None = None,
+    enrichment_queries: int | None = None,
+) -> RankedCandidatesResult:
+    """Enrich and rank an already bounded set of road-network candidates."""
+    if enrichments is None:
+        enrichments = load_candidate_enrichments(
+            session,
+            (candidate.station.station_id for candidate in network_result.candidates),
+        )
+        executed_enrichment_queries = 1 if network_result.candidates else 0
+    else:
+        executed_enrichment_queries = (
+            enrichment_queries
+            if enrichment_queries is not None
+            else (1 if network_result.candidates else 0)
+        )
+    if executed_enrichment_queries < 0:
+        raise ValueError("enrichment_queries must not be negative")
     prepared: list[RankedCandidate] = []
     open_count = 0
     closed_count = 0
@@ -93,7 +121,7 @@ async def rank_cng_candidates(
         )
         if price is not None:
             price_available_count += 1
-        if opening.state == "closed" and not request.include_closed:
+        if opening.state == "closed" and not include_closed:
             continue
         prepared.append(
             RankedCandidate(
@@ -110,14 +138,14 @@ async def rank_cng_candidates(
 
     ranked = _score_and_sort(
         prepared,
-        maximum_detour_seconds=request.network_request.maximum_detour_seconds,
+        maximum_detour_seconds=network_result.maximum_detour_seconds,
         policy=ranking_policy,
     )
     detour_eligible_count = len(network_result.candidates)
     return RankedCandidatesResult(
         network_result=network_result,
         policy=ranking_policy,
-        include_closed=request.include_closed,
+        include_closed=include_closed,
         metrics=RankingMetrics(
             detour_eligible_candidate_count=detour_eligible_count,
             opening_open_count=open_count,
@@ -126,11 +154,11 @@ async def rank_cng_candidates(
             opening_valid_count=valid_count,
             opening_missing_count=missing_count,
             opening_invalid_count=invalid_count,
-            excluded_closed_count=(0 if request.include_closed else closed_count),
+            excluded_closed_count=(0 if include_closed else closed_count),
             price_available_count=price_available_count,
             price_missing_count=detour_eligible_count - price_available_count,
             ranked_candidate_count=len(ranked),
-            enrichment_queries=1 if detour_eligible_count else 0,
+            enrichment_queries=executed_enrichment_queries,
         ),
         candidates=ranked,
     )

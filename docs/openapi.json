@@ -76,6 +76,141 @@
         "title": "BaseRouteResponse",
         "type": "object"
       },
+      "CngItineraryRouteLegResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "available_range_at_departure_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Available Range At Departure Km",
+            "type": "number"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "estimated_remaining_range_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Estimated Remaining Range At Arrival Km",
+            "type": "number"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/RouteGeometry"
+          },
+          "kind": {
+            "enum": [
+              "origin_to_cng_station",
+              "cng_station_to_cng_station",
+              "cng_station_to_destination"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "maneuvers": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverResponse"
+            },
+            "title": "Maneuvers",
+            "type": "array"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "reserve_margin_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Reserve Margin At Arrival Km",
+            "type": "number"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "kind",
+          "origin",
+          "destination",
+          "distance_meters",
+          "duration_seconds",
+          "geometry",
+          "maneuvers",
+          "available_range_at_departure_km",
+          "estimated_remaining_range_at_arrival_km",
+          "reserve_margin_at_arrival_km"
+        ],
+        "title": "CngItineraryRouteLegResponse",
+        "type": "object"
+      },
+      "CngItineraryStopResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "mimit_station_id": {
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mimit_station_id",
+          "name",
+          "municipality",
+          "province",
+          "location",
+          "sequence"
+        ],
+        "title": "CngItineraryStopResponse",
+        "type": "object"
+      },
       "CoordinateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1132,6 +1267,612 @@
         "title": "OpeningHoursEvaluationResponse",
         "type": "object"
       },
+      "PredictiveCandidatesApiRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "departure_at": {
+            "description": "Timezone-aware departure instant used to calculate station and destination ETAs.",
+            "format": "date-time",
+            "title": "Departure At",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "effective_cng_range_km": {
+            "description": "Usable CNG range after the caller's reserve/safety allowance. It controls spatial corridor width only.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "estimated_remaining_cng_range_km": {
+            "description": "Caller-estimated CNG range remaining at the request origin.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Estimated Remaining Cng Range Km",
+            "type": "number"
+          },
+          "include_closed": {
+            "default": false,
+            "description": "Include stations evaluated as closed at ETA with a zero opening score. Unknown opening state remains included regardless of this option.",
+            "title": "Include Closed",
+            "type": "boolean"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "maximum_detour_minutes": {
+            "description": "Inclusive maximum added road-network travel time.",
+            "maximum": 240.0,
+            "minimum": 0.0,
+            "title": "Maximum Detour Minutes",
+            "type": "number"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "reserve_cng_range_km": {
+            "description": "Safety range that must remain on arrival at a suggested station.",
+            "exclusiveMaximum": 2000.0,
+            "minimum": 0.0,
+            "title": "Reserve Cng Range Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "effective_cng_range_km",
+          "maximum_detour_minutes",
+          "departure_at",
+          "estimated_remaining_cng_range_km",
+          "reserve_cng_range_km"
+        ],
+        "title": "PredictiveCandidatesApiRequest",
+        "type": "object"
+      },
+      "PredictiveCandidatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_route": {
+            "$ref": "#/components/schemas/BaseRouteResponse"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/PredictiveRankedCandidateResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "corridor": {
+            "$ref": "#/components/schemas/CorridorPolicyResponse"
+          },
+          "cost_basis": {
+            "$ref": "#/components/schemas/NetworkCostBasisResponse"
+          },
+          "departure_at": {
+            "format": "date-time",
+            "title": "Departure At",
+            "type": "string"
+          },
+          "itinerary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PredictiveItineraryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maximum_detour_minutes": {
+            "minimum": 0.0,
+            "title": "Maximum Detour Minutes",
+            "type": "number"
+          },
+          "network_evaluation": {
+            "$ref": "#/components/schemas/NetworkEvaluationMetricsResponse"
+          },
+          "range_basis": {
+            "$ref": "#/components/schemas/PredictiveRangeBasisResponse"
+          },
+          "ranking_evaluation": {
+            "$ref": "#/components/schemas/RankingMetricsResponse"
+          },
+          "ranking_policy": {
+            "$ref": "#/components/schemas/RankingPolicyResponse"
+          },
+          "reachability_evaluation": {
+            "$ref": "#/components/schemas/PredictiveReachabilityMetricsResponse"
+          },
+          "spatial_pruning": {
+            "$ref": "#/components/schemas/SpatialPruningMetricsResponse"
+          },
+          "stage": {
+            "const": "predictive_ranking",
+            "default": "predictive_ranking",
+            "title": "Stage",
+            "type": "string"
+          },
+          "suggestion_state": {
+            "enum": [
+              "not_needed",
+              "suggested",
+              "no_reachable_station",
+              "no_eligible_station",
+              "no_complete_itinerary"
+            ],
+            "title": "Suggestion State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suggestion_state",
+          "departure_at",
+          "maximum_detour_minutes",
+          "base_route",
+          "corridor",
+          "spatial_pruning",
+          "cost_basis",
+          "network_evaluation",
+          "range_basis",
+          "reachability_evaluation",
+          "ranking_policy",
+          "ranking_evaluation",
+          "candidates",
+          "itinerary"
+        ],
+        "title": "PredictiveCandidatesResponse",
+        "type": "object"
+      },
+      "PredictiveDestinationLegResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "available_range_at_departure_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Available Range At Departure Km",
+            "type": "number"
+          },
+          "destination_eta": {
+            "format": "date-time",
+            "title": "Destination Eta",
+            "type": "string"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "estimated_remaining_range_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Estimated Remaining Range At Arrival Km",
+            "type": "number"
+          },
+          "reserve_margin_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Reserve Margin At Arrival Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "distance_meters",
+          "duration_seconds",
+          "available_range_at_departure_km",
+          "estimated_remaining_range_at_arrival_km",
+          "reserve_margin_at_arrival_km",
+          "destination_eta"
+        ],
+        "title": "PredictiveDestinationLegResponse",
+        "type": "object"
+      },
+      "PredictiveItineraryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_leg": {
+            "$ref": "#/components/schemas/PredictiveDestinationLegResponse"
+          },
+          "distance_model": {
+            "const": "road_network",
+            "title": "Distance Model",
+            "type": "string"
+          },
+          "refuel_assumption": {
+            "const": "full_effective_range_after_each_stop",
+            "title": "Refuel Assumption",
+            "type": "string"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/PredictiveItineraryStopResponse"
+            },
+            "minItems": 1,
+            "title": "Stops",
+            "type": "array"
+          },
+          "total_distance_meters": {
+            "minimum": 0.0,
+            "title": "Total Distance Meters",
+            "type": "number"
+          },
+          "total_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Total Duration Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "stops",
+          "destination_leg",
+          "total_distance_meters",
+          "total_duration_seconds",
+          "refuel_assumption",
+          "distance_model"
+        ],
+        "title": "PredictiveItineraryResponse",
+        "type": "object"
+      },
+      "PredictiveItineraryStopResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "arrival_at": {
+            "format": "date-time",
+            "title": "Arrival At",
+            "type": "string"
+          },
+          "available_range_at_departure_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Available Range At Departure Km",
+            "type": "number"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "estimated_remaining_range_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Estimated Remaining Range At Arrival Km",
+            "type": "number"
+          },
+          "leg_distance_meters": {
+            "minimum": 0.0,
+            "title": "Leg Distance Meters",
+            "type": "number"
+          },
+          "leg_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Leg Duration Seconds",
+            "type": "number"
+          },
+          "location": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "mimit_station_id": {
+            "title": "Mimit Station Id",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "opening": {
+            "$ref": "#/components/schemas/OpeningHoursEvaluationResponse"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "osm_match_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Osm Match Confidence"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrentCngPriceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "reserve_margin_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Reserve Margin At Arrival Km",
+            "type": "number"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "station_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Station Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "station_id",
+          "mimit_station_id",
+          "name",
+          "municipality",
+          "province",
+          "location",
+          "arrival_at",
+          "leg_distance_meters",
+          "leg_duration_seconds",
+          "available_range_at_departure_km",
+          "estimated_remaining_range_at_arrival_km",
+          "reserve_margin_at_arrival_km",
+          "opening",
+          "phone",
+          "brand",
+          "operator",
+          "price"
+        ],
+        "title": "PredictiveItineraryStopResponse",
+        "type": "object"
+      },
+      "PredictiveRangeBasisResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "consumption_model": {
+            "const": "caller_estimated_remaining_range",
+            "title": "Consumption Model",
+            "type": "string"
+          },
+          "destination_reachable_with_reserve": {
+            "title": "Destination Reachable With Reserve",
+            "type": "boolean"
+          },
+          "effective_cng_range_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "estimated_remaining_cng_range_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Estimated Remaining Cng Range Km",
+            "type": "number"
+          },
+          "range_shortfall_to_destination_km": {
+            "minimum": 0.0,
+            "title": "Range Shortfall To Destination Km",
+            "type": "number"
+          },
+          "remaining_route_distance_km": {
+            "minimum": 0.0,
+            "title": "Remaining Route Distance Km",
+            "type": "number"
+          },
+          "remaining_route_origin": {
+            "const": "request_origin",
+            "title": "Remaining Route Origin",
+            "type": "string"
+          },
+          "reserve_cng_range_km": {
+            "minimum": 0.0,
+            "title": "Reserve Cng Range Km",
+            "type": "number"
+          },
+          "traffic_adjusted": {
+            "const": false,
+            "title": "Traffic Adjusted",
+            "type": "boolean"
+          },
+          "traffic_state": {
+            "const": "not_configured",
+            "title": "Traffic State",
+            "type": "string"
+          },
+          "usable_range_before_reserve_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Usable Range Before Reserve Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "effective_cng_range_km",
+          "estimated_remaining_cng_range_km",
+          "reserve_cng_range_km",
+          "usable_range_before_reserve_km",
+          "remaining_route_distance_km",
+          "range_shortfall_to_destination_km",
+          "destination_reachable_with_reserve",
+          "remaining_route_origin",
+          "consumption_model",
+          "traffic_state",
+          "traffic_adjusted"
+        ],
+        "title": "PredictiveRangeBasisResponse",
+        "type": "object"
+      },
+      "PredictiveRankedCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/RankedCandidateResponse"
+          },
+          "estimated_remaining_range_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Estimated Remaining Range At Arrival Km",
+            "type": "number"
+          },
+          "reserve_margin_at_arrival_km": {
+            "minimum": 0.0,
+            "title": "Reserve Margin At Arrival Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "candidate",
+          "estimated_remaining_range_at_arrival_km",
+          "reserve_margin_at_arrival_km"
+        ],
+        "title": "PredictiveRankedCandidateResponse",
+        "type": "object"
+      },
+      "PredictiveReachabilityMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detour_eligible_candidate_count": {
+            "minimum": 0.0,
+            "title": "Detour Eligible Candidate Count",
+            "type": "integer"
+          },
+          "evaluation_skipped_destination_reachable": {
+            "title": "Evaluation Skipped Destination Reachable",
+            "type": "boolean"
+          },
+          "excluded_unreachable_before_reserve_count": {
+            "minimum": 0.0,
+            "title": "Excluded Unreachable Before Reserve Count",
+            "type": "integer"
+          },
+          "furthest_reachable_route_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Furthest Reachable Route Fraction"
+          },
+          "itinerary_search_labels": {
+            "minimum": 0.0,
+            "title": "Itinerary Search Labels",
+            "type": "integer"
+          },
+          "pairwise_matrix_calls": {
+            "minimum": 0.0,
+            "title": "Pairwise Matrix Calls",
+            "type": "integer"
+          },
+          "pairwise_matrix_fallback_splits": {
+            "minimum": 0.0,
+            "title": "Pairwise Matrix Fallback Splits",
+            "type": "integer"
+          },
+          "pairwise_matrix_location_failures": {
+            "minimum": 0.0,
+            "title": "Pairwise Matrix Location Failures",
+            "type": "integer"
+          },
+          "ranked_reachable_candidate_count": {
+            "minimum": 0.0,
+            "title": "Ranked Reachable Candidate Count",
+            "type": "integer"
+          },
+          "reachable_before_reserve_count": {
+            "minimum": 0.0,
+            "title": "Reachable Before Reserve Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "detour_eligible_candidate_count",
+          "reachable_before_reserve_count",
+          "excluded_unreachable_before_reserve_count",
+          "ranked_reachable_candidate_count",
+          "evaluation_skipped_destination_reachable",
+          "pairwise_matrix_calls",
+          "pairwise_matrix_fallback_splits",
+          "pairwise_matrix_location_failures",
+          "itinerary_search_labels"
+        ],
+        "title": "PredictiveReachabilityMetricsResponse",
+        "type": "object"
+      },
       "RankedCandidateResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1799,6 +2540,126 @@
           "maneuvers"
         ],
         "title": "RouteLegResponse",
+        "type": "object"
+      },
+      "RouteWithCngItineraryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "effective_cng_range_km": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Effective Cng Range Km",
+            "type": "number"
+          },
+          "estimated_remaining_cng_range_km": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Estimated Remaining Cng Range Km",
+            "type": "number"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "mimit_station_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Mimit Station Ids",
+            "type": "array"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "reserve_cng_range_km": {
+            "exclusiveMaximum": 2000.0,
+            "minimum": 0.0,
+            "title": "Reserve Cng Range Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "mimit_station_ids",
+          "effective_cng_range_km",
+          "estimated_remaining_cng_range_km",
+          "reserve_cng_range_km"
+        ],
+        "title": "RouteWithCngItineraryRequest",
+        "type": "object"
+      },
+      "RouteWithCngItineraryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/CngItineraryRouteLegResponse"
+            },
+            "maxItems": 33,
+            "minItems": 2,
+            "title": "Legs",
+            "type": "array"
+          },
+          "provider": {
+            "const": "valhalla",
+            "title": "Provider",
+            "type": "string"
+          },
+          "range_validation": {
+            "const": "all_legs_preserve_reserve",
+            "default": "all_legs_preserve_reserve",
+            "title": "Range Validation",
+            "type": "string"
+          },
+          "selected_stops": {
+            "items": {
+              "$ref": "#/components/schemas/CngItineraryStopResponse"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Selected Stops",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selected_stops",
+          "distance_meters",
+          "duration_seconds",
+          "legs",
+          "provider"
+        ],
+        "title": "RouteWithCngItineraryResponse",
         "type": "object"
       },
       "RouteWithCngStopRequest": {
@@ -2650,6 +3511,67 @@
         ]
       }
     },
+    "/api/v1/cng/predictive-candidates": {
+      "post": {
+        "operationId": "predictive_candidates_api_v1_cng_predictive_candidates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PredictiveCandidatesApiRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictiveCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid range request or no route."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database or routing unavailable."
+          }
+        },
+        "summary": "Predictive Candidates",
+        "tags": [
+          "predictive-refuelling"
+        ]
+      }
+    },
     "/api/v1/cng/ranked-candidates": {
       "post": {
         "operationId": "ranked_candidates_api_v1_cng_ranked_candidates_post",
@@ -2882,6 +3804,87 @@
         "summary": "Base Route",
         "tags": [
           "routing"
+        ]
+      }
+    },
+    "/api/v1/routes/with-cng-itinerary": {
+      "post": {
+        "operationId": "route_with_cng_itinerary_api_v1_routes_with_cng_itinerary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteWithCngItineraryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteWithCngItineraryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "One or more stations were not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The itinerary is unusable or unsafe."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request or no route."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database or routing unavailable."
+          }
+        },
+        "summary": "Route With Cng Itinerary",
+        "tags": [
+          "stations"
         ]
       }
     },

@@ -13,8 +13,8 @@ Compass uses six explicit server/domain boundaries and one first-class device cl
 4. **Routing provider** exposes a provider-neutral async interface. Its Valhalla adapter owns HTTP
    translation, response validation and failure classification.
 5. **Routing intelligence** owns corridor policy, spatial pruning, batched road detour math,
-   arrival-time opening status and explainable ranking; later phases add predictive reachability.
-   It does not live in the Android UI or raw ETL adapters.
+   arrival-time opening status, explainable ranking and reserve-aware predictive reachability. It
+   does not live in the Android UI or raw ETL adapters.
 6. **FastAPI** exposes strict versioned mobile contracts without exposing provider response shapes.
 7. **Android (Kotlin, Jetpack Compose, MapLibre Native)** owns presentation and interaction state.
 
@@ -319,6 +319,71 @@ combined map line while retaining the two maneuver legs and their station bounda
 - `traffic=not_configured` remains visible; graph-speed duration is not presented as live traffic.
 - No location permission, navigation session, voice instruction, background tracking or rerouting
   service is introduced.
+
+## Phase 10 predictive CNG reachability
+
+Phase 10 composes accepted route, candidate, detour and ranking boundaries without moving
+safety-relevant policy into Compose:
+
+```text
+request origin + caller range/reserve
+                 │
+                 v
+        one remaining base route
+                 │
+       ┌─────────┴──────────┐
+       │ destination within │ yes ─> not_needed; skip DB/matrices/enrichment
+       │ usable road range? │
+       └─────────┬──────────┘
+                 │ no
+                 v
+   PostGIS corridor ─> bounded Valhalla matrices ─> detour eligibility
+                                                        │
+                                                        v
+                       first road leg <= remaining - reserve
+                                                        │
+                                                        v
+                       candidate-to-candidate Valhalla matrices
+                                                        │
+                                                        v
+                       complete forward itinerary search
+                          (later legs <= full - reserve)
+                                                        │
+                                                        v
+                      per-stop ETA/opening/price enrichment
+```
+
+`request_origin` is the current or previous waypoint for the remaining route. The caller supplies
+estimated remaining CNG range because no telemetry integration exists. Each response identifies this
+consumption model and keeps `traffic_state=not_configured`; the system does not reinterpret graph
+speeds as live traffic.
+
+The predictive API returns distinct `not_needed`, `suggested`, `no_reachable_station`,
+`no_eligible_station` and `no_complete_itinerary` states. `suggested` means a complete ordered chain
+has been found, not merely that its first station is reachable. The first leg uses the driver-supplied
+remaining range; every later leg assumes a full refill and must preserve the same reserve. Search
+progress is measured by remaining road-network distance to the destination, not route-projection or
+Euclidean distance.
+
+`POST /api/v1/routes/with-cng-itinerary` is the execution boundary. It resolves the ordered MIMIT
+IDs in one query, asks Valhalla for one multi-waypoint route and revalidates the actual distance and
+reserve margin of every returned leg. Android maps the strict predictive plan and validated route
+into separate domain models, draws every stop marker, and divides maneuvers by refuelling leg. The
+shared contract bounds a plan to 32 stops and derives route totals from the validated leg sums.
+
+## Deliberate Phase 10 limits
+
+- Remaining range is driver supplied; no CAN/OBD integration, tank sensor or fuel-level inference is
+  claimed.
+- Every planned stop assumes an immediate full refill to the configured effective range; refill
+  dwell time, partial fills and station queues are not yet modeled.
+- The maximum-detour policy remains a per-station eligibility bound. It is not a promise that the
+  sum of all refuelling deviations is below one global detour value.
+- The deterministic request origin replaces live navigation progress for this gate.
+- Traffic-adjusted consumption, route-progress updates and proactive background notifications remain
+  future work.
+- Destination editing, active guidance, voice, rerouting and location permissions are not bundled
+  into predictive reachability.
 
 ## Runtime
 

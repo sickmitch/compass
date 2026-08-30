@@ -1,12 +1,13 @@
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from compass.stations.domain import (
     StationCurrentPriceRecord,
     StationDetail,
     StationOsmEnrichment,
+    StationRoutePoint,
 )
 
 
@@ -93,3 +94,36 @@ def load_station_detail(session: Session, mimit_station_id: str) -> StationDetai
         current_cng_prices=prices,
         osm=osm,
     )
+
+
+def load_station_route_points(
+    session: Session,
+    mimit_station_ids: tuple[str, ...],
+) -> dict[str, StationRoutePoint]:
+    """Load the routing fields for an ordered station itinerary in one query."""
+    if not mimit_station_ids:
+        return {}
+    statement = text(
+        "SELECT s.id AS station_id, s.mimit_station_id, s.name, s.municipality, "
+        "s.province, ST_Y(s.location::geometry) AS latitude, "
+        "ST_X(s.location::geometry) AS longitude, s.is_active "
+        "FROM stations AS s "
+        "WHERE s.mimit_station_id IN :mimit_station_ids"
+    ).bindparams(bindparam("mimit_station_ids", expanding=True))
+    rows = session.execute(
+        statement,
+        {"mimit_station_ids": mimit_station_ids},
+    ).all()
+    return {
+        row.mimit_station_id: StationRoutePoint(
+            station_id=int(row.station_id),
+            mimit_station_id=row.mimit_station_id,
+            name=row.name,
+            municipality=row.municipality,
+            province=row.province,
+            latitude=float(row.latitude) if row.latitude is not None else None,
+            longitude=float(row.longitude) if row.longitude is not None else None,
+            is_active=bool(row.is_active),
+        )
+        for row in rows
+    }

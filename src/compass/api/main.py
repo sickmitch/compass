@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from compass import __version__
+from compass.api.predictive import router as predictive_router
 from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
 from compass.api.stations import router as stations_router
@@ -29,6 +30,7 @@ app = FastAPI(
 )
 app.include_router(routes_router)
 app.include_router(ranking_router)
+app.include_router(predictive_router)
 app.include_router(stations_router)
 app.include_router(system_router)
 

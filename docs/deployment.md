@@ -762,3 +762,135 @@ Return the runner output and these diagnostics. The failed response body remains
 `/tmp/compass-phase7-*.json` file; return that file only when the failing `[N/9]` step identifies it.
 Do not return `.env`, credentials, full large polylines or Valhalla tile contents. Stop at this gate;
 do not begin Phase 8 until it passes or the operator explicitly waives it.
+
+## Phase 10 predictive CNG reachability validation
+
+Run this gate from the repository root after synchronizing Phase 10. It adds no migration, so the
+expected revision remains `0002 (head)`. Reuse the accepted full-Italy database and Valhalla graph.
+
+### Step 1: build the new application image
+
+```bash
+docker compose build api
+```
+
+Wait for this command to finish.
+
+### Step 2: restart the backend and router
+
+```bash
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+```
+
+Wait for all dependency checks to finish.
+
+### Step 3: verify service state
+
+```bash
+docker compose --profile routing ps -a
+```
+
+`db`, `api` and `valhalla` must be healthy. `migrate` must exit with status 0.
+
+### Step 4: open the SSH tunnel when the Android build machine is remote
+
+Skip this step only when the repository/device machine is also the live server. Otherwise open a
+separate terminal on the Android build machine and keep this command running:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
+```
+
+Replace `TEST_SERVER` with the real hostname. Do not type subsequent commands into that terminal.
+
+### Step 5: export the Android toolchain and API endpoint
+
+Open a second terminal at the repository root:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+```
+
+### Step 6: run the complete gate
+
+```bash
+bash scripts/run-phase10-live.sh
+```
+
+Do not copy individual requests from the runner. It writes each body and response to a distinct
+`/tmp/compass-phase10-*.json` file, validates the predictive states and the complete multi-stop
+route, then builds, installs and launches the Android app.
+
+Expected automated invariants:
+
+- readiness is HTTP 200 with database and routing ready; degraded source freshness is visible;
+- live OpenAPI exposes the corrected Phase 10 predictive itinerary contract, including
+  `/api/v1/routes/with-cng-itinerary`, `PredictiveCandidatesResponse.itinerary` and pairwise
+  itinerary-search metrics;
+- 120 km remaining with a 30 km reserve and 300 km full range returns a complete ordered itinerary;
+- the exposed first stop is within 90 road km and all later plan legs fit the 270 km full-refill
+  usable range;
+- 300 km remaining with a 30 km reserve returns `not_needed`, one base route call, zero matrix calls
+  and zero enrichment queries;
+- 31 km remaining with a 30 km reserve returns `no_reachable_station` for the accepted fixed route;
+- no response claims live traffic or telemetry-derived consumption;
+- 65 km remaining, 30 km reserve and 100 km full range produces at least three ordered CNG stops;
+- the 65/30/100 first leg is at most 35 road km, every later leg is at most 70 road km and every
+  station/destination reserve margin is non-negative;
+- `routes/with-cng-itinerary` returns all planned MIMIT stops in order, exactly one more route leg
+  than stops, and `range_validation=all_legs_preserve_reserve`;
+- Android unit tests, lint and APK assembly pass, installation succeeds, cold launch reports
+  `Status: ok`, and no immediate Compass fatal exception is present;
+- Alembic remains `0002 (head)` when checked after the runner.
+
+The runner's automated result is not the device gate. Follow its fully described scenarios and
+return its entire output plus the four requested screenshots.
+
+### Phase 10 diagnostics
+
+First capture service state:
+
+```bash
+docker compose --profile routing ps -a
+```
+
+Then capture bounded logs:
+
+```bash
+docker compose --profile routing logs --no-color --tail=500 api valhalla db migrate
+```
+
+Inspect the response named by the failing runner step, one command at a time:
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-standard-response.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-not-needed-response.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-unreachable-response.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-multi-stop-response.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase10-itinerary-route-response.json
+```
+
+Check the deployed schema revision:
+
+```bash
+docker compose exec -T api alembic current
+```
+
+For device connectivity and crash diagnostics use the separate commands in
+[Android client development](android.md#diagnostics). Return only the failing artifact and bounded
+logs; never return `.env`, credentials, the full graph or complete unabridged route polylines. Stop
+at this gate until the failure is fixed or explicitly waived.
