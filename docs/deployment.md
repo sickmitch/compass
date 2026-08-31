@@ -894,3 +894,88 @@ For device connectivity and crash diagnostics use the separate commands in
 [Android client development](android.md#diagnostics). Return only the failing artifact and bounded
 logs; never return `.env`, credentials, the full graph or complete unabridged route polylines. Stop
 at this gate until the failure is fixed or explicitly waived.
+
+## Phase 11 Android route endpoint editing validation
+
+Phase 11 is an Android-only increment over the accepted Phase 10 backend. It does not add a
+migration; the expected database revision remains `0002 (head)`.
+
+### Step 1: rebuild/restart the synchronized services
+
+```bash
+docker compose build api
+```
+
+```bash
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+```
+
+Confirm the state:
+
+```bash
+docker compose --profile routing ps -a
+```
+
+`db`, `api` and `valhalla` must be healthy. `migrate` must exit with status 0.
+
+### Step 2: open the SSH tunnel when needed
+
+Skip this only when the Android build/device machine is also the live server. Otherwise open a
+separate terminal on the Android build machine and keep it open:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
+```
+
+### Step 3: run the Android gate
+
+In a second terminal at the repository root:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-phase11-live.sh
+```
+
+Expected automated invariants:
+
+- readiness is HTTP 200 with database and routing ready;
+- the live backend returns a Valhalla route for the generated Rome-to-Florence request;
+- Android unit tests, lint and debug APK assembly pass for version `0.4.0`;
+- installation succeeds, cold launch reports `Status: ok`, and no immediate Compass fatal
+  exception is present.
+
+Manual acceptance is still required. Follow the runner scenarios and return its complete output plus
+the five requested screenshots: edited Rome-to-Florence preview, manual CNG candidates for the
+edited route, selected-stop route for the edited route, predictive result for the edited route and
+invalid-coordinate validation. On edited routes, destination labels must be generic and must not
+retain fixed Milan/Bologna copy.
+
+### Phase 11 diagnostics
+
+Inspect generated artifacts one at a time:
+
+```bash
+python3 -m json.tool /tmp/compass-phase11-custom-route-request.json
+```
+
+```bash
+python3 -m json.tool /tmp/compass-phase11-custom-route-response.json
+```
+
+Check the deployed schema revision:
+
+```bash
+docker compose exec -T api alembic current
+```
+
+Capture bounded service logs:
+
+```bash
+docker compose --profile routing logs --no-color --tail=300 api valhalla db migrate
+```
+
+For device connectivity and crash diagnostics use
+[Android client diagnostics](android.md#diagnostics). Return only the failing artifact and bounded
+logs.

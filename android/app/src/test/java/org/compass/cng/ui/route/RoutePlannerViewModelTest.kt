@@ -75,6 +75,52 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
+    fun editsRouteCoordinatesAndClearsRouteDependentState() = runTest {
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
+            rankedResult = Result.success(sampleRankedStations()),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openAddStop()
+        viewModel.searchCngStations()
+        assertEquals(PlannerStage.CNG_CANDIDATES, viewModel.uiState.value.stage)
+        assertTrue(viewModel.uiState.value.rankedStations?.candidates?.isNotEmpty() == true)
+
+        viewModel.openRouteConfiguration()
+        viewModel.updateDestinationLongitude("200")
+        viewModel.applyRouteInputs()
+
+        assertEquals(1, repository.previewCalls)
+        assertEquals(
+            "Inserisci una longitudine valida per la destinazione, tra -180 e 180.",
+            viewModel.uiState.value.message,
+        )
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+
+        val rome = Coordinate(latitude = 41.9028, longitude = 12.4964)
+        val florence = Coordinate(latitude = 43.7696, longitude = 11.2558)
+        viewModel.updateOriginLatitude("41.9028")
+        viewModel.updateOriginLongitude("12.4964")
+        viewModel.updateDestinationLatitude("43.7696")
+        viewModel.updateDestinationLongitude("11.2558")
+        viewModel.applyRouteInputs()
+
+        assertEquals(2, repository.previewCalls)
+        assertEquals(rome, repository.lastPreviewOrigin)
+        assertEquals(florence, repository.lastPreviewDestination)
+        assertEquals(rome, viewModel.uiState.value.activeOrigin)
+        assertEquals(florence, viewModel.uiState.value.activeDestination)
+        assertEquals(rome, viewModel.uiState.value.baseRoute?.origin)
+        assertEquals(florence, viewModel.uiState.value.baseRoute?.destination)
+        assertEquals("41.902800", viewModel.uiState.value.originLatitudeInput)
+        assertEquals("11.255800", viewModel.uiState.value.destinationLongitudeInput)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertNull(viewModel.uiState.value.rankedStations)
+        assertNull(viewModel.uiState.value.selectedRoute)
+        assertNull(viewModel.uiState.value.predictiveSuggestion)
+    }
+
+    @Test
     fun validatesCngSearchInputsWithoutCallingRepository() = runTest {
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
         val viewModel = RoutePlannerViewModel(repository)
@@ -133,6 +179,8 @@ class RoutePlannerViewModelTest {
         assertEquals("2026-08-30T10:00+02:00", repository.lastDepartureAt.toString())
         assertEquals(PlannerStage.PREDICTIVE_ITINERARY, viewModel.uiState.value.stage)
         assertEquals(CngWorkflowMode.PREDICTIVE, viewModel.uiState.value.workflowMode)
+        assertEquals(sampleRoute().origin, repository.lastPredictiveOrigin)
+        assertEquals(sampleRoute().destination, repository.lastPredictiveDestination)
         assertSame(suggestion, viewModel.uiState.value.predictiveSuggestion)
         assertNull(viewModel.uiState.value.rankedStations)
         assertEquals("43690", viewModel.uiState.value.predictiveSuggestion?.itinerary?.stops?.single()?.station?.mimitStationId)
@@ -241,6 +289,8 @@ class RoutePlannerViewModelTest {
         assertEquals(350.5, repository.lastRangeKm, 0.0)
         assertEquals(12.5, repository.lastDetourMinutes, 0.0)
         assertEquals("2026-08-30T10:00+02:00", repository.lastDepartureAt.toString())
+        assertEquals(sampleRoute().origin, repository.lastCandidateOrigin)
+        assertEquals(sampleRoute().destination, repository.lastCandidateDestination)
     }
 
     @Test
@@ -259,9 +309,54 @@ class RoutePlannerViewModelTest {
         viewModel.selectStation(ranked.candidates.single())
 
         assertEquals("43690", repository.lastSelectedStationId)
+        assertEquals(sampleRoute().origin, repository.lastSelectedOrigin)
+        assertEquals(sampleRoute().destination, repository.lastSelectedDestination)
         assertEquals(PlannerStage.SELECTED_ROUTE, viewModel.uiState.value.stage)
         assertSame(selectedRoute, viewModel.uiState.value.selectedRoute)
         assertFalse(viewModel.uiState.value.isBusy)
+    }
+
+    @Test
+    fun downstreamRequestsUseEditedRouteCoordinates() = runTest {
+        val customOrigin = Coordinate(latitude = 41.9028, longitude = 12.4964)
+        val customDestination = Coordinate(latitude = 43.7696, longitude = 11.2558)
+        val ranked = sampleRankedStations()
+        val suggestion = samplePredictiveSuggestion(PredictiveSuggestionState.SUGGESTED)
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
+            rankedResult = Result.success(ranked),
+            selectedRouteResult = Result.success(sampleSelectedRoute()),
+            predictiveResult = Result.success(suggestion),
+            selectedItineraryResult = Result.success(sampleMultiStopSelectedRoute()),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+
+        viewModel.openRouteConfiguration()
+        viewModel.updateOriginLatitude("41.9028")
+        viewModel.updateOriginLongitude("12.4964")
+        viewModel.updateDestinationLatitude("43.7696")
+        viewModel.updateDestinationLongitude("11.2558")
+        viewModel.applyRouteInputs()
+
+        viewModel.openAddStop()
+        viewModel.searchCngStations()
+        assertEquals(customOrigin, repository.lastCandidateOrigin)
+        assertEquals(customDestination, repository.lastCandidateDestination)
+
+        viewModel.selectStation(ranked.candidates.single())
+        assertEquals(customOrigin, repository.lastSelectedOrigin)
+        assertEquals(customDestination, repository.lastSelectedDestination)
+
+        viewModel.removeCngStop()
+        viewModel.openPredictiveRange()
+        viewModel.updateEstimatedRemainingRange("120")
+        viewModel.evaluatePredictiveRange()
+        assertEquals(customOrigin, repository.lastPredictiveOrigin)
+        assertEquals(customDestination, repository.lastPredictiveDestination)
+
+        viewModel.acceptPredictiveItinerary()
+        assertEquals(customOrigin, repository.lastItineraryOrigin)
+        assertEquals(customDestination, repository.lastItineraryDestination)
     }
 
     @Test
@@ -324,12 +419,23 @@ class RoutePlannerViewModelTest {
             AssertionError("routeWithCngItinerary was not expected"),
         ),
     ) : RoutingRepository {
+        var previewCalls = 0
         var candidateCalls = 0
         var predictiveCalls = 0
         var lastRangeKm = 0.0
         var lastRemainingRangeKm = 0.0
         var lastReserveRangeKm = 0.0
         var lastDetourMinutes = 0.0
+        var lastPreviewOrigin: Coordinate? = null
+        var lastPreviewDestination: Coordinate? = null
+        var lastCandidateOrigin: Coordinate? = null
+        var lastCandidateDestination: Coordinate? = null
+        var lastPredictiveOrigin: Coordinate? = null
+        var lastPredictiveDestination: Coordinate? = null
+        var lastSelectedOrigin: Coordinate? = null
+        var lastSelectedDestination: Coordinate? = null
+        var lastItineraryOrigin: Coordinate? = null
+        var lastItineraryDestination: Coordinate? = null
         lateinit var lastDepartureAt: OffsetDateTime
         var lastSelectedStationId: String? = null
         var lastItineraryStationIds: List<String>? = null
@@ -338,7 +444,21 @@ class RoutePlannerViewModelTest {
         override suspend fun previewRoute(
             origin: Coordinate,
             destination: Coordinate,
-        ): RoutePreview = baseResult.getOrThrow()
+        ): RoutePreview {
+            previewCalls += 1
+            lastPreviewOrigin = origin
+            lastPreviewDestination = destination
+            val route = baseResult.getOrThrow()
+            return if (route.origin == origin && route.destination == destination) {
+                route
+            } else {
+                route.copy(
+                    origin = origin,
+                    destination = destination,
+                    geometry = listOf(origin, destination),
+                )
+            }
+        }
 
         override suspend fun rankedCngStations(
             origin: Coordinate,
@@ -348,10 +468,24 @@ class RoutePlannerViewModelTest {
             departureAt: OffsetDateTime,
         ): RankedCngStations {
             candidateCalls += 1
+            lastCandidateOrigin = origin
+            lastCandidateDestination = destination
             lastRangeKm = effectiveCngRangeKm
             lastDetourMinutes = maximumDetourMinutes
             lastDepartureAt = departureAt
-            return rankedResult.getOrThrow()
+            val ranked = rankedResult.getOrThrow()
+            val route = ranked.baseRoute
+            return if (route.origin == origin && route.destination == destination) {
+                ranked
+            } else {
+                ranked.copy(
+                    baseRoute = route.copy(
+                        origin = origin,
+                        destination = destination,
+                        geometry = listOf(origin, destination),
+                    ),
+                )
+            }
         }
 
         override suspend fun routeWithCngStop(
@@ -359,6 +493,8 @@ class RoutePlannerViewModelTest {
             destination: Coordinate,
             mimitStationId: String,
         ): RouteWithCngStop {
+            lastSelectedOrigin = origin
+            lastSelectedDestination = destination
             lastSelectedStationId = mimitStationId
             return selectedRouteResult.getOrThrow()
         }
@@ -373,12 +509,26 @@ class RoutePlannerViewModelTest {
             departureAt: OffsetDateTime,
         ): PredictiveCngSuggestion {
             predictiveCalls += 1
+            lastPredictiveOrigin = origin
+            lastPredictiveDestination = destination
             lastRangeKm = effectiveCngRangeKm
             lastRemainingRangeKm = estimatedRemainingCngRangeKm
             lastReserveRangeKm = reserveCngRangeKm
             lastDetourMinutes = maximumDetourMinutes
             lastDepartureAt = departureAt
-            return predictiveResult.getOrThrow()
+            val suggestion = predictiveResult.getOrThrow()
+            val route = suggestion.baseRoute
+            return if (route.origin == origin && route.destination == destination) {
+                suggestion
+            } else {
+                suggestion.copy(
+                    baseRoute = route.copy(
+                        origin = origin,
+                        destination = destination,
+                        geometry = listOf(origin, destination),
+                    ),
+                )
+            }
         }
 
         override suspend fun routeWithCngItinerary(
@@ -389,6 +539,8 @@ class RoutePlannerViewModelTest {
             estimatedRemainingCngRangeKm: Double,
             reserveCngRangeKm: Double,
         ): RouteWithCngItinerary {
+            lastItineraryOrigin = origin
+            lastItineraryDestination = destination
             lastItineraryStationIds = mimitStationIds
             lastItineraryEffectiveRangeKm = effectiveCngRangeKm
             lastRemainingRangeKm = estimatedRemainingCngRangeKm

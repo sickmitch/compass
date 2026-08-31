@@ -646,9 +646,6 @@ Define realistic behavior when:
 - price data stale;
 - OSM enrichment missing;
 - mobile connectivity intermittent.
-
-Possible later work:
-
 - cached route;
 - cached CNG stations;
 - cached vector tiles;

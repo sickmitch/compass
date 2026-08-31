@@ -4,8 +4,8 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–10** foundation, including the predictive CNG
-reachability increment:
+This repository implements the accepted **Phases 0–11** foundation, including predictive CNG
+reachability and Android route-endpoint editing:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -53,9 +53,12 @@ reachability increment:
 - an independently range-validated multi-waypoint route through ordered official MIMIT IDs;
 - an Android predictive form whose remaining-range input starts empty, ordered stop/leg reserve
   margins and an executable Phase 10 API/device gate.
+- editable Android route coordinates for preview, manual Metano search and predictive CNG planning,
+  with the Milan-to-Bologna pair retained only as the startup default.
 
-It intentionally does **not** yet ingest traffic, read vehicle telemetry, edit route endpoints, or
-provide an active navigation session. Those remain later gated phases.
+It intentionally does **not** yet ingest traffic, read vehicle telemetry, provide address search or
+current-location selection, or provide an active navigation session. Those remain later gated
+phases.
 
 ## Quick local validation
 
@@ -250,6 +253,17 @@ Repository-local validation and the operator gate are documented in the
 [Phase 10 acceptance record](docs/phases/phase-10-acceptance.md). The accepted regression gate is
 reproducible with `bash scripts/run-phase10-live.sh` after the synchronized server image is rebuilt.
 
+## Phase 11 Android route endpoint editing
+
+Phase 11 removes the remaining fixed-route limitation from the Android planner. The app still starts
+from the accepted Milan-to-Bologna default, but the preview now has a `Modifica percorso` form for
+explicit origin/destination latitude and longitude. Applying new coordinates recalculates the base
+route and clears stale route-dependent CNG state. Manual Metano search, selected-stop routing and
+predictive CNG planning then use the active route returned by the backend.
+
+This increment deliberately does not add address search, current-location permissions, saved places
+or geocoding. The accepted live/device gate is automated by `scripts/run-phase11-live.sh`.
+
 ## Repository layout
 
 ```text
@@ -274,7 +288,7 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phases 2–10 have passed repository-local checks and their documented operator-run live or device
+Phases 2–11 have passed repository-local checks and their documented operator-run live or device
 tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
 representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
@@ -300,6 +314,9 @@ Phase 10 passed the corrected full-Italy/device gate. The mandatory 65 km remain
 and 100 km full-range regression now produces a complete three-stop refuelling chain, validates the
 actual multi-waypoint route with reserve preserved on every leg, and renders on device without
 system-bar overlap.
+Phase 11 passed after explicit Android route-coordinate editing was validated on device: the edited
+Rome-to-Florence route preview, manual CNG search, selected-stop route, predictive CNG flow and
+invalid-coordinate guard all behaved as expected, with generic destination labels on edited routes.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;

@@ -100,8 +100,22 @@ fun RoutePlannerScreen(
                     message = "Valuto autonomia e stazioni raggiungibili…",
                 )
                 else -> when (state.stage) {
+                    PlannerStage.CONFIGURE_ROUTE -> ConfigureRouteContent(
+                        route = baseRoute,
+                        originLatitudeInput = state.originLatitudeInput,
+                        originLongitudeInput = state.originLongitudeInput,
+                        destinationLatitudeInput = state.destinationLatitudeInput,
+                        destinationLongitudeInput = state.destinationLongitudeInput,
+                        message = state.message,
+                        onOriginLatitudeChanged = viewModel::updateOriginLatitude,
+                        onOriginLongitudeChanged = viewModel::updateOriginLongitude,
+                        onDestinationLatitudeChanged = viewModel::updateDestinationLatitude,
+                        onDestinationLongitudeChanged = viewModel::updateDestinationLongitude,
+                        onApply = viewModel::applyRouteInputs,
+                    )
                     PlannerStage.PREVIEW -> PreviewContent(
                         route = baseRoute,
+                        onEditRoute = viewModel::openRouteConfiguration,
                         onAddStop = viewModel::openAddStop,
                         onEvaluateRange = viewModel::openPredictiveRange,
                     )
@@ -192,7 +206,8 @@ private fun Header(
             )
             Text(
                 text = when (stage) {
-                    PlannerStage.PREVIEW -> "Anteprima percorso · Milano → Bologna"
+                    PlannerStage.CONFIGURE_ROUTE -> "Modifica partenza e destinazione"
+                    PlannerStage.PREVIEW -> "Anteprima percorso"
                     PlannerStage.CONFIGURE_CNG -> "Aggiungi tappa · Metano"
                     PlannerStage.CONFIGURE_PREDICTIVE -> "Valuta autonomia CNG"
                     PlannerStage.CNG_CANDIDATES -> "Stazioni Metano lungo il percorso"
@@ -283,6 +298,7 @@ private fun ErrorState(
 @Composable
 private fun PreviewContent(
     route: RoutePreview,
+    onEditRoute: () -> Unit,
     onAddStop: () -> Unit,
     onEvaluateRange: () -> Unit,
 ) {
@@ -300,11 +316,19 @@ private fun PreviewContent(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         )
+        OutlinedButton(
+            onClick = onEditRoute,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            Text("Modifica percorso")
+        }
         Button(
             onClick = onAddStop,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
         ) {
             Text("Aggiungi tappa")
         }
@@ -329,6 +353,123 @@ private fun PreviewContent(
                 .weight(0.52f),
         )
     }
+}
+
+@Composable
+private fun ConfigureRouteContent(
+    route: RoutePreview,
+    originLatitudeInput: String,
+    originLongitudeInput: String,
+    destinationLatitudeInput: String,
+    destinationLongitudeInput: String,
+    message: String?,
+    onOriginLatitudeChanged: (String) -> Unit,
+    onOriginLongitudeChanged: (String) -> Unit,
+    onDestinationLatitudeChanged: (String) -> Unit,
+    onDestinationLongitudeChanged: (String) -> Unit,
+    onApply: () -> Unit,
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        item {
+            RouteMap(
+                route = route,
+                mapStyleUrl = BuildConfig.COMPASS_MAP_STYLE_URL,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp),
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "Coordinate percorso",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Le stesse coordinate vengono usate per anteprima, stazioni Metano e rifornimento predittivo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        item {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    "Partenza",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CoordinateTextField(
+                        value = originLatitudeInput,
+                        onValueChange = onOriginLatitudeChanged,
+                        label = "Latitudine",
+                        modifier = Modifier.weight(1f),
+                    )
+                    CoordinateTextField(
+                        value = originLongitudeInput,
+                        onValueChange = onOriginLongitudeChanged,
+                        label = "Longitudine",
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    "Destinazione",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CoordinateTextField(
+                        value = destinationLatitudeInput,
+                        onValueChange = onDestinationLatitudeChanged,
+                        label = "Latitudine",
+                        modifier = Modifier.weight(1f),
+                    )
+                    CoordinateTextField(
+                        value = destinationLongitudeInput,
+                        onValueChange = onDestinationLongitudeChanged,
+                        label = "Longitudine",
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                message?.let { InlineError(it) }
+                Button(onClick = onApply, modifier = Modifier.fillMaxWidth()) {
+                    Text("Calcola percorso")
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoordinateTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        singleLine = true,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -763,7 +904,7 @@ private fun PredictiveItineraryContent(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            "Ultima tratta · Bologna",
+                            "Ultima tratta · destinazione",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -1100,7 +1241,7 @@ private fun SelectedItineraryManeuvers(
 
 private fun itineraryLegTitle(legIndex: Int, stopCount: Int): String = when {
     legIndex == 0 -> "Verso il rifornimento 1"
-    legIndex == stopCount -> "Dall'ultimo rifornimento a Bologna"
+    legIndex == stopCount -> "Dall'ultimo rifornimento alla destinazione"
     else -> "Dal rifornimento $legIndex al rifornimento ${legIndex + 1}"
 }
 
@@ -1113,7 +1254,7 @@ private fun SelectedRouteManeuvers(
         legs.forEachIndexed { legIndex, leg ->
             item(key = "leg-$legIndex") {
                 Text(
-                    if (legIndex == 0) "Verso la stazione" else "Dalla stazione a Bologna",
+                    if (legIndex == 0) "Verso la stazione" else "Dalla stazione alla destinazione",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -1315,7 +1456,7 @@ private fun predictiveStatusCopy(state: PredictiveSuggestionState): Pair<String,
     )
     PredictiveSuggestionState.NO_COMPLETE_ITINERARY -> Pair(
         "Viaggio CNG non completabile",
-        "Esiste una prima stazione raggiungibile, ma non una catena completa di rifornimenti che conservi la riserva fino a Bologna. Non fare affidamento su questo itinerario.",
+        "Esiste una prima stazione raggiungibile, ma non una catena completa di rifornimenti che conservi la riserva fino alla destinazione. Non fare affidamento su questo itinerario.",
     )
     PredictiveSuggestionState.SUGGESTED -> error("suggested results use the itinerary screen")
 }

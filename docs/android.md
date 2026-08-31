@@ -168,6 +168,39 @@ including the exact meaning of each input and expected screen. Return the comple
 four requested screenshots: 65/30/100 multi-stop plan, selected multi-stop route, not-needed state
 and no-reachable safety state.
 
+## Phase 11 editable-route physical-device live gate
+
+Run this on the workstation attached to the Android device. If the backend is on a different test
+server, open the tunnel in a separate terminal and leave it running:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
+```
+
+Then run from the repository root:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-phase11-live.sh
+```
+
+The runner avoids inline JSON. It writes a non-default Rome-to-Florence route request to
+`/tmp/compass-phase11-custom-route-request.json`, validates the live route response, builds and
+installs Android `0.4.0`, cold-launches the app and checks for an immediate fatal exception.
+
+Manual acceptance must prove that endpoint editing drives the rest of the planner:
+
+1. default Milan-to-Bologna preview still renders;
+2. `Modifica percorso` accepts Rome `41.9028, 12.4964` and Florence `43.7696, 11.2558`;
+3. manual Metano search and selected-stop routing stay on the edited route;
+4. predictive CNG evaluation stays on the edited route and uses generic destination labels, not
+   fixed Milan/Bologna copy;
+5. destination longitude `200` is rejected on the coordinate form without crash.
+
+Return the complete runner output and the four screenshots requested by the runner.
+
 ## Diagnostics
 
 If no authorized device is found:
@@ -207,6 +240,13 @@ python3 -m json.tool /tmp/compass-phase10-unreachable-response.json
 ```bash
 python3 -m json.tool /tmp/compass-phase10-multi-stop-response.json
 python3 -m json.tool /tmp/compass-phase10-itinerary-route-response.json
+```
+
+For Phase 11 inspect the generated request and response:
+
+```bash
+python3 -m json.tool /tmp/compass-phase11-custom-route-request.json
+python3 -m json.tool /tmp/compass-phase11-custom-route-response.json
 ```
 
 Return the failing artifact plus bounded service logs:

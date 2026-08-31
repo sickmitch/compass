@@ -382,8 +382,34 @@ shared contract bounds a plan to 32 stops and derives route totals from the vali
 - The deterministic request origin replaces live navigation progress for this gate.
 - Traffic-adjusted consumption, route-progress updates and proactive background notifications remain
   future work.
-- Destination editing, active guidance, voice, rerouting and location permissions are not bundled
-  into predictive reachability.
+- Active guidance, voice, rerouting and location permissions are not bundled into predictive
+  reachability. Address search and current-location selection remain future route-input work.
+
+## Phase 11 Android route endpoint editing
+
+Phase 11 keeps routing policy on the backend and changes only the Android route-input boundary:
+
+```text
+editable coordinate form
+          │
+          v
+  RoutePlannerViewModel active origin/destination
+          │
+          ├─> POST /api/v1/routes
+          ├─> POST /api/v1/cng/ranked-candidates
+          ├─> POST /api/v1/cng/predictive-candidates
+          ├─> POST /api/v1/routes/with-cng-stop
+          └─> POST /api/v1/routes/with-cng-itinerary
+```
+
+The Milan-to-Bologna pair is now only the default state. When the driver applies a new
+origin/destination coordinate pair, the ViewModel reloads the base route, records the active
+coordinates and clears stale ranked candidates, predictive suggestions and selected routes. All
+downstream CNG requests use the active route's origin/destination, not constructor defaults.
+
+The increment intentionally accepts raw coordinates rather than adding geocoding. That keeps Phase
+11 small and testable: endpoint editing is independent from address search, current-location
+permissions, saved places and navigation-session state.
 
 ## Runtime
 

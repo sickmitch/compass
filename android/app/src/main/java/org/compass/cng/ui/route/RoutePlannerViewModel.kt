@@ -24,6 +24,7 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 
 enum class PlannerStage {
+    CONFIGURE_ROUTE,
     PREVIEW,
     CONFIGURE_CNG,
     CONFIGURE_PREDICTIVE,
@@ -48,6 +49,12 @@ enum class CngWorkflowMode {
 data class RoutePlannerUiState(
     val stage: PlannerStage = PlannerStage.PREVIEW,
     val operation: PlannerOperation? = PlannerOperation.BASE_ROUTE,
+    val activeOrigin: Coordinate = DEFAULT_ORIGIN,
+    val activeDestination: Coordinate = DEFAULT_DESTINATION,
+    val originLatitudeInput: String = DEFAULT_ORIGIN_LATITUDE,
+    val originLongitudeInput: String = DEFAULT_ORIGIN_LONGITUDE,
+    val destinationLatitudeInput: String = DEFAULT_DESTINATION_LATITUDE,
+    val destinationLongitudeInput: String = DEFAULT_DESTINATION_LONGITUDE,
     val baseRoute: RoutePreview? = null,
     val effectiveRangeKmInput: String = DEFAULT_EFFECTIVE_RANGE_KM,
     val estimatedRemainingRangeKmInput: String = "",
@@ -64,6 +71,12 @@ data class RoutePlannerUiState(
     val isBusy: Boolean get() = operation != null
 
     companion object {
+        val DEFAULT_ORIGIN = Coordinate(latitude = 45.4642, longitude = 9.1900)
+        val DEFAULT_DESTINATION = Coordinate(latitude = 44.4949, longitude = 11.3426)
+        const val DEFAULT_ORIGIN_LATITUDE = "45.4642"
+        const val DEFAULT_ORIGIN_LONGITUDE = "9.1900"
+        const val DEFAULT_DESTINATION_LATITUDE = "44.4949"
+        const val DEFAULT_DESTINATION_LONGITUDE = "11.3426"
         const val DEFAULT_EFFECTIVE_RANGE_KM = "300"
         const val DEFAULT_RESERVE_RANGE_KM = "30"
         const val DEFAULT_MAXIMUM_DETOUR_MINUTES = "10"
@@ -73,10 +86,19 @@ data class RoutePlannerUiState(
 class RoutePlannerViewModel(
     private val routingRepository: RoutingRepository,
     private val clock: Clock = Clock.systemDefaultZone(),
-    private val origin: Coordinate = MILAN,
-    private val destination: Coordinate = BOLOGNA,
+    initialOrigin: Coordinate = MILAN,
+    initialDestination: Coordinate = BOLOGNA,
 ) : ViewModel() {
-    private val mutableUiState = MutableStateFlow(RoutePlannerUiState())
+    private val mutableUiState = MutableStateFlow(
+        RoutePlannerUiState(
+            activeOrigin = initialOrigin,
+            activeDestination = initialDestination,
+            originLatitudeInput = initialOrigin.latitude.toCoordinateInput(),
+            originLongitudeInput = initialOrigin.longitude.toCoordinateInput(),
+            destinationLatitudeInput = initialDestination.latitude.toCoordinateInput(),
+            destinationLongitudeInput = initialDestination.longitude.toCoordinateInput(),
+        )
+    )
     val uiState: StateFlow<RoutePlannerUiState> = mutableUiState.asStateFlow()
 
     private var requestJob: Job? = null
@@ -86,6 +108,80 @@ class RoutePlannerViewModel(
     }
 
     fun retryBaseRoute() = loadBaseRoute()
+
+    fun openRouteConfiguration() {
+        if (!mutableUiState.value.isBusy) {
+            mutableUiState.value = mutableUiState.value.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                message = null,
+            )
+        }
+    }
+
+    fun updateOriginLatitude(value: String) {
+        if (value.isCoordinateInput()) {
+            mutableUiState.value = mutableUiState.value.copy(
+                originLatitudeInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateOriginLongitude(value: String) {
+        if (value.isCoordinateInput()) {
+            mutableUiState.value = mutableUiState.value.copy(
+                originLongitudeInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateDestinationLatitude(value: String) {
+        if (value.isCoordinateInput()) {
+            mutableUiState.value = mutableUiState.value.copy(
+                destinationLatitudeInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateDestinationLongitude(value: String) {
+        if (value.isCoordinateInput()) {
+            mutableUiState.value = mutableUiState.value.copy(
+                destinationLongitudeInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun applyRouteInputs() {
+        val state = mutableUiState.value
+        val parsedOrigin = parseCoordinate(
+            latitudeInput = state.originLatitudeInput,
+            longitudeInput = state.originLongitudeInput,
+            label = "partenza",
+        )
+        val parsedDestination = parseCoordinate(
+            latitudeInput = state.destinationLatitudeInput,
+            longitudeInput = state.destinationLongitudeInput,
+            label = "destinazione",
+        )
+        val validationMessage = parsedOrigin.message ?: parsedDestination.message
+        if (validationMessage != null) {
+            mutableUiState.value = state.copy(message = validationMessage)
+            return
+        }
+        val origin = requireNotNull(parsedOrigin.coordinate)
+        val destination = requireNotNull(parsedDestination.coordinate)
+        if (origin == destination) {
+            mutableUiState.value = state.copy(
+                message = "Partenza e destinazione devono essere coordinate diverse.",
+            )
+            return
+        }
+
+        loadBaseRoute(origin = origin, destination = destination)
+    }
 
     fun openAddStop() {
         if (mutableUiState.value.baseRoute != null && !mutableUiState.value.isBusy) {
@@ -163,6 +259,7 @@ class RoutePlannerViewModel(
 
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
+            val route = requireNotNull(state.baseRoute)
             mutableUiState.value = state.copy(
                 operation = PlannerOperation.CNG_CANDIDATES,
                 message = null,
@@ -174,8 +271,8 @@ class RoutePlannerViewModel(
             )
             try {
                 val ranked = routingRepository.rankedCngStations(
-                    origin = origin,
-                    destination = destination,
+                    origin = route.origin,
+                    destination = route.destination,
                     effectiveCngRangeKm = requireNotNull(rangeKm),
                     maximumDetourMinutes = requireNotNull(detourMinutes),
                     departureAt = OffsetDateTime.now(clock),
@@ -237,6 +334,7 @@ class RoutePlannerViewModel(
 
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
+            val route = requireNotNull(state.baseRoute)
             mutableUiState.value = state.copy(
                 operation = PlannerOperation.PREDICTIVE_CANDIDATES,
                 workflowMode = CngWorkflowMode.PREDICTIVE,
@@ -249,8 +347,8 @@ class RoutePlannerViewModel(
             )
             try {
                 val suggestion = routingRepository.predictiveCngStations(
-                    origin = origin,
-                    destination = destination,
+                    origin = route.origin,
+                    destination = route.destination,
                     effectiveCngRangeKm = requireNotNull(effectiveRangeKm),
                     estimatedRemainingCngRangeKm = requireNotNull(remainingRangeKm),
                     reserveCngRangeKm = requireNotNull(reserveRangeKm),
@@ -294,6 +392,7 @@ class RoutePlannerViewModel(
 
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
+            val routeBase = requireNotNull(state.baseRoute)
             mutableUiState.value = state.copy(
                 operation = PlannerOperation.SELECTED_ROUTE,
                 pendingStation = station,
@@ -301,8 +400,8 @@ class RoutePlannerViewModel(
             )
             try {
                 val route = routingRepository.routeWithCngStop(
-                    origin = origin,
-                    destination = destination,
+                    origin = routeBase.origin,
+                    destination = routeBase.destination,
                     mimitStationId = station.mimitStationId,
                 )
                 require(route.selectedStop.mimitStationId == station.mimitStationId) {
@@ -348,14 +447,15 @@ class RoutePlannerViewModel(
 
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
+            val routeBase = requireNotNull(state.baseRoute)
             mutableUiState.value = state.copy(
                 operation = PlannerOperation.SELECTED_ROUTE,
                 message = null,
             )
             try {
                 val route = routingRepository.routeWithCngItinerary(
-                    origin = origin,
-                    destination = destination,
+                    origin = routeBase.origin,
+                    destination = routeBase.destination,
                     mimitStationIds = itinerary.stops.map { it.station.mimitStationId },
                     effectiveCngRangeKm = suggestion.rangeBasis.effectiveCngRangeKm,
                     estimatedRemainingCngRangeKm = (
@@ -390,6 +490,10 @@ class RoutePlannerViewModel(
         if (mutableUiState.value.isBusy) return
         mutableUiState.value = when (mutableUiState.value.stage) {
             PlannerStage.PREVIEW -> mutableUiState.value
+            PlannerStage.CONFIGURE_ROUTE -> mutableUiState.value.copy(
+                stage = PlannerStage.PREVIEW,
+                message = null,
+            )
             PlannerStage.CONFIGURE_CNG -> mutableUiState.value.copy(
                 stage = PlannerStage.PREVIEW,
                 message = null,
@@ -437,10 +541,30 @@ class RoutePlannerViewModel(
         )
     }
 
-    private fun loadBaseRoute() {
+    private fun loadBaseRoute(
+        origin: Coordinate = mutableUiState.value.activeOrigin,
+        destination: Coordinate = mutableUiState.value.activeDestination,
+    ) {
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
-            mutableUiState.value = RoutePlannerUiState(operation = PlannerOperation.BASE_ROUTE)
+            mutableUiState.value = mutableUiState.value.copy(
+                stage = PlannerStage.PREVIEW,
+                operation = PlannerOperation.BASE_ROUTE,
+                activeOrigin = origin,
+                activeDestination = destination,
+                originLatitudeInput = origin.latitude.toCoordinateInput(),
+                originLongitudeInput = origin.longitude.toCoordinateInput(),
+                destinationLatitudeInput = destination.latitude.toCoordinateInput(),
+                destinationLongitudeInput = destination.longitude.toCoordinateInput(),
+                baseRoute = null,
+                rankedStations = null,
+                predictiveSuggestion = null,
+                workflowMode = null,
+                pendingStation = null,
+                selectedRoute = null,
+                selectedItineraryRoute = null,
+                message = null,
+            )
             try {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -475,18 +599,47 @@ class RoutePlannerViewModel(
     }
 
     companion object {
-        val MILAN = Coordinate(latitude = 45.4642, longitude = 9.1900)
-        val BOLOGNA = Coordinate(latitude = 44.4949, longitude = 11.3426)
+        val MILAN: Coordinate = RoutePlannerUiState.DEFAULT_ORIGIN
+        val BOLOGNA: Coordinate = RoutePlannerUiState.DEFAULT_DESTINATION
+    }
+}
+
+private data class ParsedCoordinate(
+    val coordinate: Coordinate?,
+    val message: String?,
+)
+
+private fun parseCoordinate(
+    latitudeInput: String,
+    longitudeInput: String,
+    label: String,
+): ParsedCoordinate {
+    val latitude = latitudeInput.parseDecimal()
+    val longitude = longitudeInput.parseDecimal()
+    return when {
+        latitude == null || latitude < -90 || latitude > 90 -> ParsedCoordinate(
+            null,
+            "Inserisci una latitudine valida per la $label, tra -90 e 90.",
+        )
+        longitude == null || longitude < -180 || longitude > 180 -> ParsedCoordinate(
+            null,
+            "Inserisci una longitudine valida per la $label, tra -180 e 180.",
+        )
+        else -> ParsedCoordinate(Coordinate(latitude, longitude), null)
     }
 }
 
 private fun String.isDecimalInput(): Boolean = matches(Regex("^[0-9]{0,4}([.,][0-9]{0,2})?$"))
 
+private fun String.isCoordinateInput(): Boolean = matches(Regex("^-?[0-9]{0,3}([.,][0-9]{0,6})?$"))
+
 private fun String.parseDecimal(): Double? = replace(',', '.').toDoubleOrNull()
+
+private fun Double.toCoordinateInput(): String = "%.6f".format(java.util.Locale.US, this)
 
 private fun RoutePreviewFailure.baseRouteMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile contattare il server Compass."
-    RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile tra Milano e Bologna."
+    RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile tra le coordinate impostate."
     RoutePreviewFailure.SERVER -> "Il servizio di routing non è disponibile."
     RoutePreviewFailure.INVALID_RESPONSE -> "Il server ha restituito un percorso non valido."
     RoutePreviewFailure.STATION_NOT_FOUND,
