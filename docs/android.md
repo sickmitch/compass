@@ -14,8 +14,108 @@ and recalculates the route through a selected official MIMIT station.
 Phase 10 adds a separate predictive flow driven by a user-supplied remaining-range estimate and
 safety reserve. It shows a complete ordered reserve-preserving refuelling itinerary or an explicit
 no-refill/no-safe-itinerary state. Each planned stop assumes a full refill to the effective range.
-It still has no destination editor, vehicle telemetry, navigation session, background location,
-live traffic or rerouting.
+Phase 11 adds editable coordinates. Navigation Stage 1 then introduces the server-backed
+`NavigationRoute`, explicit navigation-session boundary and the `Avvia navigazione` route handoff.
+Navigation Stage 2 adds foreground location, local route matching/progress and the MapLibre
+navigation renderer. Navigation Stage 3 adds speed-aware Italian voice guidance, dynamic camera
+follow/remaining-route overview, confirmed off-route rerouting through Compass, five-minute traffic
+route refresh and in-place route replacement. After the physical-device gate passed on 2026-09-02,
+the debug replay was slowed from eight geometry points per second to one point every 1.5 seconds;
+the simulated fix still reports road speed independently for maneuver timing.
+Debug API calls emit bounded `CompassApi` logcat events containing endpoint, outcome, duration and
+exception classes. Payloads and response bodies are deliberately excluded from these diagnostics.
+Ordinary calls retain the short global network limits. Predictive candidate evaluation alone uses a
+240-second read/call limit because a bounded full-range itinerary may require multiple sequential
+Valhalla matrix batches; its actual elapsed time is recorded in the same event stream.
+Navigation Stage 4 adds an explicit next-stop skip/replacement confirmation. It replans from the
+snapped position with the unavailable MIMIT ID excluded and commits only a complete range-safe
+itinerary. Its physical-device gate passed on 2026-09-02.
+
+## Navigation Stage 1 device gate
+
+If the backend is remote, first keep this tunnel open in a separate terminal:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
+```
+
+Then run from the repository root on the machine connected to the Android device:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-navigation-stage1-live.sh
+```
+
+The runner prints the two exact manual scenarios and screenshots required for acceptance.
+
+## Navigation Stage 2 device gate
+
+Stage 2 shares the navigation session between Compose and a foreground location service. During an
+active session the app filters fixes, projects them onto a local window of the downloaded route,
+updates progress/ETA/manoeuvres locally and renders only the snapped vehicle puck. Ordinary GPS
+updates do not call Compass or Valhalla.
+
+If the backend is remote, keep the same SSH tunnel shown above open. Then run:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-navigation-stage2-live.sh
+```
+
+The runner pauses once. On the device open the navigation-ready screen, press the debug-only
+`Riproduci percorso demo`, grant location/notification permission and return to the terminal. The
+replay traverses the downloaded geometry through the real foreground service and navigation engine;
+it sends no simulated GPS point to the backend. See
+`docs/phases/navigation-stage-2-acceptance.md` for thresholds and the three requested screenshots.
+
+## Navigation Stage 3 device gate
+
+Stage 3 keeps ordinary GPS updates entirely on the device. Android contacts Compass only after a
+confirmed deviation, at the five-minute active-navigation refresh boundary, or through a
+debug-only manual test action. A route update always goes through Compass and preserves the last
+downloaded route if the network request fails. The foreground service owns TextToSpeech, so spoken
+guidance is independent from Activity recreation.
+
+If the backend is remote, keep the SSH tunnel shown above open in a separate terminal. Then run:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-navigation-stage3-live.sh
+```
+
+The runner pauses for explicit device actions, then verifies the foreground service, the automatic
+off-route route replacement and background/resume continuity. The debug replay still sends no GPS
+point to Compass; the debug deviation instead passes three controlled fixes through the production
+filter, matcher and off-route state machine. See
+`docs/phases/navigation-stage-3-acceptance.md` for the accepted evidence and thresholds.
+
+## Navigation Stage 4 device gate
+
+Stage 4 requires a predictive itinerary because the replacement decision must retain the driver's
+explicit effective range, remaining-range estimate, reserve and maximum detour. Android derives the
+current remaining range from local route progress, calls Compass with the unavailable official ID
+excluded, and keeps the downloaded route for every non-complete result. A manual selected-stop
+route has no caller-supplied tank state and is therefore guarded instead of being silently changed.
+
+Run from the repository root with the same toolchain and backend tunnel used for Stage 3:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-navigation-stage4-live.sh
+```
+
+The runner verifies the deployed OpenAPI exclusion field, builds/installs the app, checks the
+replacement start/commit events, confirms foreground-service continuity, exercises the manual-route
+range-plan guard, and checks final service/notification teardown. See
+`docs/phases/navigation-stage-4-acceptance.md` for the three required screenshots and diagnostics.
 
 ## Required toolchain
 

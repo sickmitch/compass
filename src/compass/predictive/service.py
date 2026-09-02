@@ -81,6 +81,7 @@ async def evaluate_predictive_cng_candidates(
     detour_policy: NetworkDetourPolicy,
     ranking_policy: RankingPolicy,
     max_route_geometry_points: int,
+    cost_basis: NetworkCostBasis | None = None,
 ) -> PredictiveCandidatesResult:
     remaining_range_km = request.estimated_remaining_cng_range_km
     reserve_range_km = request.reserve_cng_range_km
@@ -90,6 +91,7 @@ async def evaluate_predictive_cng_candidates(
     first_usable_range_km = remaining_range_km - reserve_range_km
     full_usable_range_km = effective_range_km - reserve_range_km
     network_request = request.ranked_request.network_request
+    configured_cost_basis = cost_basis or NetworkCostBasis()
     base_route = await provider.route(network_request.corridor_request.route)
     remaining_route_km = base_route.distance_meters / 1_000
     destination_reachable = remaining_route_km <= first_usable_range_km
@@ -100,6 +102,7 @@ async def evaluate_predictive_cng_candidates(
             request=request,
             corridor_policy=corridor_policy,
             detour_policy=detour_policy,
+            cost_basis=configured_cost_basis,
         )
         enrichments: dict[int, CandidateEnrichment] = {}
     else:
@@ -111,6 +114,7 @@ async def evaluate_predictive_cng_candidates(
             detour_policy=detour_policy,
             max_route_geometry_points=max_route_geometry_points,
             base_route=base_route,
+            cost_basis=configured_cost_basis,
         )
         enrichments = {}
 
@@ -147,6 +151,7 @@ async def evaluate_predictive_cng_candidates(
                 network.candidates,
                 costing=network_request.corridor_request.route.costing,
                 batch_size=detour_policy.matrix_batch_size,
+                departure_at=network_request.departure_at,
             )
             path = _search_complete_itinerary(
                 candidates=network.candidates,
@@ -229,6 +234,8 @@ async def evaluate_predictive_cng_candidates(
                 0.0, remaining_route_km - first_usable_range_km
             ),
             destination_reachable_with_reserve=destination_reachable,
+            traffic_state=configured_cost_basis.traffic_state,
+            traffic_adjusted=configured_cost_basis.traffic_aware,
         ),
         reachability=PredictiveReachabilityMetrics(
             detour_eligible_candidate_count=len(network.candidates),
@@ -481,6 +488,7 @@ async def _pairwise_candidate_costs(
     *,
     costing: str,
     batch_size: int,
+    departure_at: datetime,
 ) -> tuple[tuple[tuple[MatrixCost | None, ...], ...], _MatrixStats]:
     coordinates = tuple(
         Coordinate(candidate.station.latitude, candidate.station.longitude)
@@ -499,6 +507,7 @@ async def _pairwise_candidate_costs(
                 coordinates[source_start:source_end],
                 coordinates[target_start:target_end],
                 costing=costing,
+                departure_at=departure_at,
             )
             stats += block_stats
             for relative_source, block_row in enumerate(block):
@@ -512,19 +521,35 @@ async def _matrix_block(
     targets: tuple[Coordinate, ...],
     *,
     costing: str,
+    departure_at: datetime,
 ) -> tuple[tuple[tuple[MatrixCost | None, ...], ...], _MatrixStats]:
     try:
-        result = await provider.matrix(MatrixRequest(sources, targets, costing))
+        result = await provider.matrix(
+            MatrixRequest(
+                sources=sources,
+                targets=targets,
+                costing=costing,
+                departure_at=departure_at,
+            )
+        )
     except MatrixLocationError:
         if len(sources) == 1 and len(targets) == 1:
             return ((None,),), _MatrixStats(calls=1, location_failures=1)
         if len(sources) >= len(targets) and len(sources) > 1:
             split_at = len(sources) // 2
             left, left_stats = await _matrix_block(
-                provider, sources[:split_at], targets, costing=costing
+                provider,
+                sources[:split_at],
+                targets,
+                costing=costing,
+                departure_at=departure_at,
             )
             right, right_stats = await _matrix_block(
-                provider, sources[split_at:], targets, costing=costing
+                provider,
+                sources[split_at:],
+                targets,
+                costing=costing,
+                departure_at=departure_at,
             )
             return (
                 left + right,
@@ -532,10 +557,18 @@ async def _matrix_block(
             )
         split_at = len(targets) // 2
         left, left_stats = await _matrix_block(
-            provider, sources, targets[:split_at], costing=costing
+            provider,
+            sources,
+            targets[:split_at],
+            costing=costing,
+            departure_at=departure_at,
         )
         right, right_stats = await _matrix_block(
-            provider, sources, targets[split_at:], costing=costing
+            provider,
+            sources,
+            targets[split_at:],
+            costing=costing,
+            departure_at=departure_at,
         )
         return (
             tuple(left_row + right_row for left_row, right_row in zip(left, right, strict=True)),
@@ -556,6 +589,7 @@ def _skipped_network_result(
     request: PredictiveCandidatesRequest,
     corridor_policy: CorridorPolicy,
     detour_policy: NetworkDetourPolicy,
+    cost_basis: NetworkCostBasis | None = None,
 ) -> NetworkDetourResult:
     network_request = request.ranked_request.network_request
     corridor_request = network_request.corridor_request
@@ -580,7 +614,7 @@ def _skipped_network_result(
         spatial_result=spatial,
         maximum_detour_seconds=network_request.maximum_detour_seconds,
         departure_at=network_request.departure_at,
-        cost_basis=NetworkCostBasis(),
+        cost_basis=cost_basis or NetworkCostBasis(),
         metrics=NetworkEvaluationMetrics(
             spatial_candidate_count=0,
             matrix_candidate_count=0,

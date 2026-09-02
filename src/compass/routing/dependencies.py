@@ -15,5 +15,9 @@ async def get_routing_provider() -> AsyncIterator[RoutingProvider]:
             connect_timeout_seconds=settings.valhalla_connect_timeout_seconds,
             read_timeout_seconds=settings.valhalla_read_timeout_seconds,
             user_agent=settings.http_user_agent,
+            traffic_aware=(
+                settings.traffic_enabled and settings.traffic_valhalla_overlay_enabled
+            ),
+            departure_timezone=settings.opening_hours_timezone,
             client=client,
         )

@@ -292,6 +292,8 @@ data class SelectedCngStop(
     val municipality: String?,
     val province: String?,
     val location: Coordinate,
+    val expectedArrivalAt: OffsetDateTime? = null,
+    val dwellTimeSeconds: Int = 20 * 60,
 )
 
 enum class CngRouteLegKind {
@@ -311,6 +313,7 @@ data class RouteWithCngStop(
     val durationSeconds: Double,
     val legs: List<CngRouteLeg>,
     val provider: String,
+    val navigation: NavigationTiming = NavigationTiming.legacy(durationSeconds, 1),
 ) {
     init {
         require(legs.map(CngRouteLeg::kind) == EXPECTED_CNG_ROUTE_LEGS) {
@@ -344,6 +347,7 @@ data class RouteWithCngStop(
         geometry = legs.flatMap { it.route.geometry },
         maneuvers = legs.flatMap { it.route.maneuvers },
         provider = provider,
+        navigation = navigation,
     )
 
     private companion object {
@@ -383,6 +387,10 @@ data class RouteWithCngItinerary(
     val legs: List<CngItineraryRouteLeg>,
     val provider: String,
     val rangeValidation: String,
+    val navigation: NavigationTiming = NavigationTiming.legacy(
+        durationSeconds,
+        selectedStops.size,
+    ),
 ) {
     init {
         require(selectedStops.isNotEmpty()) { "CNG itinerary route needs at least one stop" }
@@ -434,5 +442,6 @@ data class RouteWithCngItinerary(
         geometry = legs.flatMap { it.route.geometry },
         maneuvers = legs.flatMap { it.route.maneuvers },
         provider = provider,
+        navigation = navigation,
     )
 }

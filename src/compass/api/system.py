@@ -12,6 +12,8 @@ from compass.api.contracts import ErrorResponse, StrictModel, error_response
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
 from compass.freshness.service import load_data_freshness
+from compass.traffic.domain import TrafficHealthState
+from compass.traffic.service import traffic_health_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["operations"])
 
@@ -29,7 +31,7 @@ class DataFreshnessResponse(StrictModel):
     evaluated_at: datetime
     overall_state: Literal["ready", "degraded", "unavailable"]
     sources: list[DataSourceFreshnessResponse] = Field(min_length=3, max_length=3)
-    traffic_state: Literal["not_configured"]
+    traffic_state: TrafficHealthState
 
 
 @router.get(
@@ -61,5 +63,5 @@ async def data_freshness(
             DataSourceFreshnessResponse.model_validate(asdict(item))
             for item in (report.mimit, report.osm, report.reconciliation)
         ],
-        traffic_state=report.traffic_state,
+        traffic_state=traffic_health_from_settings(settings).provider_status,
     )

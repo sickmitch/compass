@@ -1,0 +1,44 @@
+ARG VALHALLA_IMAGE=ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b
+FROM ${VALHALLA_IMAGE} AS build
+
+USER root
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        g++ \
+        python3-pip \
+        python3-venv \
+        rapidjson-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY tools/valhalla-traffic/traffic_tar_tool.cc /tmp/traffic_tar_tool.cc
+
+RUN python3 -m venv /opt/compass \
+    && /opt/compass/bin/pip install --no-cache-dir . \
+    && g++ -std=c++20 -O2 -Wall -Wextra -pedantic \
+        -I/usr/local/include \
+        /tmp/traffic_tar_tool.cc \
+        -L/usr/local/lib -lvalhalla \
+        -Wl,-rpath,/usr/local/lib \
+        -o /usr/local/bin/compass-valhalla-traffic-tool
+
+FROM ${VALHALLA_IMAGE} AS runtime
+
+ENV HOME=/tmp \
+    PATH=/opt/compass/bin:${PATH} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY --from=build /opt/compass /opt/compass
+COPY --from=build \
+    /usr/local/bin/compass-valhalla-traffic-tool \
+    /usr/local/bin/compass-valhalla-traffic-tool
+
+USER 10001:10001
+ENTRYPOINT []
+CMD ["uvicorn", "compass.traffic.updater_api:app", "--host", "0.0.0.0", "--port", "8003"]

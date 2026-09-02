@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from compass.candidates.domain import CandidateQueryResult, SpatialCandidate
@@ -16,6 +16,7 @@ class PostgisCandidateRepository:
         route_wkt: str,
         radius_meters: float,
         limit: int,
+        excluded_mimit_station_ids: tuple[str, ...] = (),
     ) -> CandidateQueryResult:
         counts = self.session.execute(
             text(
@@ -27,36 +28,49 @@ class PostgisCandidateRepository:
             )
         ).one()
 
+        exclusion_clause = (
+            "    AND s.mimit_station_id NOT IN :excluded_mimit_station_ids "
+            if excluded_mimit_station_ids
+            else ""
+        )
+        candidate_query = text(
+            "WITH route AS ("
+            "  SELECT ST_GeomFromText(:route_wkt, 4326) AS geometry"
+            "), candidates AS ("
+            "  SELECT s.id AS station_id, s.mimit_station_id, s.name, "
+            "         s.municipality, s.province, "
+            "         ST_Y(s.location::geometry) AS latitude, "
+            "         ST_X(s.location::geometry) AS longitude, "
+            "         ST_Distance(s.location, route.geometry::geography) "
+            "           AS straight_line_distance_to_route_meters, "
+            "         ST_LineLocatePoint(route.geometry, s.location::geometry) "
+            "           AS route_fraction "
+            "  FROM stations AS s CROSS JOIN route "
+            "  WHERE s.is_active "
+            "    AND s.location IS NOT NULL "
+            + exclusion_clause
+            + "    AND ST_DWithin(s.location, route.geometry::geography, :radius_meters)"
+            "), counted AS ("
+            "  SELECT candidates.*, count(*) OVER () AS corridor_candidate_count "
+            "  FROM candidates"
+            ") "
+            "SELECT * FROM counted "
+            "ORDER BY straight_line_distance_to_route_meters, route_fraction, station_id "
+            "LIMIT :candidate_limit"
+        )
+        parameters: dict[str, object] = {
+            "route_wkt": route_wkt,
+            "radius_meters": radius_meters,
+            "candidate_limit": limit,
+        }
+        if excluded_mimit_station_ids:
+            candidate_query = candidate_query.bindparams(
+                bindparam("excluded_mimit_station_ids", expanding=True)
+            )
+            parameters["excluded_mimit_station_ids"] = excluded_mimit_station_ids
         rows = self.session.execute(
-            text(
-                "WITH route AS ("
-                "  SELECT ST_GeomFromText(:route_wkt, 4326) AS geometry"
-                "), candidates AS ("
-                "  SELECT s.id AS station_id, s.mimit_station_id, s.name, "
-                "         s.municipality, s.province, "
-                "         ST_Y(s.location::geometry) AS latitude, "
-                "         ST_X(s.location::geometry) AS longitude, "
-                "         ST_Distance(s.location, route.geometry::geography) "
-                "           AS straight_line_distance_to_route_meters, "
-                "         ST_LineLocatePoint(route.geometry, s.location::geometry) "
-                "           AS route_fraction "
-                "  FROM stations AS s CROSS JOIN route "
-                "  WHERE s.is_active "
-                "    AND s.location IS NOT NULL "
-                "    AND ST_DWithin(s.location, route.geometry::geography, :radius_meters)"
-                "), counted AS ("
-                "  SELECT candidates.*, count(*) OVER () AS corridor_candidate_count "
-                "  FROM candidates"
-                ") "
-                "SELECT * FROM counted "
-                "ORDER BY straight_line_distance_to_route_meters, route_fraction, station_id "
-                "LIMIT :candidate_limit"
-            ),
-            {
-                "route_wkt": route_wkt,
-                "radius_meters": radius_meters,
-                "candidate_limit": limit,
-            },
+            candidate_query,
+            parameters,
         ).all()
 
         corridor_count = int(rows[0].corridor_candidate_count) if rows else 0

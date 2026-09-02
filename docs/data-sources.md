@@ -103,5 +103,7 @@ reported data state but does not conceal or delete the last successfully normali
 required MIMIT or reconciliation data prevents readiness. Missing/stale OSM affects optional
 enrichment and does not invalidate authoritative MIMIT station identity or prices.
 
-Traffic remains a separate future provider domain. Its Phase 7 state is explicitly
-`not_configured`; Valhalla graph speeds are not presented as live traffic.
+Traffic is a separate provider domain. Its default state remains explicitly `not_configured`, and
+Valhalla graph speeds are not presented as live traffic. The live-traffic architecture is documented
+in `docs/traffic.md`; production traffic must enter through the provider-independent traffic
+subsystem and Valhalla's native traffic overlay.

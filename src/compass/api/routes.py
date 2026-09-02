@@ -19,6 +19,7 @@ from compass.detours.domain import (
     NetworkDetourRequest,
 )
 from compass.detours.service import evaluate_cng_detours
+from compass.navigation.domain import NavigationTiming, build_navigation_timing
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import (
     BaseRoute,
@@ -29,6 +30,11 @@ from compass.routing.domain import (
     RoutingProviderError,
     RoutingUnavailableError,
 )
+from compass.traffic.dependencies import get_traffic_route_refresher
+from compass.traffic.domain import TrafficHealthState
+from compass.traffic.route_refresh import TrafficRouteRefresher
+from compass.traffic.routing import refresh_base_route_traffic
+from compass.traffic.service import network_cost_basis_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["routing"])
 
@@ -42,11 +48,25 @@ class BaseRouteRequest(StrictModel):
     origin: CoordinateRequest
     destination: CoordinateRequest
     costing: Literal["auto"] = "auto"
+    departure_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Optional timezone-aware departure instant. When omitted, traffic-aware "
+            "routing departs now."
+        ),
+    )
     language: str | None = Field(
         default=None,
         pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$",
         description="BCP 47 language tag used for maneuver instructions.",
     )
+
+    @field_validator("departure_at")
+    @classmethod
+    def validate_optional_departure_offset(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("departure_at must include a UTC offset")
+        return value
 
 
 class CorridorCandidatesRequest(BaseRouteRequest):
@@ -102,12 +122,26 @@ class ManeuverResponse(StrictModel):
     travel_type: str | None
 
 
+class NavigationTimingResponse(StrictModel):
+    route_id: str = Field(pattern=r"^route_[0-9a-f]{32}$")
+    driving_duration_seconds: float = Field(ge=0)
+    remaining_driving_duration_seconds: float = Field(ge=0)
+    refueling_stop_count: int = Field(ge=0)
+    dwell_seconds_per_refueling_stop: int = Field(ge=0)
+    total_refueling_dwell_seconds: float = Field(ge=0)
+    total_trip_duration_seconds: float = Field(ge=0)
+    departure_at: datetime | None
+    driving_arrival_at: datetime | None
+    trip_arrival_at: datetime | None
+
+
 class BaseRouteResponse(StrictModel):
     distance_meters: float = Field(ge=0)
     duration_seconds: float = Field(ge=0)
     geometry: RouteGeometry
     maneuvers: list[ManeuverResponse]
     provider: Literal["valhalla"]
+    navigation: NavigationTimingResponse
 
 
 class CorridorPolicyResponse(StrictModel):
@@ -161,9 +195,12 @@ class CorridorCandidatesResponse(StrictModel):
 
 class NetworkCostBasisResponse(StrictModel):
     provider: Literal["valhalla"]
-    traffic_state: Literal["not_configured"]
-    traffic_aware: Literal[False]
-    duration_model: Literal["valhalla_graph_speeds"]
+    traffic_state: TrafficHealthState
+    traffic_aware: bool
+    duration_model: Literal[
+        "valhalla_graph_speeds",
+        "valhalla_time_dependent_traffic",
+    ]
     distance_model: Literal["road_network"]
 
 
@@ -229,6 +266,9 @@ class DetourCandidatesResponse(StrictModel):
 async def base_route(
     request: BaseRouteRequest,
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    traffic_refresher: Annotated[
+        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
+    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> BaseRouteResponse | JSONResponse:
     domain_request = RouteRequest(
@@ -242,6 +282,7 @@ async def base_route(
         ),
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
     )
     try:
         route = await provider.route(domain_request)
@@ -256,7 +297,17 @@ async def base_route(
             "The routing service returned an invalid response.",
         )
 
-    return _base_route_response(route)
+    route = await refresh_base_route_traffic(
+        route=route,
+        request=domain_request,
+        provider=provider,
+        refresher=traffic_refresher,
+        current_departure_tolerance_seconds=(
+            settings.traffic_route_refresh_min_interval_seconds
+        ),
+    )
+
+    return _base_route_response(route, departure_at=request.departure_at)
 
 
 @router.post(
@@ -286,6 +337,7 @@ async def corridor_candidates(
             ),
             costing=request.costing,
             language=request.language or settings.valhalla_route_language,
+            departure_at=request.departure_at,
         ),
         effective_cng_range_km=request.effective_cng_range_km,
     )
@@ -353,6 +405,7 @@ async def detour_candidates(
         ),
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
     )
     domain_request = NetworkDetourRequest(
         corridor_request=CorridorCandidateRequest(
@@ -378,6 +431,7 @@ async def detour_candidates(
                 matrix_batch_size=settings.valhalla_matrix_batch_size
             ),
             max_route_geometry_points=settings.route_geometry_max_points,
+            cost_basis=network_cost_basis_from_settings(settings),
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -409,7 +463,16 @@ async def detour_candidates(
     )
 
 
-def _base_route_response(route: BaseRoute) -> BaseRouteResponse:
+def _base_route_response(
+    route: BaseRoute,
+    *,
+    departure_at: datetime | None = None,
+) -> BaseRouteResponse:
+    navigation = build_navigation_timing(
+        encoded_polylines=(route.encoded_polyline,),
+        driving_duration_seconds=route.duration_seconds,
+        departure_at=departure_at,
+    )
     return BaseRouteResponse(
         distance_meters=route.distance_meters,
         duration_seconds=route.duration_seconds,
@@ -418,7 +481,12 @@ def _base_route_response(route: BaseRoute) -> BaseRouteResponse:
             ManeuverResponse.model_validate(asdict(maneuver)) for maneuver in route.maneuvers
         ],
         provider="valhalla",
+        navigation=_navigation_timing_response(navigation),
     )
+
+
+def _navigation_timing_response(timing: NavigationTiming) -> NavigationTimingResponse:
+    return NavigationTimingResponse.model_validate(asdict(timing))
 
 
 def _detour_candidate_response(

@@ -7,7 +7,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from compass.candidates.domain import CorridorPolicy
-from compass.detours.domain import NetworkDetourPolicy, NetworkDetourResult
+from compass.detours.domain import NetworkCostBasis, NetworkDetourPolicy, NetworkDetourResult
 from compass.detours.service import evaluate_cng_detours
 from compass.models import (
     OsmFeature,
@@ -40,6 +40,7 @@ async def rank_cng_candidates(
     detour_policy: NetworkDetourPolicy,
     ranking_policy: RankingPolicy,
     max_route_geometry_points: int,
+    cost_basis: NetworkCostBasis | None = None,
 ) -> RankedCandidatesResult:
     network_result = await evaluate_cng_detours(
         session,
@@ -48,6 +49,7 @@ async def rank_cng_candidates(
         corridor_policy=corridor_policy,
         detour_policy=detour_policy,
         max_route_geometry_points=max_route_geometry_points,
+        cost_basis=cost_basis,
     )
     return rank_network_candidates(
         session,

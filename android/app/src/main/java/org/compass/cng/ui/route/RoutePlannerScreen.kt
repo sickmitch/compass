@@ -19,9 +19,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -30,6 +32,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.compass.cng.BuildConfig
@@ -57,17 +63,42 @@ import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
+import org.compass.cng.navigation.NavigationRoute
+import org.compass.cng.navigation.NavigationCameraMode
+import org.compass.cng.navigation.NavigationPhase
+import org.compass.cng.navigation.NavigationState
+import org.compass.cng.navigation.GpsStatus
+import org.compass.cng.navigation.OffRouteStatus
+import org.compass.cng.navigation.ReroutingStatus
+import org.compass.cng.navigation.RouteUpdateFailure
+import org.compass.cng.navigation.RouteUpdateReason
+import org.compass.cng.ui.map.NavigationMap
 import org.compass.cng.ui.map.RouteMap
 
 @Composable
 fun RoutePlannerScreen(
     viewModel: RoutePlannerViewModel,
     modifier: Modifier = Modifier,
+    onStartNavigation: () -> Unit,
+    onStartNavigationReplay: () -> Unit,
+    onRequestRouteUpdate: () -> Unit,
+    onSimulateOffRoute: () -> Unit,
+    onReplaceUnavailableFuelStop: () -> Unit,
+    onStopNavigation: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val navigationState by viewModel.navigationState.collectAsStateWithLifecycle()
     BackHandler(
         enabled = state.baseRoute != null && state.stage != PlannerStage.PREVIEW && !state.isBusy,
-        onBack = viewModel::navigateBack,
+        onBack = {
+            if (navigationState.phase != NavigationPhase.ROUTE_PREVIEW &&
+                navigationState.phase != NavigationPhase.IDLE
+            ) {
+                onStopNavigation()
+            } else {
+                viewModel.navigateBack()
+            }
+        },
     )
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -77,8 +108,17 @@ fun RoutePlannerScreen(
         ) {
             Header(
                 stage = state.stage,
+                navigationPhase = navigationState.phase,
                 canNavigateBack = state.baseRoute != null && state.stage != PlannerStage.PREVIEW,
-                onNavigateBack = viewModel::navigateBack,
+                onNavigateBack = {
+                    if (navigationState.phase != NavigationPhase.ROUTE_PREVIEW &&
+                        navigationState.phase != NavigationPhase.IDLE
+                    ) {
+                        onStopNavigation()
+                    } else {
+                        viewModel.navigateBack()
+                    }
+                },
             )
             val baseRoute = state.baseRoute
             when {
@@ -115,6 +155,7 @@ fun RoutePlannerScreen(
                     )
                     PlannerStage.PREVIEW -> PreviewContent(
                         route = baseRoute,
+                        onStartNavigation = viewModel::openNavigationPreview,
                         onEditRoute = viewModel::openRouteConfiguration,
                         onAddStop = viewModel::openAddStop,
                         onEvaluateRange = viewModel::openPredictiveRange,
@@ -163,17 +204,30 @@ fun RoutePlannerScreen(
                         if (itineraryRoute != null) {
                             SelectedItineraryRouteContent(
                                 selectedRoute = itineraryRoute,
+                                onStartNavigation = viewModel::openNavigationPreview,
                                 onChangePlan = viewModel::navigateBack,
                                 onRemoveStops = viewModel::removeCngStop,
                             )
                         } else {
                             SelectedRouteContent(
                                 selectedRoute = requireNotNull(state.selectedRoute),
+                                onStartNavigation = viewModel::openNavigationPreview,
                                 onChangeStation = viewModel::navigateBack,
                                 onRemoveStop = viewModel::removeCngStop,
                             )
                         }
                     }
+                    PlannerStage.NAVIGATION_PREVIEW -> NavigationPreviewContent(
+                        route = requireNotNull(navigationState.route),
+                        state = navigationState,
+                        message = state.message,
+                        onStartNavigation = onStartNavigation,
+                        onStartNavigationReplay = onStartNavigationReplay,
+                        onRequestRouteUpdate = onRequestRouteUpdate,
+                        onSimulateOffRoute = onSimulateOffRoute,
+                        onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
+                        onStopNavigation = onStopNavigation,
+                    )
                 }
             }
         }
@@ -183,6 +237,7 @@ fun RoutePlannerScreen(
 @Composable
 private fun Header(
     stage: PlannerStage,
+    navigationPhase: NavigationPhase,
     canNavigateBack: Boolean,
     onNavigateBack: () -> Unit,
 ) {
@@ -214,6 +269,13 @@ private fun Header(
                     PlannerStage.PREDICTIVE_ITINERARY -> "Piano rifornimenti CNG"
                     PlannerStage.PREDICTIVE_STATUS -> "Autonomia CNG"
                     PlannerStage.SELECTED_ROUTE -> "Percorso con rifornimento"
+                    PlannerStage.NAVIGATION_PREVIEW -> when (navigationPhase) {
+                        NavigationPhase.ROUTE_PREVIEW -> "Navigazione pronta"
+                        NavigationPhase.REROUTING -> "Ricalcolo percorso"
+                        NavigationPhase.GPS_LOST -> "Segnale GPS perso"
+                        NavigationPhase.ARRIVED -> "Destinazione raggiunta"
+                        else -> "Navigazione attiva"
+                    }
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -298,6 +360,7 @@ private fun ErrorState(
 @Composable
 private fun PreviewContent(
     route: RoutePreview,
+    onStartNavigation: () -> Unit,
     onEditRoute: () -> Unit,
     onAddStop: () -> Unit,
     onEvaluateRange: () -> Unit,
@@ -316,6 +379,14 @@ private fun PreviewContent(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         )
+        Button(
+            onClick = onStartNavigation,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            Text("Avvia navigazione")
+        }
         OutlinedButton(
             onClick = onEditRoute,
             modifier = Modifier
@@ -353,6 +424,394 @@ private fun PreviewContent(
                 .weight(0.52f),
         )
     }
+}
+
+@Composable
+private fun NavigationPreviewContent(
+    route: NavigationRoute,
+    state: NavigationState,
+    message: String?,
+    onStartNavigation: () -> Unit,
+    onStartNavigationReplay: () -> Unit,
+    onRequestRouteUpdate: () -> Unit,
+    onSimulateOffRoute: () -> Unit,
+    onReplaceUnavailableFuelStop: () -> Unit,
+    onStopNavigation: () -> Unit,
+) {
+    if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
+        ActiveNavigationContent(
+            state = state,
+            onRequestRouteUpdate = onRequestRouteUpdate,
+            onSimulateOffRoute = onSimulateOffRoute,
+            onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
+            onStopNavigation = onStopNavigation,
+        )
+        return
+    }
+    val preview = route.asRoutePreview()
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        item {
+            RouteMap(
+                route = preview,
+                mapStyleUrl = BuildConfig.COMPASS_MAP_STYLE_URL,
+                cngStops = route.fuelStops.map { it.location },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Percorso pronto per la navigazione",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "${formatDistance(route.totalDistanceMeters)} · " +
+                            "${formatDuration(route.drivingDurationSeconds)} di guida",
+                    )
+                    Text(
+                        "Durata totale ${formatDuration(route.totalTripDurationSeconds)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (route.fuelStops.isNotEmpty()) {
+                        Text(
+                            "${route.fuelStops.size} soste CNG · " +
+                                "${formatDuration(route.timing.totalRefuelingDwellSeconds)} " +
+                                "di rifornimento",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Text(
+                        "ID percorso ${route.routeId.takeLast(12)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (route.fuelStops.isNotEmpty()) {
+            item {
+                Text(
+                    "Tappe CNG",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+            itemsIndexed(route.fuelStops) { index, stop ->
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        "${index + 1}. ${stop.name ?: "MIMIT ${stop.mimitStationId}"}",
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        listOfNotNull(stop.municipality, stop.province).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Sosta prevista ${formatDuration(stop.dwellTimeSeconds.toDouble())}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
+            }
+        }
+        item {
+            Text(
+                "Prima indicazione",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
+        route.maneuvers.firstOrNull()?.let { maneuver ->
+            item {
+                ManeuverRow(number = 1, maneuver = maneuver)
+            }
+        }
+        if (message != null) {
+            item {
+                InlineError(
+                    message = message,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+        }
+        item {
+            Button(
+                onClick = onStartNavigation,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+            ) {
+                Text("Inizia navigazione GPS")
+            }
+        }
+        if (BuildConfig.DEBUG) {
+            item {
+                OutlinedButton(
+                    onClick = onStartNavigationReplay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp),
+                ) {
+                    Text("Riproduci percorso demo")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveNavigationContent(
+    state: NavigationState,
+    onRequestRouteUpdate: () -> Unit,
+    onSimulateOffRoute: () -> Unit,
+    onReplaceUnavailableFuelStop: () -> Unit,
+    onStopNavigation: () -> Unit,
+) {
+    requireNotNull(state.route)
+    var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
+    var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
+    if (confirmFuelStopReplacement) {
+        val fuelStop = state.nextFuelStop?.stop
+        AlertDialog(
+            onDismissRequest = { confirmFuelStopReplacement = false },
+            title = { Text("Sostituire la tappa CNG?") },
+            text = {
+                Text(
+                    "Compass escluderà ${fuelStop?.name ?: "la stazione selezionata"} e " +
+                        "cercherà un itinerario completo compatibile con autonomia e riserva. " +
+                        "Se non esiste, manterrà la rotta corrente.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmFuelStopReplacement = false
+                        onReplaceUnavailableFuelStop()
+                    },
+                ) {
+                    Text("Cerca alternativa")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFuelStopReplacement = false }) {
+                    Text("Annulla")
+                }
+            },
+        )
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.62f),
+        ) {
+            NavigationMap(
+                state = state,
+                mapStyleUrl = BuildConfig.COMPASS_MAP_STYLE_URL,
+                cameraMode = cameraMode,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                    .align(Alignment.TopCenter),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        state.currentManeuver?.instruction ?: "Prosegui sul percorso",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    state.distanceToNextManeuverMeters?.let {
+                        Text("Tra ${formatDistance(it)}")
+                    }
+                    state.currentRoadName?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (cameraMode == NavigationCameraMode.OVERVIEW) {
+                    Button(onClick = { cameraMode = NavigationCameraMode.OVERVIEW }) {
+                        Text("Panoramica")
+                    }
+                } else {
+                    OutlinedButton(onClick = { cameraMode = NavigationCameraMode.OVERVIEW }) {
+                        Text("Panoramica")
+                    }
+                }
+                if (cameraMode == NavigationCameraMode.FOLLOW) {
+                    Button(onClick = { cameraMode = NavigationCameraMode.FOLLOW }) {
+                        Text("Ricentra")
+                    }
+                } else {
+                    OutlinedButton(onClick = { cameraMode = NavigationCameraMode.FOLLOW }) {
+                        Text("Ricentra")
+                    }
+                }
+            }
+        }
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LinearProgressIndicator(
+                    progress = { state.routeProgressFraction.toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    SummaryValue(
+                        "Rimanenti",
+                        state.distanceRemainingMeters?.let(::formatDistance) ?: "—",
+                    )
+                    SummaryValue(
+                        "Durata",
+                        state.totalDurationRemainingSeconds?.let(::formatDuration) ?: "—",
+                    )
+                    SummaryValue(
+                        "Arrivo",
+                        state.estimatedArrivalAt?.let {
+                            ACTIVE_NAVIGATION_TIME_FORMATTER.format(it)
+                        } ?: "—",
+                    )
+                }
+                Text(
+                    text = gpsStatusLabel(state.gpsStatus),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state.gpsStatus == GpsStatus.ACTIVE) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                if (state.offRouteStatus != OffRouteStatus.ON_ROUTE) {
+                    Text(
+                        if (state.offRouteStatus == OffRouteStatus.OFF_ROUTE) {
+                            "Fuori percorso confermato. Ricalcolo tramite Compass…"
+                        } else {
+                            "Verifica posizione rispetto al percorso…"
+                        },
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                when (state.reroutingStatus) {
+                    ReroutingStatus.IN_PROGRESS -> Text(
+                        if (state.routeUpdateReason == RouteUpdateReason.FUEL_STOP_UNAVAILABLE) {
+                            "Cerco una tappa CNG alternativa sicura…"
+                        } else {
+                            "Aggiornamento del percorso in corso…"
+                        },
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    ReroutingStatus.FAILED -> Text(
+                        when (state.routeUpdateFailure) {
+                            RouteUpdateFailure.NO_SAFE_FUEL_ALTERNATIVE ->
+                                "Nessuna alternativa CNG sicura: mantengo la tappa corrente."
+                            RouteUpdateFailure.FUEL_RANGE_PLAN_REQUIRED ->
+                                "Per sostituire questa tappa serve un piano autonomia predittivo."
+                            RouteUpdateFailure.NETWORK_OR_SERVER,
+                            null,
+                            -> "Ricalcolo non disponibile: continuo sulla rotta scaricata."
+                        },
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    ReroutingStatus.IDLE -> Unit
+                }
+                state.lastSpokenInstruction?.let {
+                    Text(
+                        "Voce: $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                state.nextFuelStop?.let { fuel ->
+                    Text(
+                        "Prossimo rifornimento: ${fuel.stop.name ?: "MIMIT ${fuel.stop.mimitStationId}"} · " +
+                            formatDistance(fuel.distanceRemainingMeters),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedButton(
+                        onClick = { confirmFuelStopReplacement = true },
+                        enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Salta / sostituisci tappa CNG")
+                    }
+                }
+                if (BuildConfig.DEBUG) {
+                    OutlinedButton(
+                        onClick = onRequestRouteUpdate,
+                        enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Ricalcola percorso (debug)")
+                    }
+                    OutlinedButton(
+                        onClick = onSimulateOffRoute,
+                        enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Simula deviazione (debug)")
+                    }
+                }
+                OutlinedButton(
+                    onClick = onStopNavigation,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Termina navigazione")
+                }
+            }
+        }
+    }
+}
+
+private fun gpsStatusLabel(status: GpsStatus): String = when (status) {
+    GpsStatus.UNAVAILABLE -> "GPS non disponibile"
+    GpsStatus.ACQUIRING -> "Ricerca del segnale GPS…"
+    GpsStatus.ACTIVE -> "GPS attivo · posizione agganciata al percorso"
+    GpsStatus.LOST -> "Segnale GPS temporaneamente perso"
 }
 
 @Composable
@@ -1068,6 +1527,7 @@ private fun PredictiveStatusContent(
 @Composable
 private fun SelectedRouteContent(
     selectedRoute: RouteWithCngStop,
+    onStartNavigation: () -> Unit,
     onChangeStation: () -> Unit,
     onRemoveStop: () -> Unit,
 ) {
@@ -1087,6 +1547,14 @@ private fun SelectedRouteContent(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         )
+        Button(
+            onClick = onStartNavigation,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+            Text("Avvia navigazione")
+        }
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1134,6 +1602,7 @@ private fun SelectedRouteContent(
 @Composable
 private fun SelectedItineraryRouteContent(
     selectedRoute: RouteWithCngItinerary,
+    onStartNavigation: () -> Unit,
     onChangePlan: () -> Unit,
     onRemoveStops: () -> Unit,
 ) {
@@ -1153,6 +1622,14 @@ private fun SelectedItineraryRouteContent(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         )
+        Button(
+            onClick = onStartNavigation,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+            Text("Avvia navigazione")
+        }
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1417,6 +1894,10 @@ private fun formatSignedKilometers(kilometers: Double): String = String.format(
 
 private fun formatTime(value: OffsetDateTime): String = value.format(DateTimeFormatter.ofPattern("HH:mm"))
 
+private val ACTIVE_NAVIGATION_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter
+    .ofPattern("HH:mm")
+    .withZone(ZoneId.systemDefault())
+
 private fun formatDateTime(value: OffsetDateTime): String = value.format(DateTimeFormatter.ofPattern("dd/MM HH:mm"))
 
 private fun formatPrice(price: CngPrice): String = String.format(
@@ -1438,6 +1919,11 @@ private fun freshnessLabel(freshness: PriceFreshness): String = when (freshness)
 
 private fun trafficLabel(trafficState: String): String = when (trafficState) {
     "not_configured" -> "live non configurato"
+    "configured" -> "configurato, non attivo"
+    "mock" -> "mock"
+    "fresh" -> "live attivo"
+    "stale" -> "live non recente"
+    "unavailable" -> "non disponibile"
     else -> trafficState
 }
 

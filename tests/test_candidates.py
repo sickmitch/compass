@@ -89,6 +89,25 @@ def test_corridor_policy_uses_configured_factor_and_caps() -> None:
     assert capped.cap_applied == "maximum"
 
 
+def test_corridor_request_validates_excluded_official_station_ids() -> None:
+    route = RouteRequest(
+        origin=Coordinate(45.4642, 9.19),
+        destination=Coordinate(44.4949, 11.3426),
+    )
+
+    request = CorridorCandidateRequest(
+        route=route,
+        effective_cng_range_km=300,
+        excluded_mimit_station_ids=("1001", "1002"),
+    )
+
+    assert request.excluded_mimit_station_ids == ("1001", "1002")
+    with pytest.raises(ValueError, match="distinct"):
+        CorridorCandidateRequest(route, 300, ("1001", "1001"))
+    with pytest.raises(ValueError, match="numeric"):
+        CorridorCandidateRequest(route, 300, ("station-1",))
+
+
 def test_polyline6_decodes_to_wgs84_linestring() -> None:
     encoded = _encode_polyline6([(45.4642, 9.19), (44.4949, 11.3426)])
 
@@ -98,9 +117,7 @@ def test_polyline6_decodes_to_wgs84_linestring() -> None:
         Coordinate(latitude=45.4642, longitude=9.19),
         Coordinate(latitude=44.4949, longitude=11.3426),
     )
-    assert route_linestring_wkt(decoded) == (
-        "LINESTRING(9.190000 45.464200,11.342600 44.494900)"
-    )
+    assert route_linestring_wkt(decoded) == ("LINESTRING(9.190000 45.464200,11.342600 44.494900)")
 
 
 def test_polyline6_decodes_checked_in_valhalla_shape() -> None:
@@ -157,12 +174,8 @@ def test_spatial_service_routes_once_and_exposes_pruning_metrics(
         BaseRoute(
             distance_meters=220_000,
             duration_seconds=8_000,
-            encoded_polyline=_encode_polyline6(
-                [(45.4642, 9.19), (44.4949, 11.3426)]
-            ),
-            maneuvers=(
-                Maneuver(1, "Procedi.", 220_000, 8_000, 0, 1),
-            ),
+            encoded_polyline=_encode_polyline6([(45.4642, 9.19), (44.4949, 11.3426)]),
+            maneuvers=(Maneuver(1, "Procedi.", 220_000, 8_000, 0, 1),),
             provider="valhalla",
         )
     )
@@ -206,6 +219,7 @@ def test_spatial_service_routes_once_and_exposes_pruning_metrics(
     assert provider.calls == [request.route]
     assert captured["radius_meters"] == 50_000
     assert captured["limit"] == 1
+    assert captured["excluded_mimit_station_ids"] == ()
     assert str(captured["route_wkt"]).startswith("LINESTRING(9.190000 45.464200")
     assert result.candidates == (candidate,)
     assert result.metrics.active_station_count == 1512

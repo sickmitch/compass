@@ -1,5 +1,6 @@
 package org.compass.cng.data.api
 
+import java.net.SocketTimeoutException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -56,6 +57,9 @@ class CompassApiClientTest {
         assertEquals(6_773.406, route.durationSeconds, 0.0)
         assertEquals("valhalla", route.provider)
         assertEquals("Parti verso sud.", route.maneuvers.single().instruction)
+        assertEquals("route_1234567890abcdef1234567890abcdef", route.navigation.routeId)
+        assertEquals(6_773.406, route.navigation.totalTripDurationSeconds, 0.0)
+        assertEquals(181, route.maneuvers.single().bearingAfter)
 
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
@@ -66,6 +70,99 @@ class CompassApiClientTest {
         assertEquals(
             "45.4642",
             requestJson.getValue("origin").jsonObject.getValue("latitude").jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun logsBoundedRequestOutcomeWithoutPayload() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(SUCCESS_RESPONSE),
+        )
+        val events = mutableListOf<String>()
+        val timestamps = listOf(1_000_000_000L, 1_125_000_000L).iterator()
+        val client = CompassApiClient(
+            baseUrl = server.url("/").toString(),
+            httpClient = OkHttpClient(),
+            json = json,
+            eventLogger = events::add,
+            monotonicNanos = { timestamps.next() },
+        )
+
+        client.getRoute(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+        )
+
+        assertEquals(
+            listOf(
+                "request started: method=POST endpoint=/api/v1/routes " +
+                    "call_timeout_ms=0 read_timeout_ms=10000",
+                "request completed: method=POST endpoint=/api/v1/routes status=200 " +
+                    "duration_ms=125",
+            ),
+            events,
+        )
+        assertFalse(events.any { "45.4642" in it || "encoded_polyline" in it })
+    }
+
+    @Test
+    fun logsNetworkExceptionClassAndDuration() = runTest {
+        val events = mutableListOf<String>()
+        val timestamps = listOf(2_000_000_000L, 2_250_000_000L).iterator()
+        val client = CompassApiClient(
+            baseUrl = server.url("/").toString(),
+            httpClient = OkHttpClient.Builder()
+                .addInterceptor { throw SocketTimeoutException("test timeout") }
+                .build(),
+            json = json,
+            eventLogger = events::add,
+            monotonicNanos = { timestamps.next() },
+        )
+
+        val error = runCatching {
+            client.getRoute(
+                origin = Coordinate(45.4642, 9.19),
+                destination = Coordinate(44.4949, 11.3426),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is ApiClientException.Network)
+        assertEquals(
+            "request failed: method=POST endpoint=/api/v1/routes kind=network " +
+                "duration_ms=250 cause=SocketTimeoutException",
+            events.last(),
+        )
+        assertFalse(events.any { "test timeout" in it })
+    }
+
+    @Test
+    fun givesOnlyPredictiveEvaluationAnExtendedTimeout() = runTest {
+        server.enqueue(successResponse(predictiveResponseFixture(resource("ranked-candidates-response.json"))))
+        val events = mutableListOf<String>()
+        val client = CompassApiClient(
+            baseUrl = server.url("/").toString(),
+            httpClient = OkHttpClient(),
+            json = json,
+            eventLogger = events::add,
+        )
+
+        client.getPredictiveCngCandidates(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+            effectiveCngRangeKm = 300.0,
+            estimatedRemainingCngRangeKm = 120.0,
+            reserveCngRangeKm = 30.0,
+            maximumDetourMinutes = 10.0,
+            departureAt = "2026-08-30T10:00:00+02:00",
+        )
+
+        assertEquals(
+            "request started: method=POST endpoint=/api/v1/cng/predictive-candidates " +
+                "call_timeout_ms=240000 read_timeout_ms=240000",
+            events.first(),
         )
     }
 
@@ -163,7 +260,10 @@ class CompassApiClientTest {
     fun postsPredictiveRangeStateAndMapsOnlyReachableCandidates() = runTest {
         server.enqueue(
             successResponse(
-                predictiveResponseFixture(resource("ranked-candidates-response.json")),
+                predictiveResponseFixture(
+                    resource("ranked-candidates-response.json"),
+                    excludedMimitStationIds = listOf("1001"),
+                ),
             ),
         )
         val client = client()
@@ -176,9 +276,11 @@ class CompassApiClientTest {
             reserveCngRangeKm = 30.0,
             maximumDetourMinutes = 10.0,
             departureAt = "2026-08-30T10:00:00+02:00",
+            excludedMimitStationIds = setOf("1001"),
         )
 
         assertEquals("suggested", result.suggestionState)
+        assertEquals(listOf("1001"), result.excludedMimitStationIds)
         assertEquals(90.0, result.rangeBasis.usableRangeBeforeReserveKm, 0.0)
         assertFalse(result.rangeBasis.trafficAdjusted)
         assertEquals("43690", result.candidates.single().candidate.mimitStationId)
@@ -199,6 +301,11 @@ class CompassApiClientTest {
             requestJson.getValue("reserve_cng_range_km").jsonPrimitive.content,
         )
         assertFalse(requestJson.getValue("include_closed").jsonPrimitive.content.toBoolean())
+        assertEquals(
+            "1001",
+            requestJson.getValue("excluded_mimit_station_ids")
+                .jsonArray.single().jsonPrimitive.content,
+        )
     }
 
     @Test
@@ -367,7 +474,19 @@ class CompassApiClientTest {
                   "travel_type": "car"
                 }
               ],
-              "provider": "valhalla"
+              "provider": "valhalla",
+              "navigation": {
+                "route_id": "route_1234567890abcdef1234567890abcdef",
+                "driving_duration_seconds": 6773.406,
+                "remaining_driving_duration_seconds": 6773.406,
+                "refueling_stop_count": 0,
+                "dwell_seconds_per_refueling_stop": 1200,
+                "total_refueling_dwell_seconds": 0.0,
+                "total_trip_duration_seconds": 6773.406,
+                "departure_at": "2026-09-02T08:00:00+02:00",
+                "driving_arrival_at": "2026-09-02T09:52:53.406+02:00",
+                "trip_arrival_at": "2026-09-02T09:52:53.406+02:00"
+              }
             }
         """.trimIndent()
     }

@@ -14,6 +14,7 @@ from compass.candidates.domain import (
     SpatialCandidate,
     SpatialPruningMetrics,
 )
+from compass.config import get_api_settings, get_settings
 from compass.db import get_session
 from compass.detours.domain import (
     NetworkCostBasis,
@@ -31,6 +32,9 @@ from compass.routing.domain import (
     RouteRequest,
     RoutingUnavailableError,
 )
+from compass.traffic.dependencies import get_traffic_route_refresher
+from compass.traffic.domain import TrafficHealth
+from compass.traffic.route_refresh import TrafficRouteRefreshResult
 
 
 def _get(path: str) -> httpx.Response:
@@ -115,8 +119,18 @@ def test_readiness_checks_database(monkeypatch: pytest.MonkeyPatch) -> None:
     async def override_provider() -> FakeRoutingProvider:
         return provider
 
+    async def override_settings():
+        return get_settings().model_copy(
+            update={
+                "traffic_enabled": False,
+                "traffic_provider": "none",
+                "traffic_valhalla_overlay_enabled": False,
+            }
+        )
+
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
     monkeypatch.setattr(
         "compass.api.main.load_data_freshness", lambda *args, **kwargs: _freshness_report()
     )
@@ -131,6 +145,44 @@ def test_readiness_checks_database(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["routing"] == "ready"
     assert response.json()["data"] == "ready"
     assert response.json()["traffic"] == "not_configured"
+
+
+def test_traffic_unavailable_does_not_take_api_readiness_offline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    provider = FakeRoutingProvider()
+
+    async def override_session() -> AsyncIterator[Session]:
+        with Session(engine) as session:
+            yield session
+
+    async def override_provider() -> FakeRoutingProvider:
+        return provider
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_routing_provider] = override_provider
+    monkeypatch.setattr(
+        "compass.api.main.load_data_freshness", lambda *args, **kwargs: _freshness_report()
+    )
+    monkeypatch.setattr(
+        "compass.api.main.traffic_health_from_settings",
+        lambda _settings: TrafficHealth(
+            enabled=True,
+            provider="tomtom",
+            provider_status="unavailable",
+            traffic_aware_routing=True,
+        ),
+    )
+    try:
+        response = _get("/health/ready")
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["traffic"] == "unavailable"
 
 
 def test_readiness_reports_routing_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,12 +293,117 @@ def test_base_route_contract_is_provider_independent() -> None:
             }
         ],
         "provider": "valhalla",
+        "navigation": {
+            "route_id": "route_9491c0c629955aa1cb1599fa2af10efe",
+            "driving_duration_seconds": 320.0,
+            "remaining_driving_duration_seconds": 320.0,
+            "refueling_stop_count": 0,
+            "dwell_seconds_per_refueling_stop": 1200,
+            "total_refueling_dwell_seconds": 0.0,
+            "total_trip_duration_seconds": 320.0,
+            "departure_at": None,
+            "driving_arrival_at": None,
+            "trip_arrival_at": None,
+        },
     }
     assert provider.request == RouteRequest(
         origin=Coordinate(latitude=45.4642, longitude=9.19),
         destination=Coordinate(latitude=45.4781, longitude=9.2271),
         language="it-IT",
     )
+
+
+def test_base_route_refreshes_traffic_then_recomputes_with_valhalla() -> None:
+    class CountingProvider(FakeRoutingProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.route_calls = 0
+
+        async def route(self, request: RouteRequest) -> BaseRoute:
+            self.route_calls += 1
+            route = await super().route(request)
+            return BaseRoute(
+                distance_meters=route.distance_meters,
+                duration_seconds=route.duration_seconds + self.route_calls,
+                encoded_polyline=route.encoded_polyline,
+                maneuvers=route.maneuvers,
+                provider=route.provider,
+            )
+
+    class UpdatedRefresher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def refresh(self, **_kwargs) -> TrafficRouteRefreshResult:
+            self.calls += 1
+            return TrafficRouteRefreshResult(state="updated", scope_key="test")
+
+    provider = CountingProvider()
+    refresher = UpdatedRefresher()
+
+    async def override_provider() -> CountingProvider:
+        return provider
+
+    async def override_refresher() -> UpdatedRefresher:
+        return refresher
+
+    app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_traffic_route_refresher] = override_refresher
+    try:
+        response = _post(
+            "/api/v1/routes",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 45.4781, "longitude": 9.2271},
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert provider.route_calls == 2
+    assert refresher.calls == 1
+    assert response.json()["duration_seconds"] == 322.0
+
+
+def test_base_route_propagates_scheduled_departure() -> None:
+    provider = FakeRoutingProvider()
+
+    async def override_provider() -> FakeRoutingProvider:
+        return provider
+
+    app.dependency_overrides[get_routing_provider] = override_provider
+    try:
+        response = _post(
+            "/api/v1/routes",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 45.4781, "longitude": 9.2271},
+                "departure_at": "2026-08-30T10:00:00+02:00",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert provider.request is not None
+    assert provider.request.departure_at == datetime.fromisoformat(
+        "2026-08-30T10:00:00+02:00"
+    )
+
+
+def test_base_route_rejects_naive_scheduled_departure() -> None:
+    response = _post(
+        "/api/v1/routes",
+        {
+            "origin": {"latitude": 45.4642, "longitude": 9.19},
+            "destination": {"latitude": 45.4781, "longitude": 9.2271},
+            "departure_at": "2026-08-30T10:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_request"
 
 
 def test_base_route_rejects_extra_input_with_machine_error() -> None:

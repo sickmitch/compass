@@ -33,6 +33,9 @@ import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.SelectedCngStop
+import org.compass.cng.navigation.NavigationPhase
+import org.compass.cng.navigation.NavigationSession
+import org.compass.cng.navigation.toNavigationRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -60,6 +63,42 @@ class RoutePlannerViewModelTest {
         assertEquals(PlannerStage.CONFIGURE_CNG, viewModel.uiState.value.stage)
         assertEquals("300", viewModel.uiState.value.effectiveRangeKmInput)
         assertEquals("10", viewModel.uiState.value.maximumDetourMinutesInput)
+    }
+
+    @Test
+    fun startNavigationCreatesExplicitRoutePreviewSession() = runTest {
+        val route = sampleRoute()
+        val viewModel = RoutePlannerViewModel(FakeRoutingRepository(baseResult = Result.success(route)))
+
+        viewModel.openNavigationPreview()
+
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(NavigationPhase.ROUTE_PREVIEW, viewModel.navigationState.value.phase)
+        assertEquals(route.navigation.routeId, viewModel.navigationState.value.route?.routeId)
+
+        viewModel.navigateBack()
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(NavigationPhase.IDLE, viewModel.navigationState.value.phase)
+    }
+
+    @Test
+    fun recreatedViewModelReattachesToApplicationNavigationSession() = runTest {
+        val route = sampleRoute()
+        val session = NavigationSession().apply {
+            preview(route.toNavigationRoute())
+            start()
+        }
+        val repository = FakeRoutingRepository(baseResult = Result.success(route))
+
+        val recreated = RoutePlannerViewModel(
+            routingRepository = repository,
+            navigationSession = session,
+        )
+
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, recreated.uiState.value.stage)
+        assertEquals(route.navigation.routeId, recreated.navigationState.value.route?.routeId)
+        assertEquals(NavigationPhase.NAVIGATING, recreated.navigationState.value.phase)
+        assertEquals(0, repository.previewCalls)
     }
 
     @Test
@@ -507,6 +546,7 @@ class RoutePlannerViewModelTest {
             reserveCngRangeKm: Double,
             maximumDetourMinutes: Double,
             departureAt: OffsetDateTime,
+            excludedMimitStationIds: Set<String>,
         ): PredictiveCngSuggestion {
             predictiveCalls += 1
             lastPredictiveOrigin = origin

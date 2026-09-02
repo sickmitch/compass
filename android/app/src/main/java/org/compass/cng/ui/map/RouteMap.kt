@@ -166,7 +166,7 @@ private fun addEndpointLayer(
 }
 
 @Composable
-private fun rememberMapViewWithLifecycle(): MapView {
+internal fun rememberMapViewWithLifecycle(): MapView {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val mapView = remember { MapView(context) }

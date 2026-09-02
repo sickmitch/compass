@@ -72,6 +72,17 @@ def test_phase4_route_corridor_prunes_with_postgis(monkeypatch: pytest.MonkeyPat
             )
             assert all(0 <= candidate.route_fraction <= 1 for candidate in result.candidates)
 
+            excluded = PostgisCandidateRepository(session).within_corridor(
+                route_wkt=route_wkt,
+                radius_meters=25_000,
+                limit=10,
+                excluded_mimit_station_ids=("1001",),
+            )
+            assert excluded.corridor_candidate_count == 1
+            assert [candidate.mimit_station_id for candidate in excluded.candidates] == [
+                "1002"
+            ]
+
             limited = PostgisCandidateRepository(session).within_corridor(
                 route_wkt=route_wkt,
                 radius_meters=25_000,

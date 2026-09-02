@@ -1,6 +1,7 @@
 package org.compass.cng.data.api
 
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,6 +22,8 @@ class CompassApiClient(
     baseUrl: String,
     private val httpClient: OkHttpClient,
     private val json: Json,
+    private val eventLogger: (String) -> Unit = {},
+    private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
     private val apiBaseUrl = baseUrl.toHttpUrl()
     private val routeUrl = resolve("api/v1/routes")
@@ -28,6 +31,10 @@ class CompassApiClient(
     private val predictiveCandidatesUrl = resolve("api/v1/cng/predictive-candidates")
     private val routeWithCngStopUrl = resolve("api/v1/routes/with-cng-stop")
     private val routeWithCngItineraryUrl = resolve("api/v1/routes/with-cng-itinerary")
+    private val predictiveHttpClient = httpClient.newBuilder()
+        .readTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
 
     suspend fun getRoute(
         origin: Coordinate,
@@ -91,6 +98,7 @@ class CompassApiClient(
         reserveCngRangeKm: Double,
         maximumDetourMinutes: Double,
         departureAt: String,
+        excludedMimitStationIds: Set<String> = emptySet(),
     ): ApiPredictiveCandidates {
         val payload = PredictiveCandidatesRequestDto(
             origin = origin.toDto(),
@@ -103,10 +111,12 @@ class CompassApiClient(
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt,
             includeClosed = false,
+            excludedMimitStationIds = excludedMimitStationIds.sorted(),
         )
         return post<PredictiveCandidatesResponseDto>(
             predictiveCandidatesUrl,
             json.encodeToString(payload),
+            client = predictiveHttpClient,
         ).toApiPredictiveCandidates()
     }
 
@@ -140,15 +150,27 @@ class CompassApiClient(
     private suspend inline fun <reified ResponseDto> post(
         url: HttpUrl,
         requestJson: String,
+        client: OkHttpClient = httpClient,
     ): ResponseDto = withContext(Dispatchers.IO) {
+        val endpoint = url.encodedPath
+        val startedAtNanos = monotonicNanos()
         val request = Request.Builder()
             .url(url)
             .post(requestJson.toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
+        eventLogger(
+            "request started: method=POST endpoint=$endpoint " +
+                "call_timeout_ms=${client.callTimeoutMillis} " +
+                "read_timeout_ms=${client.readTimeoutMillis}",
+        )
         try {
-            httpClient.newCall(request).execute().use { response ->
+            client.newCall(request).execute().use { response ->
                 val body = response.body.string()
+                eventLogger(
+                    "request completed: method=POST endpoint=$endpoint status=${response.code} " +
+                        "duration_ms=${elapsedMillis(startedAtNanos)}",
+                )
                 if (!response.isSuccessful) {
                     val error = runCatching { json.decodeFromString<ErrorResponseDto>(body) }
                         .getOrNull()
@@ -164,19 +186,54 @@ class CompassApiClient(
                 }
             }
         } catch (error: CancellationException) {
+            eventLogger(
+                "request cancelled: method=POST endpoint=$endpoint " +
+                    "duration_ms=${elapsedMillis(startedAtNanos)}",
+            )
             throw error
-        } catch (error: ApiClientException) {
+        } catch (error: ApiClientException.Http) {
+            throw error
+        } catch (error: ApiClientException.InvalidResponse) {
+            eventLogger(
+                "request failed: method=POST endpoint=$endpoint kind=invalid_response " +
+                    "duration_ms=${elapsedMillis(startedAtNanos)} " +
+                    "cause=${error.cause.causesForLog()}",
+            )
             throw error
         } catch (error: IOException) {
+            eventLogger(
+                "request failed: method=POST endpoint=$endpoint kind=network " +
+                    "duration_ms=${elapsedMillis(startedAtNanos)} cause=${error.causesForLog()}",
+            )
             throw ApiClientException.Network(error)
         } catch (error: IllegalArgumentException) {
+            eventLogger(
+                "request failed: method=POST endpoint=$endpoint kind=invalid_response " +
+                    "duration_ms=${elapsedMillis(startedAtNanos)} cause=${error.causesForLog()}",
+            )
             throw ApiClientException.InvalidResponse(error)
         }
     }
 
+    private fun elapsedMillis(startedAtNanos: Long): Long =
+        ((monotonicNanos() - startedAtNanos).coerceAtLeast(0L) / NANOS_PER_MILLISECOND)
+
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        const val NANOS_PER_MILLISECOND = 1_000_000L
+        const val PREDICTIVE_TIMEOUT_SECONDS = 240L
     }
+}
+
+private fun Throwable?.causesForLog(): String {
+    if (this == null) return "unknown"
+    val names = mutableListOf<String>()
+    var current: Throwable? = this
+    while (current != null && names.size < 4) {
+        names += current::class.java.simpleName.ifEmpty { current::class.java.name }
+        current = current.cause
+    }
+    return names.joinToString(">")
 }
 
 sealed class ApiClientException(cause: Throwable? = null) : Exception(cause) {
@@ -227,6 +284,7 @@ private data class PredictiveCandidatesRequestDto(
     @SerialName("maximum_detour_minutes") val maximumDetourMinutes: Double,
     @SerialName("departure_at") val departureAt: String,
     @SerialName("include_closed") val includeClosed: Boolean,
+    @SerialName("excluded_mimit_station_ids") val excludedMimitStationIds: List<String>,
 )
 
 @Serializable
@@ -285,6 +343,23 @@ private data class RouteResponseDto(
     val geometry: RouteGeometryDto,
     val maneuvers: List<ManeuverDto>,
     val provider: String,
+    val navigation: NavigationTimingDto? = null,
+)
+
+@Serializable
+private data class NavigationTimingDto(
+    @SerialName("route_id") val routeId: String,
+    @SerialName("driving_duration_seconds") val drivingDurationSeconds: Double,
+    @SerialName("remaining_driving_duration_seconds")
+    val remainingDrivingDurationSeconds: Double,
+    @SerialName("refueling_stop_count") val refuelingStopCount: Int,
+    @SerialName("dwell_seconds_per_refueling_stop")
+    val dwellSecondsPerRefuelingStop: Int,
+    @SerialName("total_refueling_dwell_seconds") val totalRefuelingDwellSeconds: Double,
+    @SerialName("total_trip_duration_seconds") val totalTripDurationSeconds: Double,
+    @SerialName("departure_at") val departureAt: String?,
+    @SerialName("driving_arrival_at") val drivingArrivalAt: String?,
+    @SerialName("trip_arrival_at") val tripArrivalAt: String?,
 )
 
 @Serializable
@@ -550,6 +625,8 @@ private data class PredictiveCandidatesResponseDto(
     @SerialName("suggestion_state") val suggestionState: String,
     @SerialName("departure_at") val departureAt: String,
     @SerialName("maximum_detour_minutes") val maximumDetourMinutes: Double,
+    @SerialName("excluded_mimit_station_ids")
+    val excludedMimitStationIds: List<String> = emptyList(),
     @SerialName("base_route") val baseRoute: RouteResponseDto,
     val corridor: CorridorPolicyDto,
     @SerialName("spatial_pruning") val spatialPruning: SpatialPruningMetricsDto,
@@ -571,6 +648,8 @@ private data class SelectedCngStopDto(
     val municipality: String?,
     val province: String?,
     val location: CoordinateDto,
+    @SerialName("expected_arrival_at") val expectedArrivalAt: String? = null,
+    @SerialName("dwell_time_seconds") val dwellTimeSeconds: Int = 20 * 60,
 )
 
 @Serializable
@@ -591,6 +670,7 @@ private data class RouteWithCngStopResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<RouteLegDto>,
     val provider: String,
+    val navigation: NavigationTimingDto? = null,
 )
 
 @Serializable
@@ -601,6 +681,8 @@ private data class CngItineraryStopDto(
     val municipality: String?,
     val province: String?,
     val location: CoordinateDto,
+    @SerialName("expected_arrival_at") val expectedArrivalAt: String? = null,
+    @SerialName("dwell_time_seconds") val dwellTimeSeconds: Int = 20 * 60,
 )
 
 @Serializable
@@ -627,6 +709,7 @@ private data class RouteWithCngItineraryResponseDto(
     val legs: List<CngItineraryRouteLegDto>,
     val provider: String,
     @SerialName("range_validation") val rangeValidation: String,
+    val navigation: NavigationTimingDto? = null,
 )
 
 @Serializable
@@ -649,6 +732,7 @@ private fun RouteResponseDto.toApiRoute(): ApiRoute {
         encodedPolyline = geometry.encodedPolyline,
         maneuvers = maneuvers.map(ManeuverDto::toApiManeuver),
         provider = provider,
+        navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
     )
 }
 
@@ -660,6 +744,11 @@ private fun ManeuverDto.toApiManeuver(): ApiManeuver = ApiManeuver(
     beginShapeIndex = beginShapeIndex,
     endShapeIndex = endShapeIndex,
     streetNames = streetNames,
+    verbalTransitionAlertInstruction = verbalTransitionAlertInstruction,
+    verbalPreTransitionInstruction = verbalPreTransitionInstruction,
+    verbalPostTransitionInstruction = verbalPostTransitionInstruction,
+    bearingBefore = bearingBefore,
+    bearingAfter = bearingAfter,
     travelMode = travelMode,
     travelType = travelType,
 )
@@ -667,7 +756,6 @@ private fun ManeuverDto.toApiManeuver(): ApiManeuver = ApiManeuver(
 private fun RankedCandidatesResponseDto.toApiRankedCandidates(): ApiRankedCandidates {
     require(stage == "ranking") { "unsupported candidate response stage" }
     require(costBasis.provider == "valhalla") { "unsupported routing provider" }
-    require(!costBasis.trafficAware) { "unexpected traffic-aware response" }
     require(candidates.size == rankingEvaluation.rankedCandidateCount) {
         "candidate count does not match ranking metrics"
     }
@@ -683,8 +771,8 @@ private fun RankedCandidatesResponseDto.toApiRankedCandidates(): ApiRankedCandid
 private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPredictiveCandidates {
     require(stage == "predictive_ranking") { "unsupported predictive response stage" }
     require(costBasis.provider == "valhalla") { "unsupported routing provider" }
-    require(!costBasis.trafficAware && !rangeBasis.trafficAdjusted) {
-        "unexpected traffic-aware predictive response"
+    require(costBasis.trafficAware == rangeBasis.trafficAdjusted) {
+        "predictive traffic flags disagree"
     }
     require(rangeBasis.remainingRouteOrigin == "request_origin") {
         "unsupported remaining-route origin"
@@ -729,6 +817,7 @@ private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPred
         suggestionState = suggestionState,
         departureAt = departureAt,
         maximumDetourMinutes = maximumDetourMinutes,
+        excludedMimitStationIds = excludedMimitStationIds,
         baseRoute = baseRoute.toApiRoute(),
         trafficState = rangeBasis.trafficState,
         rangeBasis = ApiPredictiveRangeBasis(
@@ -866,6 +955,8 @@ private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCng
             province = selectedStop.province,
             latitude = selectedStop.location.latitude,
             longitude = selectedStop.location.longitude,
+            expectedArrivalAt = selectedStop.expectedArrivalAt,
+            dwellTimeSeconds = selectedStop.dwellTimeSeconds,
         ),
         distanceMeters = distanceMeters,
         durationSeconds = durationSeconds,
@@ -885,6 +976,7 @@ private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCng
             )
         },
         provider = provider,
+        navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 1),
     )
 }
 
@@ -912,6 +1004,8 @@ private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
                 province = stop.province,
                 latitude = stop.location.latitude,
                 longitude = stop.location.longitude,
+                expectedArrivalAt = stop.expectedArrivalAt,
+                dwellTimeSeconds = stop.dwellTimeSeconds,
             )
         },
         distanceMeters = distanceMeters,
@@ -940,6 +1034,64 @@ private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
         },
         provider = provider,
         rangeValidation = rangeValidation,
+        navigation = navigation.toApiNavigationTiming(
+            durationSeconds,
+            refuelingStopCount = selectedStops.size,
+        ),
+    )
+}
+
+private fun NavigationTimingDto?.toApiNavigationTiming(
+    fallbackDrivingDurationSeconds: Double,
+    refuelingStopCount: Int,
+): ApiNavigationTiming {
+    if (this == null) {
+        val dwellSeconds = refuelingStopCount * 20.0 * 60.0
+        return ApiNavigationTiming(
+            routeId = "route_00000000000000000000000000000000",
+            drivingDurationSeconds = fallbackDrivingDurationSeconds,
+            remainingDrivingDurationSeconds = fallbackDrivingDurationSeconds,
+            refuelingStopCount = refuelingStopCount,
+            dwellSecondsPerRefuelingStop = 20 * 60,
+            totalRefuelingDwellSeconds = dwellSeconds,
+            totalTripDurationSeconds = fallbackDrivingDurationSeconds + dwellSeconds,
+            departureAt = null,
+            drivingArrivalAt = null,
+            tripArrivalAt = null,
+        )
+    }
+    require(routeId.matches(Regex("^route_[0-9a-f]{32}$"))) { "invalid route identity" }
+    require(
+        drivingDurationSeconds >= 0 &&
+            remainingDrivingDurationSeconds >= 0 &&
+            refuelingStopCount >= 0 &&
+            dwellSecondsPerRefuelingStop >= 0 &&
+            totalRefuelingDwellSeconds >= 0 &&
+            totalTripDurationSeconds >= drivingDurationSeconds,
+    ) { "invalid navigation timing" }
+    require(
+        kotlin.math.abs(
+            totalRefuelingDwellSeconds -
+                refuelingStopCount * dwellSecondsPerRefuelingStop,
+        ) <= 0.001,
+    ) { "navigation dwell total does not reconcile" }
+    require(
+        kotlin.math.abs(
+            totalTripDurationSeconds -
+                drivingDurationSeconds - totalRefuelingDwellSeconds,
+        ) <= 0.001,
+    ) { "navigation trip duration does not reconcile" }
+    return ApiNavigationTiming(
+        routeId = routeId,
+        drivingDurationSeconds = drivingDurationSeconds,
+        remainingDrivingDurationSeconds = remainingDrivingDurationSeconds,
+        refuelingStopCount = refuelingStopCount,
+        dwellSecondsPerRefuelingStop = dwellSecondsPerRefuelingStop,
+        totalRefuelingDwellSeconds = totalRefuelingDwellSeconds,
+        totalTripDurationSeconds = totalTripDurationSeconds,
+        departureAt = departureAt,
+        drivingArrivalAt = drivingArrivalAt,
+        tripArrivalAt = tripArrivalAt,
     )
 }
 

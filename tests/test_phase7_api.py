@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from compass.api.main import app
+from compass.config import get_api_settings, get_settings
 from compass.db import get_session
 from compass.freshness.domain import DataFreshnessReport, DataSourceFreshness
 from compass.routing.dependencies import get_routing_provider
@@ -207,6 +208,7 @@ def test_route_with_selected_cng_stop_returns_exactly_two_legs(
                 "origin": {"latitude": 45.4642, "longitude": 9.19},
                 "destination": {"latitude": 44.4949, "longitude": 11.3426},
                 "mimit_station_id": "43690",
+                "departure_at": "2026-08-30T10:00:00+02:00",
             },
         )
     finally:
@@ -222,8 +224,17 @@ def test_route_with_selected_cng_stop_returns_exactly_two_legs(
     ]
     assert body["legs"][0]["geometry"]["encoded_polyline"] == "origin-to-stop"
     assert body["legs"][1]["geometry"]["encoded_polyline"] == "stop-to-destination"
+    assert body["selected_stop"]["expected_arrival_at"] == "2026-08-30T10:19:11+02:00"
+    assert body["selected_stop"]["dwell_time_seconds"] == 1_200
+    assert body["navigation"]["driving_duration_seconds"] == 6_839
+    assert body["navigation"]["total_refueling_dwell_seconds"] == 1_200
+    assert body["navigation"]["total_trip_duration_seconds"] == 8_039
+    assert body["navigation"]["trip_arrival_at"] == "2026-08-30T12:13:59+02:00"
     assert provider.request is not None
     assert provider.request.waypoints[0].latitude == 45.321004
+    assert provider.request.departure_at == datetime.fromisoformat(
+        "2026-08-30T10:00:00+02:00"
+    )
 
 
 @pytest.mark.parametrize(
@@ -273,7 +284,18 @@ def test_data_freshness_contract_is_explicit(monkeypatch: pytest.MonkeyPatch) ->
         reconciliation=reconciliation,
     )
     monkeypatch.setattr("compass.api.system.load_data_freshness", lambda *args, **kwargs: report)
+
+    async def override_settings():
+        return get_settings().model_copy(
+            update={
+                "traffic_enabled": False,
+                "traffic_provider": "none",
+                "traffic_valhalla_overlay_enabled": False,
+            }
+        )
+
     app.dependency_overrides[get_session] = _override_session
+    app.dependency_overrides[get_api_settings] = override_settings
     try:
         response = _request("GET", "/api/v1/data-freshness")
     finally:

@@ -22,3 +22,9 @@ def configure_logging(level: str) -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())
+    # httpx includes the complete request URL in its INFO message. Some providers,
+    # including TomTom's base Traffic API, require credentials in the query string.
+    # Keep transport diagnostics at WARNING so structured application logs can
+    # never disclose those credentials.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)

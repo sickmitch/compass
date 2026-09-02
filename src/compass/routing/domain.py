@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 
@@ -14,6 +15,13 @@ class RouteRequest:
     destination: Coordinate
     costing: str = "auto"
     language: str = "it-IT"
+    departure_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.departure_at is not None and (
+            self.departure_at.tzinfo is None or self.departure_at.utcoffset() is None
+        ):
+            raise ValueError("departure_at must include a UTC offset")
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,10 +31,15 @@ class WaypointRouteRequest:
     waypoints: tuple[Coordinate, ...]
     costing: str = "auto"
     language: str = "it-IT"
+    departure_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.waypoints:
             raise ValueError("waypoint route must contain at least one waypoint")
+        if self.departure_at is not None and (
+            self.departure_at.tzinfo is None or self.departure_at.utcoffset() is None
+        ):
+            raise ValueError("departure_at must include a UTC offset")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,12 +90,17 @@ class MatrixRequest:
     sources: tuple[Coordinate, ...]
     targets: tuple[Coordinate, ...]
     costing: str = "auto"
+    departure_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.sources:
             raise ValueError("matrix sources must not be empty")
         if not self.targets:
             raise ValueError("matrix targets must not be empty")
+        if self.departure_at is not None and (
+            self.departure_at.tzinfo is None or self.departure_at.utcoffset() is None
+        ):
+            raise ValueError("departure_at must include a UTC offset")
 
 
 @dataclass(frozen=True, slots=True)

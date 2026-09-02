@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 compass-etl = "compass.etl.cli:main"
+compass-traffic = "compass.traffic.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

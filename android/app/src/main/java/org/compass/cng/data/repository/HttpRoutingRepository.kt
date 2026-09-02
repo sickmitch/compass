@@ -9,6 +9,7 @@ import org.compass.cng.data.api.ApiOpeningEvaluation
 import org.compass.cng.data.api.ApiCngPrice
 import org.compass.cng.data.api.ApiRankedCandidate
 import org.compass.cng.data.api.ApiRoute
+import org.compass.cng.data.api.ApiNavigationTiming
 import org.compass.cng.data.api.CompassApiClient
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
@@ -20,6 +21,7 @@ import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.Maneuver
+import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.OpeningValidation
@@ -86,6 +88,7 @@ class HttpRoutingRepository(
         reserveCngRangeKm: Double,
         maximumDetourMinutes: Double,
         departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String>,
     ): PredictiveCngSuggestion = mapFailures {
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
         require(
@@ -98,6 +101,14 @@ class HttpRoutingRepository(
             "reserve range must be below remaining range"
         }
         require(maximumDetourMinutes >= 0) { "maximum detour must not be negative" }
+        require(excludedMimitStationIds.size <= 32) {
+            "at most 32 MIMIT station IDs may be excluded"
+        }
+        require(excludedMimitStationIds.all { id ->
+            id.isNotEmpty() && id.length <= 32 && id.all { character ->
+                character in '0'..'9'
+            }
+        }) { "excluded MIMIT station IDs must be numeric" }
         val response = apiClient.getPredictiveCngCandidates(
             origin = origin,
             destination = destination,
@@ -106,7 +117,11 @@ class HttpRoutingRepository(
             reserveCngRangeKm = reserveCngRangeKm,
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt.toString(),
+            excludedMimitStationIds = excludedMimitStationIds,
         )
+        require(response.excludedMimitStationIds.toSet() == excludedMimitStationIds) {
+            "server did not acknowledge the excluded MIMIT station IDs"
+        }
         val candidates = response.candidates.map { predictive ->
             PredictiveCngStation(
                 station = predictive.candidate.toRankedCngStation(),
@@ -235,6 +250,8 @@ class HttpRoutingRepository(
                 municipality = stop.municipality,
                 province = stop.province,
                 location = Coordinate(stop.latitude, stop.longitude),
+                expectedArrivalAt = stop.expectedArrivalAt?.let(OffsetDateTime::parse),
+                dwellTimeSeconds = stop.dwellTimeSeconds,
             )
         }
         require(selectedStops.map(SelectedCngStop::mimitStationId) == mimitStationIds) {
@@ -268,6 +285,10 @@ class HttpRoutingRepository(
                         geometry = Polyline6Decoder.decode(leg.encodedPolyline),
                         maneuvers = leg.maneuvers.map(ApiManeuver::toManeuver),
                         provider = response.provider,
+                        navigation = response.navigation.toLegNavigationTiming(
+                            sequence = leg.sequence,
+                            durationSeconds = leg.durationSeconds,
+                        ),
                     ),
                     availableRangeAtDepartureKm = leg.availableRangeAtDepartureKm,
                     estimatedRemainingRangeAtArrivalKm = (
@@ -278,6 +299,7 @@ class HttpRoutingRepository(
             },
             provider = response.provider,
             rangeValidation = response.rangeValidation,
+            navigation = response.navigation.toNavigationTiming(),
         )
     }
 
@@ -303,6 +325,10 @@ class HttpRoutingRepository(
                     geometry = Polyline6Decoder.decode(leg.encodedPolyline),
                     maneuvers = leg.maneuvers.map(ApiManeuver::toManeuver),
                     provider = response.provider,
+                    navigation = response.navigation.toLegNavigationTiming(
+                        sequence = response.legs.indexOf(leg) + 1,
+                        durationSeconds = leg.durationSeconds,
+                    ),
                 ),
             )
         }
@@ -316,11 +342,16 @@ class HttpRoutingRepository(
                     response.selectedStop.latitude,
                     response.selectedStop.longitude,
                 ),
+                expectedArrivalAt = response.selectedStop.expectedArrivalAt?.let(
+                    OffsetDateTime::parse,
+                ),
+                dwellTimeSeconds = response.selectedStop.dwellTimeSeconds,
             ),
             distanceMeters = response.distanceMeters,
             durationSeconds = response.durationSeconds,
             legs = legs,
             provider = response.provider,
+            navigation = response.navigation.toNavigationTiming(),
         )
     }
 
@@ -367,6 +398,7 @@ private fun ApiRoute.toRoutePreview(
     geometry = Polyline6Decoder.decode(encodedPolyline),
     maneuvers = maneuvers.map(ApiManeuver::toManeuver),
     provider = provider,
+    navigation = navigation.toNavigationTiming(),
 )
 
 private fun ApiManeuver.toManeuver(): Maneuver = Maneuver(
@@ -377,8 +409,42 @@ private fun ApiManeuver.toManeuver(): Maneuver = Maneuver(
     beginShapeIndex = beginShapeIndex,
     endShapeIndex = endShapeIndex,
     streetNames = streetNames,
+    verbalTransitionAlertInstruction = verbalTransitionAlertInstruction,
+    verbalPreTransitionInstruction = verbalPreTransitionInstruction,
+    verbalPostTransitionInstruction = verbalPostTransitionInstruction,
+    bearingBefore = bearingBefore,
+    bearingAfter = bearingAfter,
     travelMode = travelMode,
     travelType = travelType,
+)
+
+private fun ApiNavigationTiming.toNavigationTiming(): NavigationTiming = NavigationTiming(
+    routeId = routeId,
+    drivingDurationSeconds = drivingDurationSeconds,
+    remainingDrivingDurationSeconds = remainingDrivingDurationSeconds,
+    refuelingStopCount = refuelingStopCount,
+    dwellSecondsPerRefuelingStop = dwellSecondsPerRefuelingStop,
+    totalRefuelingDwellSeconds = totalRefuelingDwellSeconds,
+    totalTripDurationSeconds = totalTripDurationSeconds,
+    departureAt = departureAt?.let(OffsetDateTime::parse),
+    drivingArrivalAt = drivingArrivalAt?.let(OffsetDateTime::parse),
+    tripArrivalAt = tripArrivalAt?.let(OffsetDateTime::parse),
+)
+
+private fun ApiNavigationTiming.toLegNavigationTiming(
+    sequence: Int,
+    durationSeconds: Double,
+): NavigationTiming = NavigationTiming(
+    routeId = "${routeId}_leg_$sequence",
+    drivingDurationSeconds = durationSeconds,
+    remainingDrivingDurationSeconds = durationSeconds,
+    refuelingStopCount = 0,
+    dwellSecondsPerRefuelingStop = dwellSecondsPerRefuelingStop,
+    totalRefuelingDwellSeconds = 0.0,
+    totalTripDurationSeconds = durationSeconds,
+    departureAt = null,
+    drivingArrivalAt = null,
+    tripArrivalAt = null,
 )
 
 private fun ApiRankedCandidate.toRankedCngStation(): RankedCngStation = RankedCngStation(

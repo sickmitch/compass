@@ -1,6 +1,7 @@
 package org.compass.cng.testing
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.put
 internal fun predictiveResponseFixture(
     rankedResponse: String,
     suggestionState: String = "suggested",
+    excludedMimitStationIds: List<String> = emptyList(),
 ): String {
     val ranked = Json.parseToJsonElement(rankedResponse).jsonObject
     val suggested = suggestionState == "suggested"
@@ -19,6 +21,12 @@ internal fun predictiveResponseFixture(
         put("suggestion_state", suggestionState)
         put("departure_at", ranked.getValue("departure_at"))
         put("maximum_detour_minutes", ranked.getValue("maximum_detour_minutes"))
+        put(
+            "excluded_mimit_station_ids",
+            buildJsonArray {
+                excludedMimitStationIds.forEach { add(JsonPrimitive(it)) }
+            },
+        )
         put("base_route", ranked.getValue("base_route"))
         put("corridor", ranked.getValue("corridor"))
         put("spatial_pruning", ranked.getValue("spatial_pruning"))

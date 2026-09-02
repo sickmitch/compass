@@ -1,6 +1,8 @@
 from collections.abc import Mapping
+from datetime import datetime
 from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -23,6 +25,7 @@ from compass.routing.domain import (
 
 VALHALLA_NO_ROUTE_ERROR_CODES = {442}
 VALHALLA_MATRIX_LOCATION_ERROR_CODES = {171}
+DEFAULT_DEPARTURE_TIMEZONE = ZoneInfo("Europe/Rome")
 
 
 class ValhallaRoutingAdapter:
@@ -35,6 +38,14 @@ class ValhallaRoutingAdapter:
         connect_timeout_seconds: float,
         read_timeout_seconds: float,
         user_agent: str,
+        traffic_aware: bool = False,
+        traffic_speed_types: tuple[str, ...] = (
+            "current",
+            "predicted",
+            "constrained",
+            "freeflow",
+        ),
+        departure_timezone: str = "Europe/Rome",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -45,6 +56,9 @@ class ValhallaRoutingAdapter:
             pool=connect_timeout_seconds,
         )
         self._headers = {"User-Agent": user_agent}
+        self._traffic_aware = traffic_aware
+        self._traffic_speed_types = traffic_speed_types
+        self._departure_timezone = ZoneInfo(departure_timezone)
         self._client = client
 
     async def route(self, request: RouteRequest) -> BaseRoute:
@@ -52,6 +66,10 @@ class ValhallaRoutingAdapter:
             (request.origin, request.destination),
             costing=request.costing,
             language=request.language,
+            departure_at=request.departure_at,
+            traffic_aware=self._traffic_aware,
+            traffic_speed_types=self._traffic_speed_types,
+            departure_timezone=self._departure_timezone,
         )
         response = await self._request("POST", "/route", json=payload)
         _raise_route_http_error(response)
@@ -67,6 +85,10 @@ class ValhallaRoutingAdapter:
                 locations,
                 costing=request.costing,
                 language=request.language,
+                departure_at=request.departure_at,
+                traffic_aware=self._traffic_aware,
+                traffic_speed_types=self._traffic_speed_types,
+                departure_timezone=self._departure_timezone,
             ),
         )
         _raise_route_http_error(response)
@@ -87,6 +109,14 @@ class ValhallaRoutingAdapter:
             "verbose": True,
             "shape_format": "no_shape",
         }
+        _apply_time_dependent_costing(
+            payload,
+            costing=request.costing,
+            departure_at=request.departure_at,
+            traffic_aware=self._traffic_aware,
+            traffic_speed_types=self._traffic_speed_types,
+            departure_timezone=self._departure_timezone,
+        )
         response = await self._request("POST", "/sources_to_targets", json=payload)
         if response.status_code >= 500:
             raise RoutingUnavailableError(f"Valhalla returned HTTP {response.status_code}")
@@ -159,9 +189,21 @@ def _json_mapping(response: httpx.Response) -> Mapping[str, Any]:
 
 
 def _route_payload(
-    locations: tuple[Coordinate, ...], *, costing: str, language: str
+    locations: tuple[Coordinate, ...],
+    *,
+    costing: str,
+    language: str,
+    departure_at: datetime | None = None,
+    traffic_aware: bool = False,
+    traffic_speed_types: tuple[str, ...] = (
+        "current",
+        "predicted",
+        "constrained",
+        "freeflow",
+    ),
+    departure_timezone: ZoneInfo = DEFAULT_DEPARTURE_TIMEZONE,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "locations": [
             {
                 "lat": coordinate.latitude,
@@ -175,6 +217,48 @@ def _route_payload(
         "language": language,
         "directions_type": "instructions",
         "shape_format": "polyline6",
+    }
+    _apply_time_dependent_costing(
+        payload,
+        costing=costing,
+        departure_at=departure_at,
+        traffic_aware=traffic_aware,
+        traffic_speed_types=traffic_speed_types,
+        departure_timezone=departure_timezone,
+    )
+    return payload
+
+
+def _apply_time_dependent_costing(
+    payload: dict[str, Any],
+    *,
+    costing: str,
+    departure_at: datetime | None,
+    traffic_aware: bool,
+    traffic_speed_types: tuple[str, ...],
+    departure_timezone: ZoneInfo,
+) -> None:
+    if not traffic_aware:
+        return
+    payload["date_time"] = _date_time_payload(departure_at, departure_timezone)
+    if costing == "auto":
+        payload["costing_options"] = {
+            "auto": {"speed_types": list(traffic_speed_types)}
+        }
+
+
+def _date_time_payload(
+    departure_at: datetime | None,
+    departure_timezone: ZoneInfo,
+) -> dict[str, Any]:
+    if departure_at is None:
+        return {"type": 0}
+    if departure_at.tzinfo is None or departure_at.utcoffset() is None:
+        raise ValueError("departure_at must include a UTC offset")
+    local_departure = departure_at.astimezone(departure_timezone)
+    return {
+        "type": 1,
+        "value": local_departure.replace(tzinfo=None).isoformat(timespec="minutes"),
     }
 
 

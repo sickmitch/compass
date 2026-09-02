@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import datetime
 
 import httpx
 import pytest
@@ -32,6 +33,7 @@ def _payload() -> dict[str, object]:
         "effective_cng_range_km": 100,
         "estimated_remaining_cng_range_km": 65,
         "reserve_cng_range_km": 30,
+        "departure_at": "2026-08-30T10:00:00+02:00",
     }
 
 
@@ -136,6 +138,9 @@ def test_multi_stop_route_revalidates_every_road_leg_and_reserve(
     assert body["duration_seconds"] == sum(provider.distances) / 25
     assert provider.request is not None
     assert len(provider.request.waypoints) == 3
+    assert provider.request.departure_at == datetime.fromisoformat(
+        "2026-08-30T10:00:00+02:00"
+    )
 
 
 def test_multi_stop_route_rejects_provider_leg_that_consumes_the_reserve(

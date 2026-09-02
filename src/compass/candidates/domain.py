@@ -56,6 +56,20 @@ class CorridorPolicy:
 class CorridorCandidateRequest:
     route: RouteRequest
     effective_cng_range_km: float
+    excluded_mimit_station_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.effective_cng_range_km <= 0:
+            raise ValueError("effective_cng_range_km must be greater than zero")
+        if len(self.excluded_mimit_station_ids) > 32:
+            raise ValueError("at most 32 MIMIT station IDs may be excluded")
+        if len(set(self.excluded_mimit_station_ids)) != len(self.excluded_mimit_station_ids):
+            raise ValueError("excluded MIMIT station IDs must be distinct")
+        if any(
+            not station_id.isascii() or not station_id.isdigit() or len(station_id) > 32
+            for station_id in self.excluded_mimit_station_ids
+        ):
+            raise ValueError("excluded MIMIT station IDs must be official numeric IDs")
 
 
 @dataclass(frozen=True, slots=True)

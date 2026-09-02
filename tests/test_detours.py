@@ -13,11 +13,14 @@ from compass.candidates.domain import (
     SpatialPruningMetrics,
 )
 from compass.detours.domain import (
+    NetworkCostBasis,
     NetworkDetourPolicy,
     NetworkDetourRequest,
     calculate_detour_candidate,
 )
 from compass.detours.service import evaluate_cng_detours
+from compass.ranking.domain import CandidateEnrichment, RankingPolicy
+from compass.ranking.service import rank_network_candidates
 from compass.routing.domain import (
     BaseRoute,
     Coordinate,
@@ -198,6 +201,7 @@ def test_network_service_batches_only_pruned_candidates_and_applies_inclusive_li
     assert result.candidates[-1].detour_duration_seconds == 60
     assert result.cost_basis.traffic_state == "not_configured"
     assert result.cost_basis.traffic_aware is False
+    assert all(call.departure_at == _request().departure_at for call in provider.matrix_calls)
 
 
 def test_network_service_skips_matrix_when_spatial_pruning_returns_no_candidates(
@@ -262,3 +266,105 @@ def test_network_request_requires_timezone_aware_departure() -> None:
             maximum_detour_seconds=60,
             departure_at=datetime(2026, 8, 28, 8),
         )
+
+
+def test_traffic_aware_valhalla_costs_control_detour_eta_opening_and_ranking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = (_station(1), _station(2))
+
+    async def fake_find(*args: object, **kwargs: object) -> CorridorCandidateResult:
+        return _spatial_result(candidates)
+
+    class ScenarioProvider(_MatrixProvider):
+        def __init__(self, *, traffic_aware: bool) -> None:
+            super().__init__()
+            if traffic_aware:
+                self.outward = {
+                    1: MatrixCost(400, 600),
+                    2: MatrixCost(450, 600),
+                }
+                self.onward = {
+                    1: MatrixCost(600, 1_080),
+                    2: MatrixCost(650, 600),
+                }
+            else:
+                self.outward = {
+                    1: MatrixCost(400, 300),
+                    2: MatrixCost(450, 300),
+                }
+                self.onward = {
+                    1: MatrixCost(600, 660),
+                    2: MatrixCost(650, 780),
+                }
+
+    monkeypatch.setattr("compass.detours.service.find_corridor_candidates", fake_find)
+    request = NetworkDetourRequest(
+        corridor_request=_request().corridor_request,
+        maximum_detour_seconds=12 * 60,
+        departure_at=_request().departure_at,
+    )
+    static_result = asyncio.run(
+        evaluate_cng_detours(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            ScenarioProvider(traffic_aware=False),  # type: ignore[arg-type]
+            request,
+            corridor_policy=CorridorPolicy(),
+            detour_policy=NetworkDetourPolicy(),
+            max_route_geometry_points=100,
+        )
+    )
+    traffic_result = asyncio.run(
+        evaluate_cng_detours(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            ScenarioProvider(traffic_aware=True),  # type: ignore[arg-type]
+            request,
+            corridor_policy=CorridorPolicy(),
+            detour_policy=NetworkDetourPolicy(),
+            max_route_geometry_points=100,
+            cost_basis=NetworkCostBasis(
+                traffic_state="fresh",
+                traffic_aware=True,
+                duration_model="valhalla_time_dependent_traffic",
+            ),
+        )
+    )
+
+    assert [item.detour_minutes for item in static_result.candidates] == [6, 8]
+    assert [item.station.station_id for item in traffic_result.candidates] == [2]
+    assert traffic_result.metrics.excluded_by_detour_count == 1
+    assert traffic_result.candidates[0].detour_minutes == 10
+    assert traffic_result.candidates[0].station_eta.isoformat() == (
+        "2026-08-28T08:10:00+02:00"
+    )
+    assert traffic_result.cost_basis.duration_model == "valhalla_time_dependent_traffic"
+
+    enrichments = {
+        1: CandidateEnrichment(opening_hours="24/7"),
+        2: CandidateEnrichment(opening_hours="Mo-Su 08:10-09:00"),
+    }
+    static_ranking = rank_network_candidates(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        static_result,
+        include_closed=True,
+        ranking_policy=RankingPolicy(),
+        enrichments=enrichments,
+    )
+    traffic_ranking = rank_network_candidates(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        traffic_result,
+        include_closed=True,
+        ranking_policy=RankingPolicy(),
+        enrichments=enrichments,
+    )
+
+    static_station_two = next(
+        item for item in static_ranking.candidates if item.detour.station.station_id == 2
+    )
+    assert static_station_two.opening.state == "closed"
+    assert traffic_ranking.candidates[0].opening.state == "open"
+    assert traffic_ranking.candidates[0].ranking.detour_score == pytest.approx(1 / 6, abs=1e-6)
+    assert traffic_ranking.candidates[0].ranking.detour_contribution == pytest.approx(
+        RankingPolicy().detour_weight / 6,
+        abs=1e-6,
+    )

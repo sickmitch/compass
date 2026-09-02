@@ -176,10 +176,12 @@ def _evaluate(
         return (network_result or _network_result()).spatial_result.base_route
 
     pairwise_matrix_calls = 0
+    pairwise_matrix_requests: list[MatrixRequest] = []
 
     async def fake_matrix(request: MatrixRequest) -> MatrixResult:
         nonlocal pairwise_matrix_calls
         pairwise_matrix_calls += 1
+        pairwise_matrix_requests.append(request)
         active_network = network_result or _network_result()
         positions = {
             candidate.station.station_id: candidate.distance_from_previous_waypoint_meters
@@ -239,6 +241,10 @@ def _evaluate(
         )
     )
     assert pairwise_matrix_calls == result.reachability.pairwise_matrix_calls
+    assert all(
+        request.departure_at == datetime.fromisoformat("2026-08-30T10:00:00+02:00")
+        for request in pairwise_matrix_requests
+    )
     return result, loaded_station_ids, network_calls, base_route_calls
 
 
@@ -435,6 +441,12 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
         request = args[2]
         assert request.estimated_remaining_cng_range_km == 120  # type: ignore[attr-defined]
         assert request.reserve_cng_range_km == 30  # type: ignore[attr-defined]
+        assert (
+            request.ranked_request.network_request.corridor_request.excluded_mimit_station_ids
+            == (  # type: ignore[attr-defined]
+                "1001",
+            )
+        )
         return result
 
     monkeypatch.setattr(
@@ -445,13 +457,16 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
     app.dependency_overrides[get_routing_provider] = override_provider
     app.dependency_overrides[get_api_settings] = override_settings
     try:
-        response = _post_predictive(_api_payload())
+        payload = _api_payload()
+        payload["excluded_mimit_station_ids"] = ["1001"]
+        response = _post_predictive(payload)
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
     body = response.json()
     assert body["stage"] == "predictive_ranking"
+    assert body["excluded_mimit_station_ids"] == ["1001"]
     assert body["suggestion_state"] == "suggested"
     assert body["range_basis"] == {
         "effective_cng_range_km": 300.0,
@@ -491,6 +506,8 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
     [
         ("estimated_remaining_cng_range_km", 301),
         ("reserve_cng_range_km", 120),
+        ("excluded_mimit_station_ids", ["1001", "1001"]),
+        ("excluded_mimit_station_ids", ["not-an-official-id"]),
         ("unknown_policy", True),
     ],
 )

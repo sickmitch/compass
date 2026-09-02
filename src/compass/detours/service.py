@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Iterator
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,7 @@ async def evaluate_cng_detours(
     detour_policy: NetworkDetourPolicy,
     max_route_geometry_points: int,
     base_route: BaseRoute | None = None,
+    cost_basis: NetworkCostBasis | None = None,
 ) -> NetworkDetourResult:
     spatial = await find_corridor_candidates(
         session,
@@ -58,6 +60,7 @@ async def evaluate_cng_detours(
             origin=route_request.origin,
             destination=route_request.destination,
             costing=route_request.costing,
+            departure_at=request.departure_at,
         )
         matrix_calls += calls
         fallback_splits += splits
@@ -99,7 +102,7 @@ async def evaluate_cng_detours(
         spatial_result=spatial,
         maximum_detour_seconds=request.maximum_detour_seconds,
         departure_at=request.departure_at,
-        cost_basis=NetworkCostBasis(),
+        cost_basis=cost_basis or NetworkCostBasis(),
         metrics=NetworkEvaluationMetrics(
             spatial_candidate_count=spatial.metrics.corridor_candidate_count,
             matrix_candidate_count=len(spatial.candidates),
@@ -139,6 +142,7 @@ async def _matrix_cost_pairs(
     origin: Coordinate,
     destination: Coordinate,
     costing: str,
+    departure_at: datetime | None,
 ) -> tuple[
     tuple[tuple[MatrixCost | None, MatrixCost | None], ...],
     int,
@@ -153,11 +157,13 @@ async def _matrix_cost_pairs(
             sources=(origin,),
             targets=station_coordinates,
             costing=costing,
+            departure_at=departure_at,
         ),
         MatrixRequest(
             sources=station_coordinates,
             targets=(destination,),
             costing=costing,
+            departure_at=departure_at,
         ),
     )
     results = await asyncio.gather(
@@ -180,6 +186,7 @@ async def _matrix_cost_pairs(
             origin=origin,
             destination=destination,
             costing=costing,
+            departure_at=departure_at,
         )
         right = await _matrix_cost_pairs(
             provider,
@@ -187,6 +194,7 @@ async def _matrix_cost_pairs(
             origin=origin,
             destination=destination,
             costing=costing,
+            departure_at=departure_at,
         )
         return (
             left[0] + right[0],

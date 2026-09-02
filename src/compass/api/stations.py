@@ -15,10 +15,13 @@ from compass.api.routes import (
     BaseRouteRequest,
     CoordinateRequest,
     ManeuverResponse,
+    NavigationTimingResponse,
     RouteGeometry,
+    _navigation_timing_response,
 )
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
+from compass.navigation.domain import build_navigation_timing, fuel_stop_arrival_times
 from compass.predictive.domain import MAX_CNG_ITINERARY_STOPS
 from compass.ranking.domain import CurrentCngPrice
 from compass.ranking.opening_hours import evaluate_opening_hours
@@ -34,6 +37,9 @@ from compass.routing.domain import (
 )
 from compass.stations.domain import StationDetail
 from compass.stations.repository import load_station_detail, load_station_route_points
+from compass.traffic.dependencies import get_traffic_route_refresher
+from compass.traffic.route_refresh import TrafficRouteRefresher
+from compass.traffic.routing import refresh_waypoint_route_traffic
 
 router = APIRouter(prefix="/api/v1", tags=["stations"])
 MimitStationId = Annotated[str, Path(pattern=r"^[0-9]{1,32}$")]
@@ -98,6 +104,8 @@ class SelectedCngStopResponse(StrictModel):
     municipality: str | None
     province: str | None
     location: CoordinateRequest
+    expected_arrival_at: datetime | None = None
+    dwell_time_seconds: int = Field(default=20 * 60, ge=0)
 
 
 class RouteLegResponse(StrictModel):
@@ -116,6 +124,7 @@ class RouteWithCngStopResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     legs: list[RouteLegResponse] = Field(min_length=2, max_length=2)
     provider: Literal["valhalla"]
+    navigation: NavigationTimingResponse
 
 
 class RouteWithCngItineraryRequest(BaseRouteRequest):
@@ -179,6 +188,7 @@ class RouteWithCngItineraryResponse(StrictModel):
     legs: list[CngItineraryRouteLegResponse] = Field(min_length=2, max_length=33)
     provider: Literal["valhalla"]
     range_validation: Literal["all_legs_preserve_reserve"] = "all_legs_preserve_reserve"
+    navigation: NavigationTimingResponse
 
 
 @router.get(
@@ -225,6 +235,9 @@ async def route_with_cng_stop(
     request: RouteWithCngStopRequest,
     session: Annotated[Session, Depends(get_session)],
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    traffic_refresher: Annotated[
+        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
+    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> RouteWithCngStopResponse | JSONResponse:
     try:
@@ -245,16 +258,16 @@ async def route_with_cng_stop(
     origin = Coordinate(request.origin.latitude, request.origin.longitude)
     destination = Coordinate(request.destination.latitude, request.destination.longitude)
     stop = Coordinate(station.latitude, station.longitude)
+    route_request = WaypointRouteRequest(
+        origin=origin,
+        destination=destination,
+        waypoints=(stop,),
+        costing=request.costing,
+        language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
+    )
     try:
-        route = await provider.route_with_waypoints(
-            WaypointRouteRequest(
-                origin=origin,
-                destination=destination,
-                waypoints=(stop,),
-                costing=request.costing,
-                language=request.language or settings.valhalla_route_language,
-            )
-        )
+        route = await provider.route_with_waypoints(route_request)
     except NoRouteError:
         return error_response(
             422, "route_not_found", "No route was found through the selected station."
@@ -268,6 +281,28 @@ async def route_with_cng_stop(
             "The routing service returned an invalid response.",
         )
 
+    route = await refresh_waypoint_route_traffic(
+        route=route,
+        request=route_request,
+        provider=provider,
+        refresher=traffic_refresher,
+        current_departure_tolerance_seconds=(
+            settings.traffic_route_refresh_min_interval_seconds
+        ),
+    )
+
+    departure_at = request.departure_at or datetime.now(UTC)
+    stop_arrival_at = fuel_stop_arrival_times(
+        departure_at=departure_at,
+        leg_durations_seconds=(leg.duration_seconds for leg in route.legs),
+        stop_count=1,
+    )[0]
+    navigation = build_navigation_timing(
+        encoded_polylines=(leg.encoded_polyline for leg in route.legs),
+        driving_duration_seconds=route.duration_seconds,
+        fuel_stop_ids=(station.mimit_station_id,),
+        departure_at=departure_at,
+    )
     coordinates = (origin, stop, destination)
     kinds = ("origin_to_cng_station", "cng_station_to_destination")
     legs = [
@@ -297,11 +332,13 @@ async def route_with_cng_stop(
             municipality=station.municipality,
             province=station.province,
             location=CoordinateRequest(latitude=stop.latitude, longitude=stop.longitude),
+            expected_arrival_at=stop_arrival_at,
         ),
         distance_meters=route.distance_meters,
         duration_seconds=route.duration_seconds,
         legs=legs,
         provider="valhalla",
+        navigation=_navigation_timing_response(navigation),
     )
 
 
@@ -320,6 +357,9 @@ async def route_with_cng_itinerary(
     request: RouteWithCngItineraryRequest,
     session: Annotated[Session, Depends(get_session)],
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    traffic_refresher: Annotated[
+        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
+    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> RouteWithCngItineraryResponse | JSONResponse:
     station_ids = tuple(request.mimit_station_ids)
@@ -353,16 +393,16 @@ async def route_with_cng_itinerary(
     stop_coordinates = tuple(
         Coordinate(float(station.latitude), float(station.longitude)) for station in stations
     )
+    route_request = WaypointRouteRequest(
+        origin=origin,
+        destination=destination,
+        waypoints=stop_coordinates,
+        costing=request.costing,
+        language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
+    )
     try:
-        route = await provider.route_with_waypoints(
-            WaypointRouteRequest(
-                origin=origin,
-                destination=destination,
-                waypoints=stop_coordinates,
-                costing=request.costing,
-                language=request.language or settings.valhalla_route_language,
-            )
-        )
+        route = await provider.route_with_waypoints(route_request)
     except NoRouteError:
         return error_response(
             422,
@@ -377,6 +417,16 @@ async def route_with_cng_itinerary(
             "routing_provider_error",
             "The routing service returned an invalid response.",
         )
+
+    route = await refresh_waypoint_route_traffic(
+        route=route,
+        request=route_request,
+        provider=provider,
+        refresher=traffic_refresher,
+        current_departure_tolerance_seconds=(
+            settings.traffic_route_refresh_min_interval_seconds
+        ),
+    )
 
     coordinates = (origin, *stop_coordinates, destination)
     response_legs: list[CngItineraryRouteLegResponse] = []
@@ -436,6 +486,18 @@ async def route_with_cng_itinerary(
     # range-validated above.
     distance_meters = sum(leg.distance_meters for leg in route.legs)
     duration_seconds = sum(leg.duration_seconds for leg in route.legs)
+    departure_at = request.departure_at or datetime.now(UTC)
+    stop_arrivals = fuel_stop_arrival_times(
+        departure_at=departure_at,
+        leg_durations_seconds=(leg.duration_seconds for leg in route.legs),
+        stop_count=len(stations),
+    )
+    navigation = build_navigation_timing(
+        encoded_polylines=(leg.encoded_polyline for leg in route.legs),
+        driving_duration_seconds=duration_seconds,
+        fuel_stop_ids=station_ids,
+        departure_at=departure_at,
+    )
     return RouteWithCngItineraryResponse(
         selected_stops=[
             CngItineraryStopResponse(
@@ -448,6 +510,7 @@ async def route_with_cng_itinerary(
                     latitude=stop.latitude,
                     longitude=stop.longitude,
                 ),
+                expected_arrival_at=stop_arrivals[index - 1],
             )
             for index, (station, stop) in enumerate(
                 zip(stations, stop_coordinates, strict=True),
@@ -458,6 +521,7 @@ async def route_with_cng_itinerary(
         duration_seconds=duration_seconds,
         legs=response_legs,
         provider="valhalla",
+        navigation=_navigation_timing_response(navigation),
     )
 
 

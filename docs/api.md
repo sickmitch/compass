@@ -62,6 +62,13 @@ Representative response shape:
 Real successful legs contain one or more maneuvers. The abbreviated empty arrays above keep the
 example readable; OpenAPI defines every maneuver field.
 
+Every route response also contains `navigation`. `duration_seconds` remains driving time for
+backwards compatibility and for Valhalla cost comparisons. `navigation.total_trip_duration_seconds`
+adds exactly 1,200 seconds for every CNG stop, while
+`navigation.total_refueling_dwell_seconds` exposes that non-driving component explicitly. Route
+IDs are derived from the returned geometry and ordered fuel-stop IDs; they change when the route or
+fuel plan changes. Selected stops expose `expected_arrival_at` and `dwell_time_seconds`.
+
 ## Route through a predictive CNG itinerary
 
 `POST /api/v1/routes/with-cng-itinerary` accepts the ordered official MIMIT IDs produced by the
@@ -101,7 +108,8 @@ Content-Type: application/json
   "estimated_remaining_cng_range_km": 120,
   "reserve_cng_range_km": 30,
   "maximum_detour_minutes": 10,
-  "departure_at": "2026-08-30T10:00:00+02:00"
+  "departure_at": "2026-08-30T10:00:00+02:00",
+  "excluded_mimit_station_ids": []
 }
 ```
 
@@ -127,6 +135,12 @@ input arithmetic, remaining road distance, shortfall, `remaining_route_origin=re
 `reachability_evaluation` and the existing spatial/network/ranking metrics make all pruning stages
 auditable. The exact required fields and nested schemas are authoritative in
 [openapi.json](openapi.json).
+
+During an explicit in-navigation replacement, Android sends the unavailable station and all prior
+session exclusions in `excluded_mimit_station_ids`. The list accepts at most 32 distinct numeric
+official IDs. Compass removes them in the PostGIS corridor query before applying the candidate
+limit or calling Valhalla matrices, and echoes the applied list in the response. A strict client
+must verify that echo before accepting the replacement plan.
 
 ## Data freshness
 

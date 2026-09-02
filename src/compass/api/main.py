@@ -14,12 +14,15 @@ from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
 from compass.api.stations import router as stations_router
 from compass.api.system import router as system_router
+from compass.api.traffic import router as traffic_router
 from compass.config import Settings, get_api_settings, get_settings
 from compass.db import get_session
 from compass.freshness.service import load_data_freshness
 from compass.logging import configure_logging
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import RoutingProvider
+from compass.traffic.domain import TrafficHealthState
+from compass.traffic.service import traffic_health_from_settings
 
 configure_logging(get_settings().log_level)
 
@@ -33,6 +36,7 @@ app.include_router(ranking_router)
 app.include_router(predictive_router)
 app.include_router(stations_router)
 app.include_router(system_router)
+app.include_router(traffic_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -52,7 +56,7 @@ class HealthResponse(BaseModel):
     database: Literal["not_checked", "ready", "unavailable"]
     routing: Literal["not_checked", "ready", "unavailable"]
     data: Literal["not_checked", "ready", "degraded", "unavailable"]
-    traffic: Literal["not_checked", "not_configured"]
+    traffic: Literal["not_checked"] | TrafficHealthState
 
 
 @app.get("/health/live", response_model=HealthResponse, tags=["health"])
@@ -83,6 +87,7 @@ async def ready(
         "ready" if await routing_provider.is_ready() else "unavailable"
     )
     data_state: Literal["ready", "degraded", "unavailable"] = "unavailable"
+    traffic_state = traffic_health_from_settings(settings).provider_status
     if database_state == "ready":
         try:
             freshness = load_data_freshness(
@@ -107,12 +112,12 @@ async def ready(
             database=database_state,
             routing=routing_state,
             data=data_state,
-            traffic="not_configured",
+            traffic=traffic_state,
         )
     return HealthResponse(
         status="ok",
         database="ready",
         routing="ready",
         data=data_state,
-        traffic="not_configured",
+        traffic=traffic_state,
     )

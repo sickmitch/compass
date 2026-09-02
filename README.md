@@ -54,11 +54,24 @@ reachability and Android route-endpoint editing:
 - an Android predictive form whose remaining-range input starts empty, ordered stop/leg reserve
   margins and an executable Phase 10 API/device gate.
 - editable Android route coordinates for preview, manual Metano search and predictive CNG planning,
-  with the Milan-to-Bologna pair retained only as the startup default.
+  with the Milan-to-Bologna pair retained only as the startup default;
+- a provider-independent live-traffic subsystem with mock fixtures, a TomTom base Traffic Flow API
+  adapter, OpenLR direction verification, Valhalla directed-edge matching and time-dependent route
+  requests;
+- a hardened on-demand Docker updater with transactional native `traffic.tar` writes, explicit
+  expiry to `UNKNOWN`, tileset-bound durable state and API-readable runtime health;
+- a server-backed `NavigationRoute` plus an application-scoped Android foreground navigation
+  session with local GPS filtering, route snapping, progress/ETA and MapLibre follow rendering;
+- staged Italian TextToSpeech guidance, dynamic navigation camera, robust off-route confirmation,
+  five-minute traffic refresh and hot route replacement through Compass with offline continuity.
+- explicit in-navigation CNG stop skip/replacement with server-acknowledged station exclusion,
+  predictive range/reserve preservation and a safe keep-current-route fallback, accepted on a
+  physical Android device.
 
-It intentionally does **not** yet ingest traffic, read vehicle telemetry, provide address search or
-current-location selection, or provide an active navigation session. Those remain later gated
-phases.
+It intentionally does **not** yet provide nationwide traffic coverage from the point-based TomTom
+base API, independent LRP-to-GraphId resolution, historical traffic ingestion, vehicle telemetry,
+address search/current-location selection, automatic vehicle tank telemetry or automatic inference
+that a station is unexpectedly closed.
 
 ## Quick local validation
 
@@ -104,7 +117,8 @@ Repeating `normalize` against the same two source runs, reconciliation policy an
 returns `"reused": true`. Its metrics expose matched, ambiguous and unmatched station counts.
 
 See [deployment and live validation](docs/deployment.md),
-[architecture](docs/architecture.md), and [data sources](docs/data-sources.md).
+[architecture](docs/architecture.md), [data sources](docs/data-sources.md), and
+[live traffic architecture](docs/traffic.md).
 
 ## Phase 3 base routing
 

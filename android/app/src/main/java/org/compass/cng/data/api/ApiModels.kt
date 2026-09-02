@@ -6,6 +6,20 @@ data class ApiRoute(
     val encodedPolyline: String,
     val maneuvers: List<ApiManeuver>,
     val provider: String,
+    val navigation: ApiNavigationTiming,
+)
+
+data class ApiNavigationTiming(
+    val routeId: String,
+    val drivingDurationSeconds: Double,
+    val remainingDrivingDurationSeconds: Double,
+    val refuelingStopCount: Int,
+    val dwellSecondsPerRefuelingStop: Int,
+    val totalRefuelingDwellSeconds: Double,
+    val totalTripDurationSeconds: Double,
+    val departureAt: String?,
+    val drivingArrivalAt: String?,
+    val tripArrivalAt: String?,
 )
 
 data class ApiManeuver(
@@ -16,6 +30,11 @@ data class ApiManeuver(
     val beginShapeIndex: Int,
     val endShapeIndex: Int,
     val streetNames: List<String>,
+    val verbalTransitionAlertInstruction: String?,
+    val verbalPreTransitionInstruction: String?,
+    val verbalPostTransitionInstruction: String?,
+    val bearingBefore: Int?,
+    val bearingAfter: Int?,
     val travelMode: String?,
     val travelType: String?,
 )
@@ -32,6 +51,7 @@ data class ApiPredictiveCandidates(
     val suggestionState: String,
     val departureAt: String,
     val maximumDetourMinutes: Double,
+    val excludedMimitStationIds: List<String>,
     val baseRoute: ApiRoute,
     val trafficState: String,
     val rangeBasis: ApiPredictiveRangeBasis,
@@ -159,6 +179,7 @@ data class ApiRouteWithCngStop(
     val durationSeconds: Double,
     val legs: List<ApiRouteLeg>,
     val provider: String,
+    val navigation: ApiNavigationTiming,
 )
 
 data class ApiRouteWithCngItinerary(
@@ -168,6 +189,7 @@ data class ApiRouteWithCngItinerary(
     val legs: List<ApiCngItineraryRouteLeg>,
     val provider: String,
     val rangeValidation: String,
+    val navigation: ApiNavigationTiming,
 )
 
 data class ApiCngItineraryRouteLeg(
@@ -193,6 +215,8 @@ data class ApiSelectedCngStop(
     val province: String?,
     val latitude: Double,
     val longitude: Double,
+    val expectedArrivalAt: String?,
+    val dwellTimeSeconds: Int,
 )
 
 data class ApiRouteLeg(

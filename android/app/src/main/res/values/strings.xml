@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Compass</string>
+    <string name="navigation_notification_channel">Navigazione</string>
+    <string name="navigation_notification_title">Navigazione Compass attiva</string>
+    <string name="navigation_notification_text">Posizione e avanzamento vengono elaborati sul dispositivo.</string>
+    <string name="navigation_notification_stop">Termina</string>
 </resources>

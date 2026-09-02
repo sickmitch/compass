@@ -66,3 +66,72 @@ def test_phase7_freshness_threshold_defaults_are_explicit() -> None:
 def test_phase7_freshness_thresholds_must_be_positive(field: str) -> None:
     with pytest.raises(ValidationError, match=field):
         Settings(_env_file=None, **{field: 0})
+
+
+def test_traffic_is_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.traffic_enabled is False
+    assert settings.traffic_provider == "none"
+    assert settings.traffic_valhalla_overlay_enabled is False
+
+
+def test_traffic_provider_can_be_configured_while_disabled() -> None:
+    settings = Settings(_env_file=None, traffic_provider="mock")
+
+    assert settings.traffic_enabled is False
+    assert settings.traffic_provider == "mock"
+
+
+def test_enabled_traffic_requires_provider() -> None:
+    with pytest.raises(ValidationError, match="traffic_provider"):
+        Settings(_env_file=None, traffic_enabled=True)
+
+
+def test_tomtom_feed_credentials_are_not_required_by_overlay_consumers() -> None:
+    settings = Settings(
+        _env_file=None,
+        traffic_enabled=True,
+        traffic_provider="tomtom",
+        traffic_valhalla_overlay_enabled=True,
+        traffic_valhalla_tileset_version="tileset-test",
+    )
+
+    assert settings.tomtom_api_key == ""
+    assert settings.tomtom_flow_segment_points == ""
+
+
+def test_tomtom_flow_segment_mode_requires_api_key_and_points() -> None:
+    settings = Settings(
+        _env_file=None,
+        traffic_enabled=True,
+        traffic_provider="tomtom",
+        tomtom_api_key="test-key",
+        tomtom_flow_segment_points="45.4642,9.19;44.4949,11.3426",
+    )
+
+    assert settings.tomtom_traffic_api_mode == "flow_segment"
+    assert settings.tomtom_flow_segment_openlr is True
+    assert settings.traffic_openlr_decoder_path == ""
+    assert settings.traffic_openlr_decoder_timeout_seconds == 2
+    assert settings.traffic_openlr_endpoint_tolerance_meters == 300
+    assert settings.traffic_writer_timeout_seconds == 60
+    assert settings.traffic_update_segment_limit == 1000
+    assert settings.traffic_state_path == "/custom_files/compass_traffic_state/state.json"
+    assert settings.traffic_health_path == "/custom_files/compass_traffic_state/health.json"
+
+
+@pytest.mark.parametrize("value", [0, 10001])
+def test_traffic_update_segment_limit_is_bounded(value: int) -> None:
+    with pytest.raises(ValidationError, match="traffic_update_segment_limit"):
+        Settings(_env_file=None, traffic_update_segment_limit=value)
+
+
+def test_traffic_overlay_requires_tileset_version() -> None:
+    with pytest.raises(ValidationError, match="tileset_version"):
+        Settings(
+            _env_file=None,
+            traffic_enabled=True,
+            traffic_provider="mock",
+            traffic_valhalla_overlay_enabled=True,
+        )

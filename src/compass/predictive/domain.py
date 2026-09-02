@@ -11,6 +11,7 @@ from compass.ranking.domain import (
     RankedCandidatesRequest,
     RankedCandidatesResult,
 )
+from compass.traffic.domain import TrafficHealthState
 
 PredictiveSuggestionState = Literal[
     "not_needed",
@@ -61,7 +62,7 @@ class PredictiveRangeBasis:
     consumption_model: Literal["caller_estimated_remaining_range"] = (
         "caller_estimated_remaining_range"
     )
-    traffic_state: Literal["not_configured"] = "not_configured"
+    traffic_state: TrafficHealthState = "not_configured"
     traffic_adjusted: bool = False
 
     def __post_init__(self) -> None:

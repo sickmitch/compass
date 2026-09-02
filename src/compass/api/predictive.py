@@ -50,6 +50,8 @@ from compass.routing.domain import (
     RoutingProviderError,
     RoutingUnavailableError,
 )
+from compass.traffic.domain import TrafficHealthState
+from compass.traffic.service import network_cost_basis_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["predictive-refuelling"])
 
@@ -65,6 +67,13 @@ class PredictiveCandidatesApiRequest(RankedCandidatesApiRequest):
         lt=2000,
         description="Safety range that must remain on arrival at a suggested station.",
     )
+    excluded_mimit_station_ids: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description=(
+            "Official MIMIT station IDs that must not be considered for this replacement plan."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_predictive_ranges(self) -> "PredictiveCandidatesApiRequest":
@@ -72,6 +81,13 @@ class PredictiveCandidatesApiRequest(RankedCandidatesApiRequest):
             raise ValueError("estimated remaining range must not exceed effective vehicle range")
         if self.reserve_cng_range_km >= self.estimated_remaining_cng_range_km:
             raise ValueError("reserve range must be lower than estimated remaining range")
+        if len(set(self.excluded_mimit_station_ids)) != len(self.excluded_mimit_station_ids):
+            raise ValueError("excluded_mimit_station_ids must not contain duplicates")
+        if any(
+            not station_id.isascii() or not station_id.isdigit() or len(station_id) > 32
+            for station_id in self.excluded_mimit_station_ids
+        ):
+            raise ValueError("excluded_mimit_station_ids must contain official numeric IDs")
         return self
 
 
@@ -85,8 +101,8 @@ class PredictiveRangeBasisResponse(StrictModel):
     destination_reachable_with_reserve: bool
     remaining_route_origin: Literal["request_origin"]
     consumption_model: Literal["caller_estimated_remaining_range"]
-    traffic_state: Literal["not_configured"]
-    traffic_adjusted: Literal[False]
+    traffic_state: TrafficHealthState
+    traffic_adjusted: bool
 
 
 class PredictiveReachabilityMetricsResponse(StrictModel):
@@ -159,6 +175,7 @@ class PredictiveCandidatesResponse(StrictModel):
     ]
     departure_at: datetime
     maximum_detour_minutes: float = Field(ge=0)
+    excluded_mimit_station_ids: list[str]
     base_route: BaseRouteResponse
     corridor: CorridorPolicyResponse
     spatial_pruning: SpatialPruningMetricsResponse
@@ -192,6 +209,7 @@ async def predictive_candidates(
         destination=Coordinate(request.destination.latitude, request.destination.longitude),
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
     )
     predictive_request = PredictiveCandidatesRequest(
         ranked_request=RankedCandidatesRequest(
@@ -199,6 +217,7 @@ async def predictive_candidates(
                 corridor_request=CorridorCandidateRequest(
                     route=route_request,
                     effective_cng_range_km=request.effective_cng_range_km,
+                    excluded_mimit_station_ids=tuple(request.excluded_mimit_station_ids),
                 ),
                 maximum_detour_seconds=request.maximum_detour_minutes * 60,
                 departure_at=request.departure_at,
@@ -226,6 +245,7 @@ async def predictive_candidates(
             ),
             ranking_policy=ranking_policy,
             max_route_geometry_points=settings.route_geometry_max_points,
+            cost_basis=network_cost_basis_from_settings(settings),
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -247,7 +267,11 @@ async def predictive_candidates(
         suggestion_state=result.suggestion_state,
         departure_at=network.departure_at,
         maximum_detour_minutes=network.maximum_detour_seconds / 60,
-        base_route=_base_route_response(spatial.base_route),
+        excluded_mimit_station_ids=request.excluded_mimit_station_ids,
+        base_route=_base_route_response(
+            spatial.base_route,
+            departure_at=network.departure_at,
+        ),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),
         spatial_pruning=SpatialPruningMetricsResponse.model_validate(asdict(spatial.metrics)),
         cost_basis=NetworkCostBasisResponse.model_validate(asdict(network.cost_basis)),

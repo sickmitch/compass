@@ -10,6 +10,19 @@
             "title": "Costing",
             "type": "string"
           },
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "title": "Departure At"
+          },
           "destination": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
@@ -60,6 +73,9 @@
             "title": "Maneuvers",
             "type": "array"
           },
+          "navigation": {
+            "$ref": "#/components/schemas/NavigationTimingResponse"
+          },
           "provider": {
             "const": "valhalla",
             "title": "Provider",
@@ -71,7 +87,8 @@
           "duration_seconds",
           "geometry",
           "maneuvers",
-          "provider"
+          "provider",
+          "navigation"
         ],
         "title": "BaseRouteResponse",
         "type": "object"
@@ -154,6 +171,24 @@
       "CngItineraryStopResponse": {
         "additionalProperties": false,
         "properties": {
+          "dwell_time_seconds": {
+            "default": 1200,
+            "minimum": 0.0,
+            "title": "Dwell Time Seconds",
+            "type": "integer"
+          },
+          "expected_arrival_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Arrival At"
+          },
           "location": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
@@ -242,6 +277,19 @@
             "default": "auto",
             "title": "Costing",
             "type": "string"
+          },
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "title": "Departure At"
           },
           "destination": {
             "$ref": "#/components/schemas/CoordinateRequest"
@@ -462,7 +510,14 @@
             "type": "array"
           },
           "traffic_state": {
-            "const": "not_configured",
+            "enum": [
+              "not_configured",
+              "configured",
+              "mock",
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
             "title": "Traffic State",
             "type": "string"
           }
@@ -596,9 +651,9 @@
         "required": [
           "origin",
           "destination",
+          "departure_at",
           "effective_cng_range_km",
-          "maximum_detour_minutes",
-          "departure_at"
+          "maximum_detour_minutes"
         ],
         "title": "DetourCandidatesRequest",
         "type": "object"
@@ -874,12 +929,24 @@
             "type": "string"
           },
           "traffic": {
-            "enum": [
-              "not_checked",
-              "not_configured"
+            "anyOf": [
+              {
+                "const": "not_checked",
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "not_configured",
+                  "configured",
+                  "mock",
+                  "fresh",
+                  "stale",
+                  "unavailable"
+                ],
+                "type": "string"
+              }
             ],
-            "title": "Traffic",
-            "type": "string"
+            "title": "Traffic"
           },
           "version": {
             "default": "0.1.0",
@@ -1034,6 +1101,96 @@
         "title": "ManeuverResponse",
         "type": "object"
       },
+      "NavigationTimingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Departure At"
+          },
+          "driving_arrival_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Driving Arrival At"
+          },
+          "driving_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Driving Duration Seconds",
+            "type": "number"
+          },
+          "dwell_seconds_per_refueling_stop": {
+            "minimum": 0.0,
+            "title": "Dwell Seconds Per Refueling Stop",
+            "type": "integer"
+          },
+          "refueling_stop_count": {
+            "minimum": 0.0,
+            "title": "Refueling Stop Count",
+            "type": "integer"
+          },
+          "remaining_driving_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Remaining Driving Duration Seconds",
+            "type": "number"
+          },
+          "route_id": {
+            "pattern": "^route_[0-9a-f]{32}$",
+            "title": "Route Id",
+            "type": "string"
+          },
+          "total_refueling_dwell_seconds": {
+            "minimum": 0.0,
+            "title": "Total Refueling Dwell Seconds",
+            "type": "number"
+          },
+          "total_trip_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Total Trip Duration Seconds",
+            "type": "number"
+          },
+          "trip_arrival_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Arrival At"
+          }
+        },
+        "required": [
+          "route_id",
+          "driving_duration_seconds",
+          "remaining_driving_duration_seconds",
+          "refueling_stop_count",
+          "dwell_seconds_per_refueling_stop",
+          "total_refueling_dwell_seconds",
+          "total_trip_duration_seconds",
+          "departure_at",
+          "driving_arrival_at",
+          "trip_arrival_at"
+        ],
+        "title": "NavigationTimingResponse",
+        "type": "object"
+      },
       "NetworkCostBasisResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1043,7 +1200,10 @@
             "type": "string"
           },
           "duration_model": {
-            "const": "valhalla_graph_speeds",
+            "enum": [
+              "valhalla_graph_speeds",
+              "valhalla_time_dependent_traffic"
+            ],
             "title": "Duration Model",
             "type": "string"
           },
@@ -1053,12 +1213,18 @@
             "type": "string"
           },
           "traffic_aware": {
-            "const": false,
             "title": "Traffic Aware",
             "type": "boolean"
           },
           "traffic_state": {
-            "const": "not_configured",
+            "enum": [
+              "not_configured",
+              "configured",
+              "mock",
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
             "title": "Traffic State",
             "type": "string"
           }
@@ -1299,6 +1465,15 @@
             "title": "Estimated Remaining Cng Range Km",
             "type": "number"
           },
+          "excluded_mimit_station_ids": {
+            "description": "Official MIMIT station IDs that must not be considered for this replacement plan.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Excluded Mimit Station Ids",
+            "type": "array"
+          },
           "include_closed": {
             "default": false,
             "description": "Include stations evaluated as closed at ETA with a zero opening score. Unknown opening state remains included regardless of this option.",
@@ -1339,9 +1514,9 @@
         "required": [
           "origin",
           "destination",
+          "departure_at",
           "effective_cng_range_km",
           "maximum_detour_minutes",
-          "departure_at",
           "estimated_remaining_cng_range_km",
           "reserve_cng_range_km"
         ],
@@ -1371,6 +1546,13 @@
             "format": "date-time",
             "title": "Departure At",
             "type": "string"
+          },
+          "excluded_mimit_station_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Mimit Station Ids",
+            "type": "array"
           },
           "itinerary": {
             "anyOf": [
@@ -1427,6 +1609,7 @@
           "suggestion_state",
           "departure_at",
           "maximum_detour_minutes",
+          "excluded_mimit_station_ids",
           "base_route",
           "corridor",
           "spatial_pruning",
@@ -1742,12 +1925,18 @@
             "type": "number"
           },
           "traffic_adjusted": {
-            "const": false,
             "title": "Traffic Adjusted",
             "type": "boolean"
           },
           "traffic_state": {
-            "const": "not_configured",
+            "enum": [
+              "not_configured",
+              "configured",
+              "mock",
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
             "title": "Traffic State",
             "type": "string"
           },
@@ -2152,9 +2341,9 @@
         "required": [
           "origin",
           "destination",
+          "departure_at",
           "effective_cng_range_km",
-          "maximum_detour_minutes",
-          "departure_at"
+          "maximum_detour_minutes"
         ],
         "title": "RankedCandidatesApiRequest",
         "type": "object"
@@ -2551,6 +2740,19 @@
             "title": "Costing",
             "type": "string"
           },
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "title": "Departure At"
+          },
           "destination": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
@@ -2631,6 +2833,9 @@
             "title": "Legs",
             "type": "array"
           },
+          "navigation": {
+            "$ref": "#/components/schemas/NavigationTimingResponse"
+          },
           "provider": {
             "const": "valhalla",
             "title": "Provider",
@@ -2657,7 +2862,8 @@
           "distance_meters",
           "duration_seconds",
           "legs",
-          "provider"
+          "provider",
+          "navigation"
         ],
         "title": "RouteWithCngItineraryResponse",
         "type": "object"
@@ -2670,6 +2876,19 @@
             "default": "auto",
             "title": "Costing",
             "type": "string"
+          },
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "title": "Departure At"
           },
           "destination": {
             "$ref": "#/components/schemas/CoordinateRequest"
@@ -2726,6 +2945,9 @@
             "title": "Legs",
             "type": "array"
           },
+          "navigation": {
+            "$ref": "#/components/schemas/NavigationTimingResponse"
+          },
           "provider": {
             "const": "valhalla",
             "title": "Provider",
@@ -2740,7 +2962,8 @@
           "distance_meters",
           "duration_seconds",
           "legs",
-          "provider"
+          "provider",
+          "navigation"
         ],
         "title": "RouteWithCngStopResponse",
         "type": "object"
@@ -2748,6 +2971,24 @@
       "SelectedCngStopResponse": {
         "additionalProperties": false,
         "properties": {
+          "dwell_time_seconds": {
+            "default": 1200,
+            "minimum": 0.0,
+            "title": "Dwell Time Seconds",
+            "type": "integer"
+          },
+          "expected_arrival_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Arrival At"
+          },
           "location": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
@@ -3379,6 +3620,196 @@
         ],
         "title": "StationOsmResponse",
         "type": "object"
+      },
+      "TrafficHealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "edges_expired": {
+            "minimum": 0.0,
+            "title": "Edges Expired",
+            "type": "integer"
+          },
+          "edges_updated": {
+            "minimum": 0.0,
+            "title": "Edges Updated",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "feed_age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feed Age Seconds"
+          },
+          "last_fetch_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fetch Completed At"
+          },
+          "last_fetch_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fetch Started At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "managed_edge_count": {
+            "minimum": 0.0,
+            "title": "Managed Edge Count",
+            "type": "integer"
+          },
+          "mapping_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Version"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_api_errors": {
+            "minimum": 0.0,
+            "title": "Provider Api Errors",
+            "type": "integer"
+          },
+          "provider_segments_received": {
+            "minimum": 0.0,
+            "title": "Provider Segments Received",
+            "type": "integer"
+          },
+          "provider_status": {
+            "enum": [
+              "not_configured",
+              "configured",
+              "mock",
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Provider Status",
+            "type": "string"
+          },
+          "segments_matched": {
+            "minimum": 0.0,
+            "title": "Segments Matched",
+            "type": "integer"
+          },
+          "segments_normalized": {
+            "minimum": 0.0,
+            "title": "Segments Normalized",
+            "type": "integer"
+          },
+          "segments_unmatched": {
+            "minimum": 0.0,
+            "title": "Segments Unmatched",
+            "type": "integer"
+          },
+          "traffic_aware_routing": {
+            "title": "Traffic Aware Routing",
+            "type": "boolean"
+          },
+          "traffic_extract_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traffic Extract Path"
+          },
+          "updater_consecutive_failures": {
+            "minimum": 0.0,
+            "title": "Updater Consecutive Failures",
+            "type": "integer"
+          },
+          "valhalla_tileset_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valhalla Tileset Version"
+          }
+        },
+        "required": [
+          "enabled",
+          "provider",
+          "provider_status",
+          "traffic_aware_routing",
+          "last_fetch_started_at",
+          "last_fetch_completed_at",
+          "last_success_at",
+          "provider_segments_received",
+          "segments_normalized",
+          "segments_matched",
+          "segments_unmatched",
+          "edges_updated",
+          "edges_expired",
+          "provider_api_errors",
+          "updater_consecutive_failures",
+          "managed_edge_count",
+          "mapping_version",
+          "valhalla_tileset_version",
+          "traffic_extract_path",
+          "message"
+        ],
+        "title": "TrafficHealthResponse",
+        "type": "object"
       }
     }
   },
@@ -3966,6 +4397,27 @@
         "summary": "Route With Cng Stop",
         "tags": [
           "stations"
+        ]
+      }
+    },
+    "/api/v1/traffic/health": {
+      "get": {
+        "operationId": "traffic_health_api_v1_traffic_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Traffic Health",
+        "tags": [
+          "traffic"
         ]
       }
     },

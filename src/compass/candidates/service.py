@@ -32,6 +32,7 @@ async def find_corridor_candidates(
         route_wkt=route_linestring_wkt(route_coordinates),
         radius_meters=corridor.radius_km * 1000,
         limit=policy.candidate_limit,
+        excluded_mimit_station_ids=request.excluded_mimit_station_ids,
     )
 
     with_location = query.active_station_with_location_count

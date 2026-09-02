@@ -586,6 +586,7 @@ Important ADR candidates:
 
 A phase is complete only when:
 
+- ALL the points for the phase are reached, none can be skipped
 - implementation for that phase exists;
 - automated tests for the phase pass locally where runnable;
 - Docker/config/docs changes are included;

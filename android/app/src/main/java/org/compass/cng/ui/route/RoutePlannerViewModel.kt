@@ -22,6 +22,8 @@ import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
+import org.compass.cng.navigation.NavigationSession
+import org.compass.cng.navigation.toNavigationRoute
 
 enum class PlannerStage {
     CONFIGURE_ROUTE,
@@ -32,6 +34,7 @@ enum class PlannerStage {
     PREDICTIVE_ITINERARY,
     PREDICTIVE_STATUS,
     SELECTED_ROUTE,
+    NAVIGATION_PREVIEW,
 }
 
 enum class PlannerOperation {
@@ -88,9 +91,24 @@ class RoutePlannerViewModel(
     private val clock: Clock = Clock.systemDefaultZone(),
     initialOrigin: Coordinate = MILAN,
     initialDestination: Coordinate = BOLOGNA,
+    private val navigationSession: NavigationSession = NavigationSession(),
 ) : ViewModel() {
+    val navigationState = navigationSession.state
+    private val restoredNavigation = navigationSession.state.value
     private val mutableUiState = MutableStateFlow(
-        RoutePlannerUiState(
+        restoredNavigation.route?.let { activeRoute ->
+            RoutePlannerUiState(
+                stage = PlannerStage.NAVIGATION_PREVIEW,
+                operation = null,
+                activeOrigin = activeRoute.origin,
+                activeDestination = activeRoute.destination,
+                originLatitudeInput = activeRoute.origin.latitude.toCoordinateInput(),
+                originLongitudeInput = activeRoute.origin.longitude.toCoordinateInput(),
+                destinationLatitudeInput = activeRoute.destination.latitude.toCoordinateInput(),
+                destinationLongitudeInput = activeRoute.destination.longitude.toCoordinateInput(),
+                baseRoute = activeRoute.asRoutePreview(),
+            )
+        } ?: RoutePlannerUiState(
             activeOrigin = initialOrigin,
             activeDestination = initialDestination,
             originLatitudeInput = initialOrigin.latitude.toCoordinateInput(),
@@ -104,7 +122,7 @@ class RoutePlannerViewModel(
     private var requestJob: Job? = null
 
     init {
-        loadBaseRoute()
+        if (restoredNavigation.route == null) loadBaseRoute()
     }
 
     fun retryBaseRoute() = loadBaseRoute()
@@ -524,7 +542,53 @@ class RoutePlannerViewModel(
                 selectedItineraryRoute = null,
                 message = null,
             )
+            PlannerStage.NAVIGATION_PREVIEW -> {
+                navigationSession.clear()
+                mutableUiState.value.copy(
+                    stage = if (
+                        mutableUiState.value.selectedRoute != null ||
+                        mutableUiState.value.selectedItineraryRoute != null
+                    ) {
+                        PlannerStage.SELECTED_ROUTE
+                    } else {
+                        PlannerStage.PREVIEW
+                    },
+                    message = null,
+                )
+            }
         }
+    }
+
+    fun openNavigationPreview() {
+        if (mutableUiState.value.isBusy) return
+        val predictive = mutableUiState.value.predictiveSuggestion
+        val route = mutableUiState.value.selectedItineraryRoute?.toNavigationRoute(
+            maximumDetourMinutes = predictive?.maximumDetourMinutes,
+        )
+            ?: mutableUiState.value.selectedRoute?.toNavigationRoute()
+            ?: mutableUiState.value.baseRoute?.toNavigationRoute()
+            ?: return
+        navigationSession.preview(route)
+        mutableUiState.value = mutableUiState.value.copy(
+            stage = PlannerStage.NAVIGATION_PREVIEW,
+            message = null,
+        )
+    }
+
+    fun startNavigation() {
+        if (mutableUiState.value.stage != PlannerStage.NAVIGATION_PREVIEW) return
+        navigationSession.start()
+        mutableUiState.value = mutableUiState.value.copy(message = null)
+    }
+
+    fun stopNavigation() {
+        navigationSession.stopToPreview()
+    }
+
+    fun navigationPermissionDenied() {
+        mutableUiState.value = mutableUiState.value.copy(
+            message = "La posizione è necessaria per iniziare la navigazione.",
+        )
     }
 
     fun removeCngStop() {
@@ -546,6 +610,7 @@ class RoutePlannerViewModel(
         destination: Coordinate = mutableUiState.value.activeDestination,
     ) {
         requestJob?.cancel()
+        navigationSession.clear()
         requestJob = viewModelScope.launch {
             mutableUiState.value = mutableUiState.value.copy(
                 stage = PlannerStage.PREVIEW,
@@ -588,13 +653,17 @@ class RoutePlannerViewModel(
 
     class Factory(
         private val routingRepository: RoutingRepository,
+        private val navigationSession: NavigationSession,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(RoutePlannerViewModel::class.java)) {
                 "Unsupported ViewModel class: ${modelClass.name}"
             }
-            return RoutePlannerViewModel(routingRepository) as T
+            return RoutePlannerViewModel(
+                routingRepository = routingRepository,
+                navigationSession = navigationSession,
+            ) as T
         }
     }
 

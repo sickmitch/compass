@@ -40,6 +40,35 @@ services:
       VALHALLA_READ_TIMEOUT_SECONDS: ${VALHALLA_READ_TIMEOUT_SECONDS:-60}
       VALHALLA_ROUTE_LANGUAGE: ${VALHALLA_ROUTE_LANGUAGE:-it-IT}
       VALHALLA_MATRIX_BATCH_SIZE: ${VALHALLA_MATRIX_BATCH_SIZE:-40}
+      TRAFFIC_ENABLED: ${TRAFFIC_ENABLED:-false}
+      TRAFFIC_PROVIDER: ${TRAFFIC_PROVIDER:-none}
+      TRAFFIC_REFRESH_MODE: ${TRAFFIC_REFRESH_MODE:-on_demand}
+      TRAFFIC_REFRESH_SECONDS: ${TRAFFIC_REFRESH_SECONDS:-60}
+      TRAFFIC_ROUTE_REFRESH_MIN_INTERVAL_SECONDS: ${TRAFFIC_ROUTE_REFRESH_MIN_INTERVAL_SECONDS:-300}
+      TRAFFIC_ROUTE_PROBE_SPACING_KM: ${TRAFFIC_ROUTE_PROBE_SPACING_KM:-25}
+      TRAFFIC_ROUTE_MAX_PROBES: ${TRAFFIC_ROUTE_MAX_PROBES:-16}
+      TRAFFIC_ROUTE_REFRESH_TIMEOUT_SECONDS: ${TRAFFIC_ROUTE_REFRESH_TIMEOUT_SECONDS:-45}
+      TRAFFIC_UPDATER_URL: ${TRAFFIC_UPDATER_URL:-http://traffic-updater:8003}
+      TRAFFIC_REFRESH_LEDGER_PATH: ${TRAFFIC_REFRESH_LEDGER_PATH:-/custom_files/compass_traffic_state/route_refresh.json}
+      TRAFFIC_EXPIRY_SWEEP_SECONDS: ${TRAFFIC_EXPIRY_SWEEP_SECONDS:-30}
+      TRAFFIC_UPDATE_SEGMENT_LIMIT: ${TRAFFIC_UPDATE_SEGMENT_LIMIT:-1000}
+      TRAFFIC_MAX_AGE_SECONDS: ${TRAFFIC_MAX_AGE_SECONDS:-300}
+      TRAFFIC_MIN_CONFIDENCE: ${TRAFFIC_MIN_CONFIDENCE:-0.50}
+      TRAFFIC_MIN_MATCH_CONFIDENCE: ${TRAFFIC_MIN_MATCH_CONFIDENCE:-0.75}
+      TRAFFIC_MATCH_SEARCH_RADIUS_METERS: ${TRAFFIC_MATCH_SEARCH_RADIUS_METERS:-75}
+      TRAFFIC_MATCH_GPS_ACCURACY_METERS: ${TRAFFIC_MATCH_GPS_ACCURACY_METERS:-15}
+      # The generic API image intentionally has no Valhalla native helper.
+      TRAFFIC_OPENLR_DECODER_PATH: ""
+      TRAFFIC_OPENLR_DECODER_TIMEOUT_SECONDS: ${TRAFFIC_OPENLR_DECODER_TIMEOUT_SECONDS:-2}
+      TRAFFIC_OPENLR_ENDPOINT_TOLERANCE_METERS: ${TRAFFIC_OPENLR_ENDPOINT_TOLERANCE_METERS:-300}
+      TRAFFIC_WRITER_TIMEOUT_SECONDS: ${TRAFFIC_WRITER_TIMEOUT_SECONDS:-60}
+      TRAFFIC_MAX_SPEED_KPH: ${TRAFFIC_MAX_SPEED_KPH:-180}
+      TRAFFIC_VALHALLA_OVERLAY_ENABLED: ${TRAFFIC_VALHALLA_OVERLAY_ENABLED:-false}
+      TRAFFIC_VALHALLA_TILESET_VERSION: ${TRAFFIC_VALHALLA_TILESET_VERSION:-}
+      TRAFFIC_MAPPING_VERSION: ${TRAFFIC_MAPPING_VERSION:-unbuilt}
+      TRAFFIC_STATE_PATH: ${TRAFFIC_STATE_PATH:-/custom_files/compass_traffic_state/state.json}
+      TRAFFIC_HEALTH_PATH: ${TRAFFIC_HEALTH_PATH:-/custom_files/compass_traffic_state/health.json}
+      TRAFFIC_MOCK_FIXTURE_PATH: ${TRAFFIC_MOCK_FIXTURE_PATH:-}
       CNG_CORRIDOR_RANGE_FRACTION: ${CNG_CORRIDOR_RANGE_FRACTION:-0.20}
       CNG_CORRIDOR_MINIMUM_RADIUS_KM: ${CNG_CORRIDOR_MINIMUM_RADIUS_KM:-5}
       CNG_CORRIDOR_MAXIMUM_RADIUS_KM: ${CNG_CORRIDOR_MAXIMUM_RADIUS_KM:-50}
@@ -75,6 +104,8 @@ services:
       start_period: 10s
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+    volumes:
+      - valhalla_data:/custom_files:ro
     restart: unless-stopped
 
   valhalla-tiles:
@@ -97,7 +128,7 @@ services:
     restart: "no"
 
   valhalla:
-    profiles: ["routing"]
+    profiles: ["routing", "traffic"]
     image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
     environment:
       tile_urls: ${VALHALLA_TILE_URLS:-https://download.geofabrik.de/europe/italy-latest.osm.pbf}
@@ -117,6 +148,128 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    volumes:
+      - valhalla_data:/custom_files
+    restart: unless-stopped
+
+  valhalla-traffic-extract:
+    profiles: ["traffic-build"]
+    image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
+    entrypoint: ["python3", "/usr/local/bin/rebuild_traffic_extract.py"]
+    command:
+      [
+        "--config",
+        "/custom_files/valhalla.json",
+      ]
+    volumes:
+      - valhalla_data:/custom_files
+      - ./tools/valhalla-traffic/rebuild_traffic_extract.py:/usr/local/bin/rebuild_traffic_extract.py:ro
+    restart: "no"
+
+  valhalla-traffic-tool:
+    profiles: ["traffic-tools"]
+    image: ${VALHALLA_TRAFFIC_TOOL_IMAGE:-compass-valhalla-traffic-tool:0.1.0}
+    build:
+      context: tools/valhalla-traffic
+      args:
+        VALHALLA_IMAGE: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
+    volumes:
+      - valhalla_data:/custom_files
+    restart: "no"
+
+  traffic-updater:
+    profiles: ["traffic"]
+    image: ${COMPASS_TRAFFIC_IMAGE:-compass-traffic-updater:0.1.0}
+    build:
+      context: .
+      dockerfile: Dockerfile.traffic
+      args:
+        VALHALLA_IMAGE: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
+    command:
+      [
+        "uvicorn",
+        "compass.traffic.updater_api:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8003",
+      ]
+    # traffic.tar is created root-owned by the pinned Valhalla image. This
+    # dedicated writer runs as container root without host privileges and with
+    # every Linux capability removed; only the tileset/traffic volume remains writable.
+    user: "0:0"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HTTP_USER_AGENT: ${HTTP_USER_AGENT:-compass-cng/0.1.0}
+      VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
+      VALHALLA_CONNECT_TIMEOUT_SECONDS: ${VALHALLA_CONNECT_TIMEOUT_SECONDS:-5}
+      VALHALLA_READ_TIMEOUT_SECONDS: ${VALHALLA_READ_TIMEOUT_SECONDS:-60}
+      TRAFFIC_ENABLED: ${TRAFFIC_ENABLED:-false}
+      TRAFFIC_PROVIDER: ${TRAFFIC_PROVIDER:-none}
+      TRAFFIC_REFRESH_MODE: ${TRAFFIC_REFRESH_MODE:-on_demand}
+      TRAFFIC_REFRESH_SECONDS: ${TRAFFIC_REFRESH_SECONDS:-60}
+      TRAFFIC_ROUTE_REFRESH_MIN_INTERVAL_SECONDS: ${TRAFFIC_ROUTE_REFRESH_MIN_INTERVAL_SECONDS:-300}
+      TRAFFIC_ROUTE_PROBE_SPACING_KM: ${TRAFFIC_ROUTE_PROBE_SPACING_KM:-25}
+      TRAFFIC_ROUTE_MAX_PROBES: ${TRAFFIC_ROUTE_MAX_PROBES:-16}
+      TRAFFIC_ROUTE_REFRESH_TIMEOUT_SECONDS: ${TRAFFIC_ROUTE_REFRESH_TIMEOUT_SECONDS:-45}
+      TRAFFIC_UPDATER_URL: ${TRAFFIC_UPDATER_URL:-http://traffic-updater:8003}
+      TRAFFIC_REFRESH_LEDGER_PATH: ${TRAFFIC_REFRESH_LEDGER_PATH:-/custom_files/compass_traffic_state/route_refresh.json}
+      TRAFFIC_EXPIRY_SWEEP_SECONDS: ${TRAFFIC_EXPIRY_SWEEP_SECONDS:-30}
+      TRAFFIC_UPDATE_SEGMENT_LIMIT: ${TRAFFIC_UPDATE_SEGMENT_LIMIT:-1000}
+      TRAFFIC_MAX_AGE_SECONDS: ${TRAFFIC_MAX_AGE_SECONDS:-300}
+      TRAFFIC_MIN_CONFIDENCE: ${TRAFFIC_MIN_CONFIDENCE:-0.50}
+      TRAFFIC_MIN_MATCH_CONFIDENCE: ${TRAFFIC_MIN_MATCH_CONFIDENCE:-0.75}
+      TRAFFIC_MATCH_SEARCH_RADIUS_METERS: ${TRAFFIC_MATCH_SEARCH_RADIUS_METERS:-75}
+      TRAFFIC_MATCH_GPS_ACCURACY_METERS: ${TRAFFIC_MATCH_GPS_ACCURACY_METERS:-15}
+      TRAFFIC_OPENLR_DECODER_PATH: ${TRAFFIC_OPENLR_DECODER_PATH:-/usr/local/bin/compass-valhalla-traffic-tool}
+      TRAFFIC_OPENLR_DECODER_TIMEOUT_SECONDS: ${TRAFFIC_OPENLR_DECODER_TIMEOUT_SECONDS:-2}
+      TRAFFIC_OPENLR_ENDPOINT_TOLERANCE_METERS: ${TRAFFIC_OPENLR_ENDPOINT_TOLERANCE_METERS:-300}
+      TRAFFIC_WRITER_TIMEOUT_SECONDS: ${TRAFFIC_WRITER_TIMEOUT_SECONDS:-60}
+      TRAFFIC_MAX_SPEED_KPH: ${TRAFFIC_MAX_SPEED_KPH:-180}
+      TRAFFIC_VALHALLA_OVERLAY_ENABLED: ${TRAFFIC_VALHALLA_OVERLAY_ENABLED:-false}
+      TRAFFIC_VALHALLA_TILESET_VERSION: ${TRAFFIC_VALHALLA_TILESET_VERSION:-}
+      TRAFFIC_MAPPING_VERSION: ${TRAFFIC_MAPPING_VERSION:-unbuilt}
+      TRAFFIC_STATE_PATH: ${TRAFFIC_STATE_PATH:-/custom_files/compass_traffic_state/state.json}
+      TRAFFIC_HEALTH_PATH: ${TRAFFIC_HEALTH_PATH:-/custom_files/compass_traffic_state/health.json}
+      TRAFFIC_MOCK_FIXTURE_PATH: ${TRAFFIC_MOCK_FIXTURE_PATH:-}
+      TOMTOM_TRAFFIC_API_MODE: ${TOMTOM_TRAFFIC_API_MODE:-flow_segment}
+      TOMTOM_TRAFFIC_URL: ${TOMTOM_TRAFFIC_URL:-}
+      TOMTOM_FLOW_SEGMENT_POINTS: ${TOMTOM_FLOW_SEGMENT_POINTS:-}
+      TOMTOM_FLOW_SEGMENT_STYLE: ${TOMTOM_FLOW_SEGMENT_STYLE:-absolute}
+      TOMTOM_FLOW_SEGMENT_ZOOM: ${TOMTOM_FLOW_SEGMENT_ZOOM:-10}
+      TOMTOM_FLOW_SEGMENT_UNIT: ${TOMTOM_FLOW_SEGMENT_UNIT:-kmph}
+      TOMTOM_FLOW_SEGMENT_OPENLR: ${TOMTOM_FLOW_SEGMENT_OPENLR:-true}
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
+      TOMTOM_TIMEOUT_SECONDS: ${TOMTOM_TIMEOUT_SECONDS:-20}
+      TOMTOM_MAX_RETRIES: ${TOMTOM_MAX_RETRIES:-3}
+      TOMTOM_MAX_CONCURRENCY: ${TOMTOM_MAX_CONCURRENCY:-2}
+      TOMTOM_BACKOFF_BASE_SECONDS: ${TOMTOM_BACKOFF_BASE_SECONDS:-0.5}
+      VALHALLA_CONFIG_PATH: ${VALHALLA_CONFIG_PATH:-/custom_files/valhalla.json}
+      VALHALLA_TILE_DIR: ${VALHALLA_TILE_DIR:-/custom_files/valhalla_tiles}
+      VALHALLA_TILE_EXTRACT: ${VALHALLA_TILE_EXTRACT:-/custom_files/valhalla_tiles.tar}
+      VALHALLA_TRAFFIC_EXTRACT: ${VALHALLA_TRAFFIC_EXTRACT:-/custom_files/traffic.tar}
+    depends_on:
+      valhalla:
+        condition: service_healthy
+    expose:
+      - "8003"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health/live', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     volumes:
       - valhalla_data:/custom_files
     restart: unless-stopped

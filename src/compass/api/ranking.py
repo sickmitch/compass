@@ -35,6 +35,7 @@ from compass.routing.domain import (
     RoutingProviderError,
     RoutingUnavailableError,
 )
+from compass.traffic.service import network_cost_basis_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["ranking"])
 
@@ -163,6 +164,7 @@ async def ranked_candidates(
         ),
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
     )
     domain_request = RankedCandidatesRequest(
         network_request=NetworkDetourRequest(
@@ -193,6 +195,7 @@ async def ranked_candidates(
             ),
             ranking_policy=ranking_policy,
             max_route_geometry_points=settings.route_geometry_max_points,
+            cost_basis=network_cost_basis_from_settings(settings),
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -212,7 +215,10 @@ async def ranked_candidates(
     return RankedCandidatesResponse(
         departure_at=network.departure_at,
         maximum_detour_minutes=network.maximum_detour_seconds / 60,
-        base_route=_base_route_response(spatial.base_route),
+        base_route=_base_route_response(
+            spatial.base_route,
+            departure_at=network.departure_at,
+        ),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),
         spatial_pruning=SpatialPruningMetricsResponse.model_validate(
             asdict(spatial.metrics)

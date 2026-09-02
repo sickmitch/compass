@@ -625,6 +625,7 @@ Acceptance:
 
 Goal:
 
+- navigation start and destination from mobile app;
 - maneuver consumption;
 - navigation state;
 - location progress;
