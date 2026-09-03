@@ -420,7 +420,7 @@ estimated remaining CNG range because no telemetry integration exists. Each resp
 consumption model and reports whether the underlying Valhalla durations were traffic-aware; the
 system does not reinterpret graph speeds as live traffic.
 
-The predictive API returns distinct `not_needed`, `suggested`, `no_reachable_station`,
+The predictive API returns distinct `not_needed`, `suggested`, `gasoline_fallback`, `no_reachable_station`,
 `no_eligible_station` and `no_complete_itinerary` states. `suggested` means a complete ordered chain
 has been found, not merely that its first station is reachable. The first leg uses the driver-supplied
 remaining range; every later leg assumes a full refill and must preserve the same reserve. Search
@@ -432,6 +432,13 @@ IDs in one query, asks Valhalla for one multi-waypoint route and revalidates the
 reserve margin of every returned leg. Android maps the strict predictive plan and validated route
 into separate domain models, draws every stop marker, and divides maneuvers by refuelling leg. The
 shared contract bounds a plan to 32 stops and derives route totals from the validated leg sums.
+
+Vehicle profiles are local Android presentation state, persisted as a versioned strict document.
+They contain a label plus effective full range and reserve for CNG and gasoline. Selecting a profile
+pre-fills those policy values; it never invents current tank levels. The driver may separately enter
+estimated remaining gasoline range. Only after complete CNG planning fails may the backend return a
+direct-route `gasoline_fallback`, with explicit required range and reserve margin. Navigation retains
+those metrics across route preview and ordinary rerouting so the fallback stays visible.
 
 ## Deliberate Phase 10 limits
 

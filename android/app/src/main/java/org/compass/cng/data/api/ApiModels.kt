@@ -57,6 +57,17 @@ data class ApiPredictiveCandidates(
     val rangeBasis: ApiPredictiveRangeBasis,
     val candidates: List<ApiPredictiveRankedCandidate>,
     val itinerary: ApiPredictiveItinerary?,
+    val gasolineFallback: ApiGasolineFallback? = null,
+)
+
+data class ApiGasolineFallback(
+    val estimatedRemainingGasolineRangeKm: Double,
+    val reserveGasolineRangeKm: Double,
+    val usableGasolineRangeKm: Double,
+    val cngRangeUsedBeforeSwitchKm: Double,
+    val requiredGasolineRangeKm: Double,
+    val gasolineMarginAtDestinationKm: Double,
+    val strategy: String,
 )
 
 data class ApiPredictiveRangeBasis(

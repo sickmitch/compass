@@ -16,6 +16,7 @@ from compass.traffic.domain import TrafficHealthState
 PredictiveSuggestionState = Literal[
     "not_needed",
     "suggested",
+    "gasoline_fallback",
     "no_reachable_station",
     "no_eligible_station",
     "no_complete_itinerary",
@@ -29,6 +30,8 @@ class PredictiveCandidatesRequest:
     ranked_request: RankedCandidatesRequest
     estimated_remaining_cng_range_km: float
     reserve_cng_range_km: float
+    estimated_remaining_gasoline_range_km: float | None = None
+    reserve_gasoline_range_km: float | None = None
 
     def __post_init__(self) -> None:
         effective_range = (
@@ -47,6 +50,64 @@ class PredictiveCandidatesRequest:
             raise ValueError("reserve_cng_range_km must not be negative")
         if self.reserve_cng_range_km >= self.estimated_remaining_cng_range_km:
             raise ValueError("reserve_cng_range_km must be lower than estimated remaining range")
+        gasoline_values = (
+            self.estimated_remaining_gasoline_range_km,
+            self.reserve_gasoline_range_km,
+        )
+        if (gasoline_values[0] is None) != (gasoline_values[1] is None):
+            raise ValueError("gasoline remaining range and reserve must be supplied together")
+        if gasoline_values[0] is not None and gasoline_values[1] is not None:
+            if (
+                not isfinite(gasoline_values[0])
+                or gasoline_values[0] <= 0
+                or gasoline_values[0] > 2_000
+            ):
+                raise ValueError(
+                    "estimated_remaining_gasoline_range_km must be between zero and 2,000"
+                )
+            if not isfinite(gasoline_values[1]) or gasoline_values[1] < 0:
+                raise ValueError("reserve_gasoline_range_km must not be negative")
+            if gasoline_values[1] >= gasoline_values[0]:
+                raise ValueError(
+                    "gasoline reserve must be lower than estimated remaining range"
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class GasolineFallback:
+    estimated_remaining_gasoline_range_km: float
+    reserve_gasoline_range_km: float
+    usable_gasoline_range_km: float
+    cng_range_used_before_switch_km: float
+    required_gasoline_range_km: float
+    gasoline_margin_at_destination_km: float
+    strategy: Literal["direct_after_cng_reserve"] = "direct_after_cng_reserve"
+
+    def __post_init__(self) -> None:
+        values = (
+            self.estimated_remaining_gasoline_range_km,
+            self.reserve_gasoline_range_km,
+            self.usable_gasoline_range_km,
+            self.cng_range_used_before_switch_km,
+            self.required_gasoline_range_km,
+            self.gasoline_margin_at_destination_km,
+        )
+        if any(not isfinite(value) or value < 0 for value in values):
+            raise ValueError("gasoline fallback ranges must not be negative")
+        if not isclose(
+            self.usable_gasoline_range_km,
+            self.estimated_remaining_gasoline_range_km - self.reserve_gasoline_range_km,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("usable gasoline range must equal remaining range minus reserve")
+        if self.required_gasoline_range_km > self.usable_gasoline_range_km + 1e-9:
+            raise ValueError("gasoline fallback must preserve the requested reserve")
+        if not isclose(
+            self.gasoline_margin_at_destination_km,
+            self.usable_gasoline_range_km - self.required_gasoline_range_km,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("gasoline fallback margin does not reconcile")
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +290,7 @@ class PredictiveCandidatesResult:
     ranking_result: RankedCandidatesResult
     candidates: tuple[PredictiveRankedCandidate, ...]
     itinerary: PredictiveItinerary | None = None
+    gasoline_fallback: GasolineFallback | None = None
 
     def __post_init__(self) -> None:
         has_candidates = bool(self.candidates)
@@ -238,6 +300,10 @@ class PredictiveCandidatesResult:
             raise ValueError("candidate count must match predictive metrics")
         if (self.suggestion_state == "suggested") != (self.itinerary is not None):
             raise ValueError("only a suggested result may contain a complete itinerary")
+        if (self.suggestion_state == "gasoline_fallback") != (
+            self.gasoline_fallback is not None
+        ):
+            raise ValueError("only a gasoline fallback result may contain fallback metrics")
         if self.itinerary is not None:
             if len(self.candidates) != 1:
                 raise ValueError("a complete itinerary must expose its selected first stop")

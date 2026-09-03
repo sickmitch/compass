@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
         RoutePlannerViewModel.Factory(
             routingRepository = application.container.routingRepository,
             navigationSession = application.container.navigationSession,
+            vehicleProfileRepository = application.container.vehicleProfileRepository,
         )
     }
 

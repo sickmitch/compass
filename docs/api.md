@@ -107,6 +107,8 @@ Content-Type: application/json
   "effective_cng_range_km": 300,
   "estimated_remaining_cng_range_km": 120,
   "reserve_cng_range_km": 30,
+  "estimated_remaining_gasoline_range_km": 200,
+  "reserve_gasoline_range_km": 30,
   "maximum_detour_minutes": 10,
   "departure_at": "2026-08-30T10:00:00+02:00",
   "excluded_mimit_station_ids": []
@@ -122,6 +124,8 @@ The response stage is `predictive_ranking` and `suggestion_state` is one of:
 - `not_needed`: destination is within usable range; station/matrix/enrichment work is skipped;
 - `suggested`: `itinerary` contains a complete ordered reserve-preserving chain from origin to
   destination; `candidates` exposes exactly its ranked first stop for compatibility/explanation;
+- `gasoline_fallback`: no complete CNG itinerary exists, but the direct route is reachable by
+  consuming CNG only down to its reserve and then gasoline only down to its separate reserve;
 - `no_reachable_station`: no eligible station is reachable before reserve;
 - `no_eligible_station`: reachable stations exist, but none survives opening/availability policy;
 - `no_complete_itinerary`: a safe first stop exists, but no complete chain reaches the destination.
@@ -141,6 +145,12 @@ session exclusions in `excluded_mimit_station_ids`. The list accepts at most 32 
 official IDs. Compass removes them in the PostGIS corridor query before applying the candidate
 limit or calling Valhalla matrices, and echoes the applied list in the response. A strict client
 must verify that echo before accepting the replacement plan.
+
+The two gasoline fields are optional but must be supplied together. They are caller estimates, not
+telemetry. `gasoline_fallback` never outranks an available complete CNG itinerary and does not assume
+a gasoline refuelling stop. Its metrics expose usable gasoline range, estimated gasoline required on
+the direct route and the remaining margin at destination. If gasoline is absent or insufficient,
+the original CNG failure state is preserved.
 
 ## Data freshness
 

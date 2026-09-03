@@ -86,9 +86,40 @@ data class RankedCngStations(
 enum class PredictiveSuggestionState {
     NOT_NEEDED,
     SUGGESTED,
+    GASOLINE_FALLBACK,
     NO_REACHABLE_STATION,
     NO_ELIGIBLE_STATION,
     NO_COMPLETE_ITINERARY,
+}
+
+data class GasolineFallback(
+    val estimatedRemainingGasolineRangeKm: Double,
+    val reserveGasolineRangeKm: Double,
+    val usableGasolineRangeKm: Double,
+    val cngRangeUsedBeforeSwitchKm: Double,
+    val requiredGasolineRangeKm: Double,
+    val gasolineMarginAtDestinationKm: Double,
+    val strategy: String,
+) {
+    init {
+        require(estimatedRemainingGasolineRangeKm > 0)
+        require(reserveGasolineRangeKm >= 0 && reserveGasolineRangeKm < estimatedRemainingGasolineRangeKm)
+        require(
+            abs(
+                usableGasolineRangeKm -
+                    (estimatedRemainingGasolineRangeKm - reserveGasolineRangeKm),
+            ) <= 0.001,
+        )
+        require(usableGasolineRangeKm >= requiredGasolineRangeKm)
+        require(cngRangeUsedBeforeSwitchKm >= 0 && gasolineMarginAtDestinationKm >= 0)
+        require(
+            abs(
+                gasolineMarginAtDestinationKm -
+                    (usableGasolineRangeKm - requiredGasolineRangeKm),
+            ) <= 0.001,
+        )
+        require(strategy == "direct_after_cng_reserve")
+    }
 }
 
 data class PredictiveRangeBasis(
@@ -249,6 +280,7 @@ data class PredictiveCngSuggestion(
     val rangeBasis: PredictiveRangeBasis,
     val candidates: List<PredictiveCngStation>,
     val itinerary: PredictiveCngItinerary?,
+    val gasolineFallback: GasolineFallback? = null,
 ) {
     init {
         require((state == PredictiveSuggestionState.SUGGESTED) == (itinerary != null)) {
@@ -257,6 +289,10 @@ data class PredictiveCngSuggestion(
         require((state == PredictiveSuggestionState.SUGGESTED) == (candidates.size == 1)) {
             "a suggested predictive result must expose its selected first stop"
         }
+        require(
+            (state == PredictiveSuggestionState.GASOLINE_FALLBACK) ==
+                (gasolineFallback != null),
+        ) { "only a gasoline fallback result may contain gasoline metrics" }
         require(
             state != PredictiveSuggestionState.NOT_NEEDED ||
                 rangeBasis.destinationReachableWithReserve,

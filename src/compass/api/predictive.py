@@ -34,6 +34,7 @@ from compass.config import Settings, get_api_settings
 from compass.db import get_session
 from compass.detours.domain import NetworkDetourPolicy, NetworkDetourRequest
 from compass.predictive.domain import (
+    GasolineFallback,
     PredictiveCandidatesRequest,
     PredictiveItinerary,
     PredictiveItineraryStop,
@@ -67,6 +68,22 @@ class PredictiveCandidatesApiRequest(RankedCandidatesApiRequest):
         lt=2000,
         description="Safety range that must remain on arrival at a suggested station.",
     )
+    estimated_remaining_gasoline_range_km: float | None = Field(
+        default=None,
+        gt=0,
+        le=2000,
+        description=(
+            "Caller-estimated gasoline range remaining at the request origin. "
+            "Supplying it enables an explicit direct-route fallback only when no complete "
+            "CNG itinerary exists."
+        ),
+    )
+    reserve_gasoline_range_km: float | None = Field(
+        default=None,
+        ge=0,
+        lt=2000,
+        description="Gasoline safety range that must remain at the destination.",
+    )
     excluded_mimit_station_ids: list[str] = Field(
         default_factory=list,
         max_length=32,
@@ -81,6 +98,17 @@ class PredictiveCandidatesApiRequest(RankedCandidatesApiRequest):
             raise ValueError("estimated remaining range must not exceed effective vehicle range")
         if self.reserve_cng_range_km >= self.estimated_remaining_cng_range_km:
             raise ValueError("reserve range must be lower than estimated remaining range")
+        if (self.estimated_remaining_gasoline_range_km is None) != (
+            self.reserve_gasoline_range_km is None
+        ):
+            raise ValueError("gasoline remaining range and reserve must be supplied together")
+        if (
+            self.estimated_remaining_gasoline_range_km is not None
+            and self.reserve_gasoline_range_km is not None
+            and self.reserve_gasoline_range_km
+            >= self.estimated_remaining_gasoline_range_km
+        ):
+            raise ValueError("gasoline reserve must be lower than estimated remaining range")
         if len(set(self.excluded_mimit_station_ids)) != len(self.excluded_mimit_station_ids):
             raise ValueError("excluded_mimit_station_ids must not contain duplicates")
         if any(
@@ -164,11 +192,22 @@ class PredictiveItineraryResponse(StrictModel):
     distance_model: Literal["road_network"]
 
 
+class GasolineFallbackResponse(StrictModel):
+    estimated_remaining_gasoline_range_km: float = Field(gt=0)
+    reserve_gasoline_range_km: float = Field(ge=0)
+    usable_gasoline_range_km: float = Field(gt=0)
+    cng_range_used_before_switch_km: float = Field(ge=0)
+    required_gasoline_range_km: float = Field(ge=0)
+    gasoline_margin_at_destination_km: float = Field(ge=0)
+    strategy: Literal["direct_after_cng_reserve"]
+
+
 class PredictiveCandidatesResponse(StrictModel):
     stage: Literal["predictive_ranking"] = "predictive_ranking"
     suggestion_state: Literal[
         "not_needed",
         "suggested",
+        "gasoline_fallback",
         "no_reachable_station",
         "no_eligible_station",
         "no_complete_itinerary",
@@ -187,6 +226,7 @@ class PredictiveCandidatesResponse(StrictModel):
     ranking_evaluation: RankingMetricsResponse
     candidates: list[PredictiveRankedCandidateResponse]
     itinerary: PredictiveItineraryResponse | None
+    gasoline_fallback: GasolineFallbackResponse | None
 
 
 @router.post(
@@ -226,6 +266,10 @@ async def predictive_candidates(
         ),
         estimated_remaining_cng_range_km=request.estimated_remaining_cng_range_km,
         reserve_cng_range_km=request.reserve_cng_range_km,
+        estimated_remaining_gasoline_range_km=(
+            request.estimated_remaining_gasoline_range_km
+        ),
+        reserve_gasoline_range_km=request.reserve_gasoline_range_km,
     )
     corridor_policy = CorridorPolicy(
         range_fraction=settings.cng_corridor_range_fraction,
@@ -290,7 +334,18 @@ async def predictive_candidates(
             if result.itinerary is not None
             else None
         ),
+        gasoline_fallback=(
+            _gasoline_fallback_response(result.gasoline_fallback)
+            if result.gasoline_fallback is not None
+            else None
+        ),
     )
+
+
+def _gasoline_fallback_response(
+    fallback: GasolineFallback,
+) -> GasolineFallbackResponse:
+    return GasolineFallbackResponse.model_validate(asdict(fallback))
 
 
 def _predictive_candidate_response(

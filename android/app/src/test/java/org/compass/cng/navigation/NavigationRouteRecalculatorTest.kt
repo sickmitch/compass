@@ -272,6 +272,8 @@ class NavigationRouteRecalculatorTest {
             maximumDetourMinutes: Double,
             departureAt: OffsetDateTime,
             excludedMimitStationIds: Set<String>,
+            estimatedRemainingGasolineRangeKm: Double?,
+            reserveGasolineRangeKm: Double?,
         ): PredictiveCngSuggestion {
             lastOrigin = origin
             lastDestination = destination

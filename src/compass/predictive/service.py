@@ -21,6 +21,7 @@ from compass.detours.domain import (
 from compass.detours.service import evaluate_cng_detours
 from compass.predictive.domain import (
     MAX_CNG_ITINERARY_STOPS,
+    GasolineFallback,
     PredictiveCandidatesRequest,
     PredictiveCandidatesResult,
     PredictiveDestinationLeg,
@@ -209,10 +210,21 @@ async def evaluate_predictive_cng_candidates(
         if path is not None
         else None
     )
+    gasoline_fallback = (
+        _build_gasoline_fallback(
+            request=request,
+            remaining_route_km=remaining_route_km,
+            usable_cng_range_km=first_usable_range_km,
+        )
+        if not destination_reachable and itinerary is None
+        else None
+    )
 
     suggestion_state: PredictiveSuggestionState
     if destination_reachable:
         suggestion_state = "not_needed"
+    elif gasoline_fallback is not None:
+        suggestion_state = "gasoline_fallback"
     elif not first_reachable:
         suggestion_state = "no_reachable_station"
     elif not first_eligible:
@@ -258,6 +270,31 @@ async def evaluate_predictive_cng_candidates(
         ranking_result=ranking,
         candidates=candidates,
         itinerary=itinerary,
+        gasoline_fallback=gasoline_fallback,
+    )
+
+
+def _build_gasoline_fallback(
+    *,
+    request: PredictiveCandidatesRequest,
+    remaining_route_km: float,
+    usable_cng_range_km: float,
+) -> GasolineFallback | None:
+    remaining_gasoline_km = request.estimated_remaining_gasoline_range_km
+    reserve_gasoline_km = request.reserve_gasoline_range_km
+    if remaining_gasoline_km is None or reserve_gasoline_km is None:
+        return None
+    usable_gasoline_km = remaining_gasoline_km - reserve_gasoline_km
+    required_gasoline_km = max(0.0, remaining_route_km - usable_cng_range_km)
+    if required_gasoline_km > usable_gasoline_km:
+        return None
+    return GasolineFallback(
+        estimated_remaining_gasoline_range_km=remaining_gasoline_km,
+        reserve_gasoline_range_km=reserve_gasoline_km,
+        usable_gasoline_range_km=usable_gasoline_km,
+        cng_range_used_before_switch_km=min(remaining_route_km, usable_cng_range_km),
+        required_gasoline_range_km=required_gasoline_km,
+        gasoline_margin_at_destination_km=usable_gasoline_km - required_gasoline_km,
     )
 
 

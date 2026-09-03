@@ -63,6 +63,8 @@ import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
+import org.compass.cng.domain.vehicle.VehicleProfile
+import org.compass.cng.domain.vehicle.VehicleProfiles
 import org.compass.cng.navigation.NavigationRoute
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.NavigationPhase
@@ -159,6 +161,8 @@ fun RoutePlannerScreen(
                         onEditRoute = viewModel::openRouteConfiguration,
                         onAddStop = viewModel::openAddStop,
                         onEvaluateRange = viewModel::openPredictiveRange,
+                        selectedVehicleName = state.vehicleProfiles.selectedProfile?.name,
+                        onVehicleProfiles = viewModel::openVehicleProfiles,
                     )
                     PlannerStage.CONFIGURE_CNG -> ConfigureCngContent(
                         route = baseRoute,
@@ -174,13 +178,41 @@ fun RoutePlannerScreen(
                         effectiveRangeInput = state.effectiveRangeKmInput,
                         remainingRangeInput = state.estimatedRemainingRangeKmInput,
                         reserveRangeInput = state.reserveRangeKmInput,
+                        remainingGasolineRangeInput = (
+                            state.estimatedRemainingGasolineRangeKmInput
+                        ),
+                        effectiveGasolineRangeInput = state.effectiveGasolineRangeKmInput,
+                        gasolineReserveRangeInput = state.gasolineReserveRangeKmInput,
+                        selectedVehicleName = state.vehicleProfiles.selectedProfile?.name,
                         detourInput = state.maximumDetourMinutesInput,
                         message = state.message,
                         onEffectiveRangeChanged = viewModel::updateEffectiveRange,
                         onRemainingRangeChanged = viewModel::updateEstimatedRemainingRange,
                         onReserveRangeChanged = viewModel::updateReserveRange,
+                        onRemainingGasolineRangeChanged = (
+                            viewModel::updateEstimatedRemainingGasolineRange
+                        ),
                         onDetourChanged = viewModel::updateMaximumDetour,
                         onEvaluate = viewModel::evaluatePredictiveRange,
+                    )
+                    PlannerStage.VEHICLE_PROFILES -> VehicleProfilesContent(
+                        profiles = state.vehicleProfiles,
+                        editingProfileId = state.editingVehicleProfileId,
+                        nameInput = state.vehicleProfileNameInput,
+                        cngRangeInput = state.vehicleProfileCngRangeInput,
+                        cngReserveInput = state.vehicleProfileCngReserveInput,
+                        gasolineRangeInput = state.vehicleProfileGasolineRangeInput,
+                        gasolineReserveInput = state.vehicleProfileGasolineReserveInput,
+                        message = state.message,
+                        onEdit = viewModel::editVehicleProfile,
+                        onSelect = viewModel::selectVehicleProfile,
+                        onDelete = viewModel::deleteVehicleProfile,
+                        onNameChanged = viewModel::updateVehicleProfileName,
+                        onCngRangeChanged = viewModel::updateVehicleProfileCngRange,
+                        onCngReserveChanged = viewModel::updateVehicleProfileCngReserve,
+                        onGasolineRangeChanged = viewModel::updateVehicleProfileGasolineRange,
+                        onGasolineReserveChanged = viewModel::updateVehicleProfileGasolineReserve,
+                        onSave = viewModel::saveVehicleProfile,
                     )
                     PlannerStage.CNG_CANDIDATES -> CandidateContent(
                         rankedStations = requireNotNull(state.rankedStations),
@@ -198,6 +230,7 @@ fun RoutePlannerScreen(
                     PlannerStage.PREDICTIVE_STATUS -> PredictiveStatusContent(
                         suggestion = requireNotNull(state.predictiveSuggestion),
                         onChangeInputs = viewModel::navigateBack,
+                        onUseGasolineFallback = viewModel::openGasolineFallbackNavigation,
                     )
                     PlannerStage.SELECTED_ROUTE -> {
                         val itineraryRoute = state.selectedItineraryRoute
@@ -265,6 +298,7 @@ private fun Header(
                     PlannerStage.PREVIEW -> "Anteprima percorso"
                     PlannerStage.CONFIGURE_CNG -> "Aggiungi tappa · Metano"
                     PlannerStage.CONFIGURE_PREDICTIVE -> "Valuta autonomia CNG"
+                    PlannerStage.VEHICLE_PROFILES -> "Profili dei mezzi"
                     PlannerStage.CNG_CANDIDATES -> "Stazioni Metano lungo il percorso"
                     PlannerStage.PREDICTIVE_ITINERARY -> "Piano rifornimenti CNG"
                     PlannerStage.PREDICTIVE_STATUS -> "Autonomia CNG"
@@ -364,6 +398,8 @@ private fun PreviewContent(
     onEditRoute: () -> Unit,
     onAddStop: () -> Unit,
     onEvaluateRange: () -> Unit,
+    selectedVehicleName: String?,
+    onVehicleProfiles: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         RouteMap(
@@ -410,6 +446,15 @@ private fun PreviewContent(
                 .padding(horizontal = 16.dp, vertical = 6.dp),
         ) {
             Text("Valuta autonomia CNG")
+        }
+        TextButton(
+            onClick = onVehicleProfiles,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                selectedVehicleName?.let { "Mezzo: $it" }
+                    ?: "Configura profili mezzi",
+            )
         }
         Text(
             text = "Indicazioni principali",
@@ -490,6 +535,17 @@ private fun NavigationPreviewContent(
                                 "${formatDuration(route.timing.totalRefuelingDwellSeconds)} " +
                                 "di rifornimento",
                             style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    route.gasolineFallback?.let { fallback ->
+                        Text(
+                            "Fallback benzina · uso stimato fino a " +
+                                formatKilometers(fallback.requiredGasolineRangeKm) +
+                                " · margine " +
+                                formatKilometers(fallback.gasolineMarginAtDestinationKm),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                     Text(
@@ -723,6 +779,15 @@ private fun ActiveNavigationContent(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                state.route.gasolineFallback?.let { fallback ->
+                    Text(
+                        "Fallback benzina attivo · uso stimato fino a " +
+                            formatKilometers(fallback.requiredGasolineRangeKm),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 if (state.offRouteStatus != OffRouteStatus.ON_ROUTE) {
                     Text(
                         if (state.offRouteStatus == OffRouteStatus.OFF_ROUTE) {
@@ -932,16 +997,162 @@ private fun CoordinateTextField(
 }
 
 @Composable
+private fun VehicleProfilesContent(
+    profiles: VehicleProfiles,
+    editingProfileId: String?,
+    nameInput: String,
+    cngRangeInput: String,
+    cngReserveInput: String,
+    gasolineRangeInput: String,
+    gasolineReserveInput: String,
+    message: String?,
+    onEdit: (VehicleProfile?) -> Unit,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onNameChanged: (String) -> Unit,
+    onCngRangeChanged: (String) -> Unit,
+    onCngReserveChanged: (String) -> Unit,
+    onGasolineRangeChanged: (String) -> Unit,
+    onGasolineReserveChanged: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        item {
+            Card(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "Parametri per mezzo",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Il profilo precompila autonomie piene e riserve. Le autonomie residue " +
+                            "restano sempre una stima inserita dal conducente.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        if (profiles.profiles.isEmpty()) {
+            item {
+                Text(
+                    "Nessun profilo salvato.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        itemsIndexed(profiles.profiles) { _, profile ->
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(profile.name, fontWeight = FontWeight.Bold)
+                    Text(
+                        "CNG ${formatKilometers(profile.effectiveCngRangeKm)} " +
+                            "(riserva ${formatKilometers(profile.cngReserveKm)}) · " +
+                            "benzina ${formatKilometers(profile.effectiveGasolineRangeKm)} " +
+                            "(riserva ${formatKilometers(profile.gasolineReserveKm)})",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onSelect(profile.id) },
+                            enabled = profiles.selectedProfileId != profile.id,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (profiles.selectedProfileId == profile.id) "Selezionato" else "Usa")
+                        }
+                        OutlinedButton(
+                            onClick = { onEdit(profile) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Modifica") }
+                        TextButton(onClick = { onDelete(profile.id) }) { Text("Elimina") }
+                    }
+                }
+            }
+        }
+        item {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (editingProfileId == null) "Nuovo profilo" else "Modifica profilo",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    TextButton(onClick = { onEdit(null) }) { Text("Svuota") }
+                }
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = onNameChanged,
+                    label = { Text("Nome mezzo") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                VehicleProfileNumberField(cngRangeInput, onCngRangeChanged, "Autonomia CNG piena (km)")
+                VehicleProfileNumberField(cngReserveInput, onCngReserveChanged, "Riserva CNG (km)")
+                VehicleProfileNumberField(
+                    gasolineRangeInput,
+                    onGasolineRangeChanged,
+                    "Autonomia benzina piena (km)",
+                )
+                VehicleProfileNumberField(
+                    gasolineReserveInput,
+                    onGasolineReserveChanged,
+                    "Riserva benzina (km)",
+                )
+                message?.let { InlineError(it) }
+                Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
+                    Text("Salva e seleziona")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VehicleProfileNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
 private fun ConfigurePredictiveContent(
     route: RoutePreview,
     effectiveRangeInput: String,
     remainingRangeInput: String,
     reserveRangeInput: String,
+    remainingGasolineRangeInput: String,
+    effectiveGasolineRangeInput: String,
+    gasolineReserveRangeInput: String,
+    selectedVehicleName: String?,
     detourInput: String,
     message: String?,
     onEffectiveRangeChanged: (String) -> Unit,
     onRemainingRangeChanged: (String) -> Unit,
     onReserveRangeChanged: (String) -> Unit,
+    onRemainingGasolineRangeChanged: (String) -> Unit,
     onDetourChanged: (String) -> Unit,
     onEvaluate: () -> Unit,
 ) {
@@ -1017,6 +1228,35 @@ private fun ConfigurePredictiveContent(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Text(
+                    "Fallback benzina",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (selectedVehicleName == null) {
+                    Text(
+                        "Seleziona prima un profilo mezzo per abilitare il fallback benzina.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "$selectedVehicleName · massimo $effectiveGasolineRangeInput km · " +
+                            "riserva $gasolineReserveRangeInput km",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = remainingGasolineRangeInput,
+                        onValueChange = onRemainingGasolineRangeChanged,
+                        label = { Text("Autonomia benzina residua stimata (km, opzionale)") },
+                        supportingText = {
+                            Text("Dato del conducente; lasciando vuoto il fallback è disattivato.")
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 message?.let { InlineError(it) }
                 Button(onClick = onEvaluate, modifier = Modifier.fillMaxWidth()) {
                     Text("Valuta e suggerisci una stazione")
@@ -1474,6 +1714,7 @@ private fun PredictiveItineraryStopCard(stop: PredictiveItineraryStop) {
 private fun PredictiveStatusContent(
     suggestion: PredictiveCngSuggestion,
     onChangeInputs: () -> Unit,
+    onUseGasolineFallback: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         RouteMap(
@@ -1515,6 +1756,23 @@ private fun PredictiveStatusContent(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    suggestion.gasolineFallback?.let { fallback ->
+                        Text(
+                            "Benzina necessaria stimata " +
+                                "${formatKilometers(fallback.requiredGasolineRangeKm)} · " +
+                                "margine sulla riserva " +
+                                formatKilometers(fallback.gasolineMarginAtDestinationKm),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Button(
+                            onClick = onUseGasolineFallback,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Continua con fallback benzina")
+                        }
+                    }
                     Button(onClick = onChangeInputs, modifier = Modifier.fillMaxWidth()) {
                         Text("Modifica autonomia")
                     }
@@ -1945,6 +2203,10 @@ private fun predictiveStatusCopy(state: PredictiveSuggestionState): Pair<String,
         "Esiste una prima stazione raggiungibile, ma non una catena completa di rifornimenti che conservi la riserva fino alla destinazione. Non fare affidamento su questo itinerario.",
     )
     PredictiveSuggestionState.SUGGESTED -> error("suggested results use the itinerary screen")
+    PredictiveSuggestionState.GASOLINE_FALLBACK -> Pair(
+        "Fallback benzina disponibile",
+        "Non esiste un itinerario completo a metano, ma la rotta diretta è stimata percorribile usando la benzina e conservando entrambe le riserve.",
+    )
 }
 
 private fun String.filterPhoneCharacters(): String = filter { it.isDigit() || it == '+' }

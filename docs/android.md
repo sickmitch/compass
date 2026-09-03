@@ -31,6 +31,13 @@ Navigation Stage 4 adds an explicit next-stop skip/replacement confirmation. It 
 snapped position with the unavailable MIMIT ID excluded and commits only a complete range-safe
 itinerary. Its physical-device gate passed on 2026-09-02.
 
+Navigation Stage 5 adds local vehicle profiles and an explicit gasoline fallback. A profile stores
+effective full range and reserve for both fuels and is selected across app restarts. Predictive CNG
+planning still requires driver-entered remaining CNG range. Remaining gasoline is also entered by
+the driver and is optional; when present, Compass may offer a direct gasoline fallback only after no
+complete CNG itinerary exists and only if both reserves are preserved. The fallback remains labelled
+in navigation preview and active guidance.
+
 ## Navigation Stage 1 device gate
 
 If the backend is remote, first keep this tunnel open in a separate terminal:

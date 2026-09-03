@@ -11,6 +11,6 @@ class CompassApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         MapLibre.getInstance(this)
-        container = AppContainer()
+        container = AppContainer(this)
     }
 }

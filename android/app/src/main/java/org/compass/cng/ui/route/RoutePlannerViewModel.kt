@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import java.time.Clock
 import java.time.OffsetDateTime
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,12 +25,17 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.toNavigationRoute
+import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
+import org.compass.cng.domain.vehicle.VehicleProfile
+import org.compass.cng.domain.vehicle.VehicleProfileRepository
+import org.compass.cng.domain.vehicle.VehicleProfiles
 
 enum class PlannerStage {
     CONFIGURE_ROUTE,
     PREVIEW,
     CONFIGURE_CNG,
     CONFIGURE_PREDICTIVE,
+    VEHICLE_PROFILES,
     CNG_CANDIDATES,
     PREDICTIVE_ITINERARY,
     PREDICTIVE_STATUS,
@@ -62,6 +68,9 @@ data class RoutePlannerUiState(
     val effectiveRangeKmInput: String = DEFAULT_EFFECTIVE_RANGE_KM,
     val estimatedRemainingRangeKmInput: String = "",
     val reserveRangeKmInput: String = DEFAULT_RESERVE_RANGE_KM,
+    val estimatedRemainingGasolineRangeKmInput: String = "",
+    val effectiveGasolineRangeKmInput: String = "",
+    val gasolineReserveRangeKmInput: String = "",
     val maximumDetourMinutesInput: String = DEFAULT_MAXIMUM_DETOUR_MINUTES,
     val workflowMode: CngWorkflowMode? = null,
     val rankedStations: RankedCngStations? = null,
@@ -70,6 +79,13 @@ data class RoutePlannerUiState(
     val selectedRoute: RouteWithCngStop? = null,
     val selectedItineraryRoute: RouteWithCngItinerary? = null,
     val message: String? = null,
+    val vehicleProfiles: VehicleProfiles = VehicleProfiles(),
+    val editingVehicleProfileId: String? = null,
+    val vehicleProfileNameInput: String = "",
+    val vehicleProfileCngRangeInput: String = "",
+    val vehicleProfileCngReserveInput: String = "",
+    val vehicleProfileGasolineRangeInput: String = "",
+    val vehicleProfileGasolineReserveInput: String = "",
 ) {
     val isBusy: Boolean get() = operation != null
 
@@ -92,9 +108,12 @@ class RoutePlannerViewModel(
     initialOrigin: Coordinate = MILAN,
     initialDestination: Coordinate = BOLOGNA,
     private val navigationSession: NavigationSession = NavigationSession(),
+    private val vehicleProfileRepository: VehicleProfileRepository =
+        InMemoryVehicleProfileRepository(),
 ) : ViewModel() {
     val navigationState = navigationSession.state
     private val restoredNavigation = navigationSession.state.value
+    private val initialVehicleProfiles = vehicleProfileRepository.load()
     private val mutableUiState = MutableStateFlow(
         restoredNavigation.route?.let { activeRoute ->
             RoutePlannerUiState(
@@ -107,7 +126,7 @@ class RoutePlannerViewModel(
                 destinationLatitudeInput = activeRoute.destination.latitude.toCoordinateInput(),
                 destinationLongitudeInput = activeRoute.destination.longitude.toCoordinateInput(),
                 baseRoute = activeRoute.asRoutePreview(),
-            )
+            ).withVehicleProfiles(initialVehicleProfiles)
         } ?: RoutePlannerUiState(
             activeOrigin = initialOrigin,
             activeDestination = initialDestination,
@@ -115,7 +134,7 @@ class RoutePlannerViewModel(
             originLongitudeInput = initialOrigin.longitude.toCoordinateInput(),
             destinationLatitudeInput = initialDestination.latitude.toCoordinateInput(),
             destinationLongitudeInput = initialDestination.longitude.toCoordinateInput(),
-        )
+        ).withVehicleProfiles(initialVehicleProfiles)
     )
     val uiState: StateFlow<RoutePlannerUiState> = mutableUiState.asStateFlow()
 
@@ -221,6 +240,137 @@ class RoutePlannerViewModel(
         }
     }
 
+    fun openVehicleProfiles() {
+        if (!mutableUiState.value.isBusy) {
+            mutableUiState.value = mutableUiState.value.copy(
+                stage = PlannerStage.VEHICLE_PROFILES,
+                editingVehicleProfileId = null,
+                vehicleProfileNameInput = "",
+                vehicleProfileCngRangeInput = "",
+                vehicleProfileCngReserveInput = "",
+                vehicleProfileGasolineRangeInput = "",
+                vehicleProfileGasolineReserveInput = "",
+                message = null,
+            )
+        }
+    }
+
+    fun editVehicleProfile(profile: VehicleProfile?) {
+        mutableUiState.value = mutableUiState.value.copy(
+            editingVehicleProfileId = profile?.id,
+            vehicleProfileNameInput = profile?.name.orEmpty(),
+            vehicleProfileCngRangeInput = profile?.effectiveCngRangeKm?.toInput().orEmpty(),
+            vehicleProfileCngReserveInput = profile?.cngReserveKm?.toInput().orEmpty(),
+            vehicleProfileGasolineRangeInput = (
+                profile?.effectiveGasolineRangeKm?.toInput().orEmpty()
+            ),
+            vehicleProfileGasolineReserveInput = profile?.gasolineReserveKm?.toInput().orEmpty(),
+            message = null,
+        )
+    }
+
+    fun updateVehicleProfileName(value: String) {
+        if (value.length <= 60) {
+            mutableUiState.value = mutableUiState.value.copy(
+                vehicleProfileNameInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateVehicleProfileCngRange(value: String) = updateProfileDecimal(value) {
+        copy(vehicleProfileCngRangeInput = value, message = null)
+    }
+
+    fun updateVehicleProfileCngReserve(value: String) = updateProfileDecimal(value) {
+        copy(vehicleProfileCngReserveInput = value, message = null)
+    }
+
+    fun updateVehicleProfileGasolineRange(value: String) = updateProfileDecimal(value) {
+        copy(vehicleProfileGasolineRangeInput = value, message = null)
+    }
+
+    fun updateVehicleProfileGasolineReserve(value: String) = updateProfileDecimal(value) {
+        copy(vehicleProfileGasolineReserveInput = value, message = null)
+    }
+
+    fun saveVehicleProfile() {
+        val state = mutableUiState.value
+        val name = state.vehicleProfileNameInput.trim()
+        val cngRange = state.vehicleProfileCngRangeInput.parseDecimal()
+        val cngReserve = state.vehicleProfileCngReserveInput.parseDecimal()
+        val gasolineRange = state.vehicleProfileGasolineRangeInput.parseDecimal()
+        val gasolineReserve = state.vehicleProfileGasolineReserveInput.parseDecimal()
+        val error = when {
+            name.isEmpty() -> "Inserisci un nome per il mezzo."
+            cngRange == null || cngRange <= 0 || cngRange > 2_000 ->
+                "Inserisci un'autonomia CNG piena tra 0 e 2.000 km."
+            cngReserve == null || cngReserve < 0 || cngReserve >= cngRange ->
+                "La riserva CNG deve essere inferiore all'autonomia piena."
+            gasolineRange == null || gasolineRange <= 0 || gasolineRange > 2_000 ->
+                "Inserisci un'autonomia benzina piena tra 0 e 2.000 km."
+            gasolineReserve == null || gasolineReserve < 0 || gasolineReserve >= gasolineRange ->
+                "La riserva benzina deve essere inferiore all'autonomia piena."
+            else -> null
+        }
+        if (error != null) {
+            mutableUiState.value = state.copy(message = error)
+            return
+        }
+        try {
+            val profile = VehicleProfile(
+                id = state.editingVehicleProfileId ?: UUID.randomUUID().toString(),
+                name = name,
+                effectiveCngRangeKm = requireNotNull(cngRange),
+                cngReserveKm = requireNotNull(cngReserve),
+                effectiveGasolineRangeKm = requireNotNull(gasolineRange),
+                gasolineReserveKm = requireNotNull(gasolineReserve),
+            )
+            vehicleProfileRepository.save(profile)
+            val profiles = vehicleProfileRepository.select(profile.id)
+            mutableUiState.value = state.withVehicleProfiles(profiles).copy(
+                editingVehicleProfileId = null,
+                vehicleProfileNameInput = "",
+                vehicleProfileCngRangeInput = "",
+                vehicleProfileCngReserveInput = "",
+                vehicleProfileGasolineRangeInput = "",
+                vehicleProfileGasolineReserveInput = "",
+                message = "Profilo ${profile.name} salvato e selezionato.",
+            )
+        } catch (_: Exception) {
+            mutableUiState.value = state.copy(message = "Impossibile salvare il profilo del mezzo.")
+        }
+    }
+
+    fun selectVehicleProfile(profileId: String) {
+        try {
+            mutableUiState.value = mutableUiState.value
+                .withVehicleProfiles(vehicleProfileRepository.select(profileId))
+                .copy(message = null)
+        } catch (_: Exception) {
+            mutableUiState.value = mutableUiState.value.copy(message = "Profilo mezzo non valido.")
+        }
+    }
+
+    fun deleteVehicleProfile(profileId: String) {
+        try {
+            mutableUiState.value = mutableUiState.value
+                .withVehicleProfiles(vehicleProfileRepository.delete(profileId))
+                .copy(message = null)
+        } catch (_: Exception) {
+            mutableUiState.value = mutableUiState.value.copy(
+                message = "Impossibile eliminare il profilo del mezzo.",
+            )
+        }
+    }
+
+    private fun updateProfileDecimal(
+        value: String,
+        transform: RoutePlannerUiState.() -> RoutePlannerUiState,
+    ) {
+        if (value.isDecimalInput()) mutableUiState.value = mutableUiState.value.transform()
+    }
+
     fun updateEffectiveRange(value: String) {
         if (value.isDecimalInput()) {
             mutableUiState.value = mutableUiState.value.copy(
@@ -252,6 +402,15 @@ class RoutePlannerViewModel(
         if (value.isDecimalInput()) {
             mutableUiState.value = mutableUiState.value.copy(
                 reserveRangeKmInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateEstimatedRemainingGasolineRange(value: String) {
+        if (value.isDecimalInput()) {
+            mutableUiState.value = mutableUiState.value.copy(
+                estimatedRemainingGasolineRangeKmInput = value,
                 message = null,
             )
         }
@@ -324,6 +483,10 @@ class RoutePlannerViewModel(
         val remainingRangeKm = state.estimatedRemainingRangeKmInput.parseDecimal()
         val reserveRangeKm = state.reserveRangeKmInput.parseDecimal()
         val detourMinutes = state.maximumDetourMinutesInput.parseDecimal()
+        val gasolineInputPresent = state.estimatedRemainingGasolineRangeKmInput.isNotBlank()
+        val remainingGasolineRangeKm = state.estimatedRemainingGasolineRangeKmInput.parseDecimal()
+        val effectiveGasolineRangeKm = state.effectiveGasolineRangeKmInput.parseDecimal()
+        val gasolineReserveRangeKm = state.gasolineReserveRangeKmInput.parseDecimal()
         val validationMessage = when {
             effectiveRangeKm == null || effectiveRangeKm <= 0 || effectiveRangeKm > 2_000 -> {
                 "Inserisci un'autonomia effettiva maggiore di 0 e fino a 2.000 km."
@@ -340,6 +503,20 @@ class RoutePlannerViewModel(
             reserveRangeKm >= remainingRangeKm -> {
                 "La riserva deve essere inferiore all'autonomia residua."
             }
+            gasolineInputPresent && state.vehicleProfiles.selectedProfile == null -> {
+                "Seleziona un profilo mezzo per usare il fallback benzina."
+            }
+            gasolineInputPresent && (
+                remainingGasolineRangeKm == null || remainingGasolineRangeKm <= 0
+            ) -> "Inserisci l'autonomia benzina residua stimata, maggiore di 0 km."
+            gasolineInputPresent && (
+                effectiveGasolineRangeKm == null ||
+                    requireNotNull(remainingGasolineRangeKm) > effectiveGasolineRangeKm
+            ) -> "L'autonomia benzina residua supera il massimo del profilo selezionato."
+            gasolineInputPresent && (
+                gasolineReserveRangeKm == null ||
+                    gasolineReserveRangeKm >= requireNotNull(remainingGasolineRangeKm)
+            ) -> "La riserva benzina deve essere inferiore all'autonomia residua."
             detourMinutes == null || detourMinutes < 0 || detourMinutes > 240 -> {
                 "Inserisci un tempo massimo di deviazione tra 0 e 240 minuti."
             }
@@ -372,6 +549,16 @@ class RoutePlannerViewModel(
                     reserveCngRangeKm = requireNotNull(reserveRangeKm),
                     maximumDetourMinutes = requireNotNull(detourMinutes),
                     departureAt = OffsetDateTime.now(clock),
+                    estimatedRemainingGasolineRangeKm = if (gasolineInputPresent) {
+                        remainingGasolineRangeKm
+                    } else {
+                        null
+                    },
+                    reserveGasolineRangeKm = if (gasolineInputPresent) {
+                        gasolineReserveRangeKm
+                    } else {
+                        null
+                    },
                 )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = if (suggestion.state == PredictiveSuggestionState.SUGGESTED) {
@@ -520,6 +707,10 @@ class RoutePlannerViewModel(
                 stage = PlannerStage.PREVIEW,
                 message = null,
             )
+            PlannerStage.VEHICLE_PROFILES -> mutableUiState.value.copy(
+                stage = PlannerStage.PREVIEW,
+                message = null,
+            )
             PlannerStage.CNG_CANDIDATES -> mutableUiState.value.copy(
                 stage = PlannerStage.CONFIGURE_CNG,
                 message = null,
@@ -573,6 +764,19 @@ class RoutePlannerViewModel(
             stage = PlannerStage.NAVIGATION_PREVIEW,
             message = null,
         )
+    }
+
+    fun openGasolineFallbackNavigation() {
+        val state = mutableUiState.value
+        val fallback = state.predictiveSuggestion?.gasolineFallback
+        if (
+            state.stage != PlannerStage.PREDICTIVE_STATUS ||
+            state.isBusy ||
+            fallback == null
+        ) return
+        val route = state.baseRoute?.toNavigationRoute(gasolineFallback = fallback) ?: return
+        navigationSession.preview(route)
+        mutableUiState.value = state.copy(stage = PlannerStage.NAVIGATION_PREVIEW, message = null)
     }
 
     fun startNavigation() {
@@ -654,6 +858,7 @@ class RoutePlannerViewModel(
     class Factory(
         private val routingRepository: RoutingRepository,
         private val navigationSession: NavigationSession,
+        private val vehicleProfileRepository: VehicleProfileRepository,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -663,6 +868,7 @@ class RoutePlannerViewModel(
             return RoutePlannerViewModel(
                 routingRepository = routingRepository,
                 navigationSession = navigationSession,
+                vehicleProfileRepository = vehicleProfileRepository,
             ) as T
         }
     }
@@ -705,6 +911,26 @@ private fun String.isCoordinateInput(): Boolean = matches(Regex("^-?[0-9]{0,3}([
 private fun String.parseDecimal(): Double? = replace(',', '.').toDoubleOrNull()
 
 private fun Double.toCoordinateInput(): String = "%.6f".format(java.util.Locale.US, this)
+
+private fun Double.toInput(): String = if (this % 1.0 == 0.0) {
+    toInt().toString()
+} else {
+    toString()
+}
+
+private fun RoutePlannerUiState.withVehicleProfiles(
+    profiles: VehicleProfiles,
+): RoutePlannerUiState {
+    val selected = profiles.selectedProfile
+    return copy(
+        vehicleProfiles = profiles,
+        effectiveRangeKmInput = selected?.effectiveCngRangeKm?.toInput()
+            ?: effectiveRangeKmInput,
+        reserveRangeKmInput = selected?.cngReserveKm?.toInput() ?: reserveRangeKmInput,
+        effectiveGasolineRangeKmInput = selected?.effectiveGasolineRangeKm?.toInput().orEmpty(),
+        gasolineReserveRangeKmInput = selected?.gasolineReserveKm?.toInput().orEmpty(),
+    )
+}
 
 private fun RoutePreviewFailure.baseRouteMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile contattare il server Compass."

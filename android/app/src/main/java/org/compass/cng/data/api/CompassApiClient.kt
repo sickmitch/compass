@@ -99,6 +99,8 @@ class CompassApiClient(
         maximumDetourMinutes: Double,
         departureAt: String,
         excludedMimitStationIds: Set<String> = emptySet(),
+        estimatedRemainingGasolineRangeKm: Double? = null,
+        reserveGasolineRangeKm: Double? = null,
     ): ApiPredictiveCandidates {
         val payload = PredictiveCandidatesRequestDto(
             origin = origin.toDto(),
@@ -108,6 +110,8 @@ class CompassApiClient(
             effectiveCngRangeKm = effectiveCngRangeKm,
             estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
             reserveCngRangeKm = reserveCngRangeKm,
+            estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
+            reserveGasolineRangeKm = reserveGasolineRangeKm,
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt,
             includeClosed = false,
@@ -281,6 +285,9 @@ private data class PredictiveCandidatesRequestDto(
     @SerialName("estimated_remaining_cng_range_km")
     val estimatedRemainingCngRangeKm: Double,
     @SerialName("reserve_cng_range_km") val reserveCngRangeKm: Double,
+    @SerialName("estimated_remaining_gasoline_range_km")
+    val estimatedRemainingGasolineRangeKm: Double?,
+    @SerialName("reserve_gasoline_range_km") val reserveGasolineRangeKm: Double?,
     @SerialName("maximum_detour_minutes") val maximumDetourMinutes: Double,
     @SerialName("departure_at") val departureAt: String,
     @SerialName("include_closed") val includeClosed: Boolean,
@@ -639,6 +646,20 @@ private data class PredictiveCandidatesResponseDto(
     @SerialName("ranking_evaluation") val rankingEvaluation: RankingEvaluationMetricsDto,
     val candidates: List<PredictiveRankedCandidateDto>,
     val itinerary: PredictiveItineraryDto?,
+    @SerialName("gasoline_fallback") val gasolineFallback: GasolineFallbackDto? = null,
+)
+
+@Serializable
+private data class GasolineFallbackDto(
+    @SerialName("estimated_remaining_gasoline_range_km")
+    val estimatedRemainingGasolineRangeKm: Double,
+    @SerialName("reserve_gasoline_range_km") val reserveGasolineRangeKm: Double,
+    @SerialName("usable_gasoline_range_km") val usableGasolineRangeKm: Double,
+    @SerialName("cng_range_used_before_switch_km") val cngRangeUsedBeforeSwitchKm: Double,
+    @SerialName("required_gasoline_range_km") val requiredGasolineRangeKm: Double,
+    @SerialName("gasoline_margin_at_destination_km")
+    val gasolineMarginAtDestinationKm: Double,
+    val strategy: String,
 )
 
 @Serializable
@@ -790,6 +811,7 @@ private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPred
         suggestionState in setOf(
             "not_needed",
             "suggested",
+            "gasoline_fallback",
             "no_reachable_station",
             "no_eligible_station",
             "no_complete_itinerary",
@@ -806,6 +828,9 @@ private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPred
     ) { "not-needed response must prove destination reachability" }
     require((suggestionState == "suggested") == (itinerary != null)) {
         "only a suggested response may contain a complete itinerary"
+    }
+    require((suggestionState == "gasoline_fallback") == (gasolineFallback != null)) {
+        "only a gasoline fallback response may contain gasoline metrics"
     }
     val usableMeters = rangeBasis.usableRangeBeforeReserveKm * 1_000
     candidates.forEach { predictive ->
@@ -842,6 +867,17 @@ private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPred
             )
         },
         itinerary = itinerary?.toApiPredictiveItinerary(),
+        gasolineFallback = gasolineFallback?.let {
+            ApiGasolineFallback(
+                estimatedRemainingGasolineRangeKm = it.estimatedRemainingGasolineRangeKm,
+                reserveGasolineRangeKm = it.reserveGasolineRangeKm,
+                usableGasolineRangeKm = it.usableGasolineRangeKm,
+                cngRangeUsedBeforeSwitchKm = it.cngRangeUsedBeforeSwitchKm,
+                requiredGasolineRangeKm = it.requiredGasolineRangeKm,
+                gasolineMarginAtDestinationKm = it.gasolineMarginAtDestinationKm,
+                strategy = it.strategy,
+            )
+        },
     )
 }
 

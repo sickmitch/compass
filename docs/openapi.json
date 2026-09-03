@@ -885,6 +885,57 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "GasolineFallbackResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cng_range_used_before_switch_km": {
+            "minimum": 0.0,
+            "title": "Cng Range Used Before Switch Km",
+            "type": "number"
+          },
+          "estimated_remaining_gasoline_range_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Estimated Remaining Gasoline Range Km",
+            "type": "number"
+          },
+          "gasoline_margin_at_destination_km": {
+            "minimum": 0.0,
+            "title": "Gasoline Margin At Destination Km",
+            "type": "number"
+          },
+          "required_gasoline_range_km": {
+            "minimum": 0.0,
+            "title": "Required Gasoline Range Km",
+            "type": "number"
+          },
+          "reserve_gasoline_range_km": {
+            "minimum": 0.0,
+            "title": "Reserve Gasoline Range Km",
+            "type": "number"
+          },
+          "strategy": {
+            "const": "direct_after_cng_reserve",
+            "title": "Strategy",
+            "type": "string"
+          },
+          "usable_gasoline_range_km": {
+            "exclusiveMinimum": 0.0,
+            "title": "Usable Gasoline Range Km",
+            "type": "number"
+          }
+        },
+        "required": [
+          "estimated_remaining_gasoline_range_km",
+          "reserve_gasoline_range_km",
+          "usable_gasoline_range_km",
+          "cng_range_used_before_switch_km",
+          "required_gasoline_range_km",
+          "gasoline_margin_at_destination_km",
+          "strategy"
+        ],
+        "title": "GasolineFallbackResponse",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "data": {
@@ -1465,6 +1516,20 @@
             "title": "Estimated Remaining Cng Range Km",
             "type": "number"
           },
+          "estimated_remaining_gasoline_range_km": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caller-estimated gasoline range remaining at the request origin. Supplying it enables an explicit direct-route fallback only when no complete CNG itinerary exists.",
+            "title": "Estimated Remaining Gasoline Range Km"
+          },
           "excluded_mimit_station_ids": {
             "description": "Official MIMIT station IDs that must not be considered for this replacement plan.",
             "items": {
@@ -1509,6 +1574,20 @@
             "minimum": 0.0,
             "title": "Reserve Cng Range Km",
             "type": "number"
+          },
+          "reserve_gasoline_range_km": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 2000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Gasoline safety range that must remain at the destination.",
+            "title": "Reserve Gasoline Range Km"
           }
         },
         "required": [
@@ -1554,6 +1633,16 @@
             "title": "Excluded Mimit Station Ids",
             "type": "array"
           },
+          "gasoline_fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GasolineFallbackResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "itinerary": {
             "anyOf": [
               {
@@ -1597,6 +1686,7 @@
             "enum": [
               "not_needed",
               "suggested",
+              "gasoline_fallback",
               "no_reachable_station",
               "no_eligible_station",
               "no_complete_itinerary"
@@ -1620,7 +1710,8 @@
           "ranking_policy",
           "ranking_evaluation",
           "candidates",
-          "itinerary"
+          "itinerary",
+          "gasoline_fallback"
         ],
         "title": "PredictiveCandidatesResponse",
         "type": "object"

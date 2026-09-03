@@ -48,6 +48,9 @@ reachability and Android route-endpoint editing:
   two preserved maneuver legs;
 - strict mobile workflow state, contract tests and an executable Phase 9 API/device gate.
 - a strict predictive API using caller-estimated remaining range and an explicit safety reserve;
+- persistent Android vehicle profiles for per-vehicle CNG/gasoline full-range and reserve defaults;
+- an explicit gasoline direct-route fallback, used only when complete CNG planning fails and both
+  fuel reserves remain protected;
 - complete road-network refuelling-chain search with explicit suggestion/no-suggestion states, a
   full-refill assumption and an optimized destination-reachable fast path;
 - an independently range-validated multi-waypoint route through ordered official MIMIT IDs;

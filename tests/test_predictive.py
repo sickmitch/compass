@@ -133,6 +133,8 @@ def _request(
     reserve_km: float = 30,
     *,
     effective_range_km: float = 300,
+    remaining_gasoline_km: float | None = None,
+    reserve_gasoline_km: float | None = None,
 ) -> PredictiveCandidatesRequest:
     return PredictiveCandidatesRequest(
         ranked_request=RankedCandidatesRequest(
@@ -150,6 +152,8 @@ def _request(
         ),
         estimated_remaining_cng_range_km=remaining_km,
         reserve_cng_range_km=reserve_km,
+        estimated_remaining_gasoline_range_km=remaining_gasoline_km,
+        reserve_gasoline_range_km=reserve_gasoline_km,
     )
 
 
@@ -161,6 +165,8 @@ def _evaluate(
     opening_hours: str | None = None,
     effective_range_km: float = 300,
     network_result: NetworkDetourResult | None = None,
+    remaining_gasoline_km: float | None = None,
+    reserve_gasoline_km: float | None = None,
 ):
     network_calls = 0
     base_route_calls = 0
@@ -233,6 +239,8 @@ def _evaluate(
                 remaining_km,
                 reserve_km,
                 effective_range_km=effective_range_km,
+                remaining_gasoline_km=remaining_gasoline_km,
+                reserve_gasoline_km=reserve_gasoline_km,
             ),
             corridor_policy=CorridorPolicy(),
             detour_policy=NetworkDetourPolicy(),
@@ -354,6 +362,66 @@ def test_reachable_first_station_without_complete_chain_is_not_suggested(
     assert result.reachability.pairwise_matrix_calls == 1
 
 
+def test_gasoline_fallback_is_explicit_when_no_complete_cng_chain_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    network = _network_result((20_000, 100_000, 180_000))
+
+    result, _, _, _ = _evaluate(
+        monkeypatch,
+        remaining_km=65,
+        reserve_km=30,
+        effective_range_km=100,
+        network_result=network,
+        remaining_gasoline_km=220,
+        reserve_gasoline_km=30,
+    )
+
+    assert result.suggestion_state == "gasoline_fallback"
+    assert result.candidates == ()
+    assert result.itinerary is None
+    assert result.gasoline_fallback is not None
+    assert result.gasoline_fallback.usable_gasoline_range_km == 190
+    assert result.gasoline_fallback.cng_range_used_before_switch_km == 35
+    assert result.gasoline_fallback.required_gasoline_range_km == 175
+    assert result.gasoline_fallback.gasoline_margin_at_destination_km == 15
+
+
+def test_gasoline_does_not_mask_an_existing_complete_cng_itinerary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _, _, _ = _evaluate(
+        monkeypatch,
+        remaining_km=65,
+        reserve_km=30,
+        effective_range_km=100,
+        network_result=_network_result((20_000, 80_000, 140_000)),
+        remaining_gasoline_km=220,
+        reserve_gasoline_km=30,
+    )
+
+    assert result.suggestion_state == "suggested"
+    assert result.itinerary is not None
+    assert result.gasoline_fallback is None
+
+
+def test_insufficient_gasoline_preserves_the_cng_failure_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _, _, _ = _evaluate(
+        monkeypatch,
+        remaining_km=65,
+        reserve_km=30,
+        effective_range_km=100,
+        network_result=_network_result((20_000, 100_000, 180_000)),
+        remaining_gasoline_km=100,
+        reserve_gasoline_km=30,
+    )
+
+    assert result.suggestion_state == "no_complete_itinerary"
+    assert result.gasoline_fallback is None
+
+
 def test_no_station_before_reserve_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
     result, loaded_station_ids, network_calls, base_route_calls = _evaluate(
         monkeypatch,
@@ -400,6 +468,22 @@ def test_predictive_request_rejects_impossible_range_state(
 ) -> None:
     with pytest.raises(ValueError):
         _request(remaining_km, reserve_km)
+
+
+@pytest.mark.parametrize(
+    ("remaining_gasoline_km", "reserve_gasoline_km"),
+    [(100, None), (None, 20), (0, 0), (100, -1), (100, 100)],
+)
+def test_predictive_request_rejects_impossible_gasoline_state(
+    remaining_gasoline_km: float | None,
+    reserve_gasoline_km: float | None,
+) -> None:
+    with pytest.raises(ValueError):
+        _request(
+            120,
+            remaining_gasoline_km=remaining_gasoline_km,
+            reserve_gasoline_km=reserve_gasoline_km,
+        )
 
 
 def _api_payload() -> dict[str, object]:
@@ -499,6 +583,67 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
     assert body["ranking_evaluation"]["enrichment_queries"] == 1
     assert [stop["mimit_station_id"] for stop in body["itinerary"]["stops"]] == ["1001"]
     assert body["itinerary"]["destination_leg"]["reserve_margin_at_arrival_km"] == 110
+    assert body["gasoline_fallback"] is None
+
+
+def test_predictive_api_forwards_gasoline_fallback_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _, _, _ = _evaluate(
+        monkeypatch,
+        remaining_km=65,
+        reserve_km=30,
+        effective_range_km=100,
+        network_result=_network_result((20_000, 100_000, 180_000)),
+        remaining_gasoline_km=220,
+        reserve_gasoline_km=30,
+    )
+
+    async def override_session() -> AsyncIterator[object]:
+        yield object()
+
+    async def override_provider() -> object:
+        return object()
+
+    async def override_settings() -> Settings:
+        return Settings(_env_file=None)
+
+    async def fake_predictive(*args: object, **kwargs: object):
+        request = args[2]
+        assert request.estimated_remaining_gasoline_range_km == 220  # type: ignore[attr-defined]
+        assert request.reserve_gasoline_range_km == 30  # type: ignore[attr-defined]
+        return result
+
+    monkeypatch.setattr(
+        "compass.api.predictive.evaluate_predictive_cng_candidates",
+        fake_predictive,
+    )
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        payload = _api_payload()
+        payload.update(
+            effective_cng_range_km=100,
+            estimated_remaining_cng_range_km=65,
+            estimated_remaining_gasoline_range_km=220,
+            reserve_gasoline_range_km=30,
+        )
+        response = _post_predictive(payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["suggestion_state"] == "gasoline_fallback"
+    assert response.json()["gasoline_fallback"] == {
+        "estimated_remaining_gasoline_range_km": 220.0,
+        "reserve_gasoline_range_km": 30.0,
+        "usable_gasoline_range_km": 190.0,
+        "cng_range_used_before_switch_km": 35.0,
+        "required_gasoline_range_km": 175.0,
+        "gasoline_margin_at_destination_km": 15.0,
+        "strategy": "direct_after_cng_reserve",
+    }
 
 
 @pytest.mark.parametrize(
@@ -506,6 +651,7 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
     [
         ("estimated_remaining_cng_range_km", 301),
         ("reserve_cng_range_km", 120),
+        ("estimated_remaining_gasoline_range_km", 100),
         ("excluded_mimit_station_ids", ["1001", "1001"]),
         ("excluded_mimit_station_ids", ["not-an-official-id"]),
         ("unknown_policy", True),

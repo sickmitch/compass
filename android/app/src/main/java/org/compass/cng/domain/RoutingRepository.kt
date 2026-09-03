@@ -37,6 +37,8 @@ interface RoutingRepository {
         maximumDetourMinutes: Double,
         departureAt: OffsetDateTime,
         excludedMimitStationIds: Set<String> = emptySet(),
+        estimatedRemainingGasolineRangeKm: Double? = null,
+        reserveGasolineRangeKm: Double? = null,
     ): PredictiveCngSuggestion
 
     suspend fun routeWithCngItinerary(

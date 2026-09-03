@@ -170,5 +170,21 @@ internal fun predictiveResponseFixture(
         } else {
             put("itinerary", null)
         }
+        if (suggestionState == "gasoline_fallback") {
+            put(
+                "gasoline_fallback",
+                buildJsonObject {
+                    put("estimated_remaining_gasoline_range_km", 200.0)
+                    put("reserve_gasoline_range_km", 30.0)
+                    put("usable_gasoline_range_km", 170.0)
+                    put("cng_range_used_before_switch_km", 90.0)
+                    put("required_gasoline_range_km", 120.925)
+                    put("gasoline_margin_at_destination_km", 49.075)
+                    put("strategy", "direct_after_cng_reserve")
+                },
+            )
+        } else {
+            put("gasoline_fallback", null)
+        }
     }.toString()
 }

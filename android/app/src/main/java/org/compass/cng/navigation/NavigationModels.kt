@@ -1,6 +1,7 @@
 package org.compass.cng.navigation
 
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.RoutePreview
@@ -68,6 +69,7 @@ data class NavigationRoute(
     val fuelPlan: NavigationFuelPlan? = null,
     val timing: NavigationTiming,
     val provider: String,
+    val gasolineFallback: GasolineFallback? = null,
 ) {
     fun asRoutePreview(): RoutePreview = RoutePreview(
         origin = origin,
@@ -154,11 +156,14 @@ data class NavigationFuelStopProgress(
     val distanceRemainingMeters: Double,
 )
 
-fun RoutePreview.toNavigationRoute(): NavigationRoute = buildNavigationRoute(
+fun RoutePreview.toNavigationRoute(
+    gasolineFallback: GasolineFallback? = null,
+): NavigationRoute = buildNavigationRoute(
     route = this,
     sourceLegs = listOf(this),
     stops = emptyList(),
     rangeLegs = emptyList(),
+    gasolineFallback = gasolineFallback,
 )
 
 fun RouteWithCngStop.toNavigationRoute(): NavigationRoute = buildNavigationRoute(
@@ -193,6 +198,7 @@ private fun buildNavigationRoute(
     rangeLegs: List<NavigationRangeLeg>,
     maximumDetourMinutes: Double? = null,
     excludedMimitStationIds: Set<String> = emptySet(),
+    gasolineFallback: GasolineFallback? = null,
 ): NavigationRoute {
     require(sourceLegs.isNotEmpty()) { "navigation route needs at least one leg" }
     val navigationLegs = mutableListOf<NavigationLeg>()
@@ -248,6 +254,7 @@ private fun buildNavigationRoute(
         },
         timing = route.navigation,
         provider = route.provider,
+        gasolineFallback = gasolineFallback,
     )
 }
 

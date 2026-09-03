@@ -309,6 +309,44 @@ class CompassApiClientTest {
     }
 
     @Test
+    fun postsAndMapsExplicitGasolineFallback() = runTest {
+        server.enqueue(
+            successResponse(
+                predictiveResponseFixture(
+                    resource("ranked-candidates-response.json"),
+                    suggestionState = "gasoline_fallback",
+                ),
+            ),
+        )
+        val client = client()
+
+        val result = client.getPredictiveCngCandidates(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+            effectiveCngRangeKm = 300.0,
+            estimatedRemainingCngRangeKm = 120.0,
+            reserveCngRangeKm = 30.0,
+            maximumDetourMinutes = 10.0,
+            departureAt = "2026-08-30T10:00:00+02:00",
+            estimatedRemainingGasolineRangeKm = 200.0,
+            reserveGasolineRangeKm = 30.0,
+        )
+
+        assertEquals("gasoline_fallback", result.suggestionState)
+        assertEquals(120.925, result.gasolineFallback?.requiredGasolineRangeKm ?: -1.0, 0.0)
+        assertEquals("direct_after_cng_reserve", result.gasolineFallback?.strategy)
+        val request = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals(
+            "200.0",
+            request.getValue("estimated_remaining_gasoline_range_km").jsonPrimitive.content,
+        )
+        assertEquals(
+            "30.0",
+            request.getValue("reserve_gasoline_range_km").jsonPrimitive.content,
+        )
+    }
+
+    @Test
     fun postsOrderedMultiStopRangeRequestAndMapsValidatedLegs() = runTest {
         server.enqueue(successResponse(resource("route-with-cng-itinerary-response.json")))
         val client = client()

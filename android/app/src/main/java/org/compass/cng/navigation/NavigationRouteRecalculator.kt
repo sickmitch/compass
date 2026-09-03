@@ -45,7 +45,9 @@ class CompassNavigationRouteRecalculator(
         } ?: route.origin
         val remainingStops = remainingFuelStops(state)
         return when (remainingStops.size) {
-            0 -> routingRepository.previewRoute(origin, route.destination).toNavigationRoute()
+            0 -> routingRepository.previewRoute(origin, route.destination).toNavigationRoute(
+                gasolineFallback = route.gasolineFallback,
+            )
             1 -> routingRepository.routeWithCngStop(
                 origin = origin,
                 destination = route.destination,
@@ -114,6 +116,7 @@ class CompassNavigationRouteRecalculator(
             PredictiveSuggestionState.NO_REACHABLE_STATION,
             PredictiveSuggestionState.NO_ELIGIBLE_STATION,
             PredictiveSuggestionState.NO_COMPLETE_ITINERARY,
+            PredictiveSuggestionState.GASOLINE_FALLBACK,
             -> return FuelStopReplacementResult.NoSafeAlternative
         }
         return FuelStopReplacementResult.Replaced(

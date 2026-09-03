@@ -10,6 +10,7 @@ import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.CngPrice
+import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
@@ -36,6 +37,8 @@ import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.navigation.NavigationPhase
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.toNavigationRoute
+import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
+import org.compass.cng.domain.vehicle.VehicleProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -193,6 +196,79 @@ class RoutePlannerViewModelTest {
             "Inserisci l'autonomia CNG residua stimata, maggiore di 0 km.",
             viewModel.uiState.value.message,
         )
+    }
+
+    @Test
+    fun selectedVehicleProfilePrefillsCngAndGasolinePolicyAcrossViewModels() = runTest {
+        val profiles = InMemoryVehicleProfileRepository()
+        val first = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(Result.success(sampleRoute())),
+            vehicleProfileRepository = profiles,
+        )
+        first.openVehicleProfiles()
+        first.updateVehicleProfileName("Panda Natural Power")
+        first.updateVehicleProfileCngRange("240")
+        first.updateVehicleProfileCngReserve("25")
+        first.updateVehicleProfileGasolineRange("520")
+        first.updateVehicleProfileGasolineReserve("50")
+
+        first.saveVehicleProfile()
+
+        assertEquals("Panda Natural Power", first.uiState.value.vehicleProfiles.selectedProfile?.name)
+        assertEquals("240", first.uiState.value.effectiveRangeKmInput)
+        assertEquals("25", first.uiState.value.reserveRangeKmInput)
+        assertEquals("520", first.uiState.value.effectiveGasolineRangeKmInput)
+        assertEquals("50", first.uiState.value.gasolineReserveRangeKmInput)
+
+        val recreated = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(Result.success(sampleRoute())),
+            vehicleProfileRepository = profiles,
+        )
+        assertEquals("Panda Natural Power", recreated.uiState.value.vehicleProfiles.selectedProfile?.name)
+        assertEquals("240", recreated.uiState.value.effectiveRangeKmInput)
+        assertEquals("50", recreated.uiState.value.gasolineReserveRangeKmInput)
+    }
+
+    @Test
+    fun gasolineFallbackUsesProfileReserveAndStaysVisibleInNavigation() = runTest {
+        val fallback = GasolineFallback(
+            estimatedRemainingGasolineRangeKm = 220.0,
+            reserveGasolineRangeKm = 30.0,
+            usableGasolineRangeKm = 190.0,
+            cngRangeUsedBeforeSwitchKm = 35.0,
+            requiredGasolineRangeKm = 175.0,
+            gasolineMarginAtDestinationKm = 15.0,
+            strategy = "direct_after_cng_reserve",
+        )
+        val suggestion = samplePredictiveSuggestion(
+            PredictiveSuggestionState.NO_COMPLETE_ITINERARY,
+        ).copy(
+            state = PredictiveSuggestionState.GASOLINE_FALLBACK,
+            gasolineFallback = fallback,
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
+            predictiveResult = Result.success(suggestion),
+        )
+        val profiles = InMemoryVehicleProfileRepository().apply {
+            save(VehicleProfile("panda", "Panda", 300.0, 30.0, 500.0, 30.0))
+        }
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            vehicleProfileRepository = profiles,
+        )
+        viewModel.openPredictiveRange()
+        viewModel.updateEstimatedRemainingRange("120")
+        viewModel.updateEstimatedRemainingGasolineRange("220")
+
+        viewModel.evaluatePredictiveRange()
+
+        assertEquals(220.0, requireNotNull(repository.lastRemainingGasolineRangeKm), 0.0)
+        assertEquals(30.0, requireNotNull(repository.lastGasolineReserveRangeKm), 0.0)
+        assertEquals(PlannerStage.PREDICTIVE_STATUS, viewModel.uiState.value.stage)
+        viewModel.openGasolineFallbackNavigation()
+        assertEquals(fallback, viewModel.navigationState.value.route?.gasolineFallback)
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, viewModel.uiState.value.stage)
     }
 
     @Test
@@ -479,6 +555,8 @@ class RoutePlannerViewModelTest {
         var lastSelectedStationId: String? = null
         var lastItineraryStationIds: List<String>? = null
         var lastItineraryEffectiveRangeKm = 0.0
+        var lastRemainingGasolineRangeKm: Double? = null
+        var lastGasolineReserveRangeKm: Double? = null
 
         override suspend fun previewRoute(
             origin: Coordinate,
@@ -547,6 +625,8 @@ class RoutePlannerViewModelTest {
             maximumDetourMinutes: Double,
             departureAt: OffsetDateTime,
             excludedMimitStationIds: Set<String>,
+            estimatedRemainingGasolineRangeKm: Double?,
+            reserveGasolineRangeKm: Double?,
         ): PredictiveCngSuggestion {
             predictiveCalls += 1
             lastPredictiveOrigin = origin
@@ -556,6 +636,8 @@ class RoutePlannerViewModelTest {
             lastReserveRangeKm = reserveCngRangeKm
             lastDetourMinutes = maximumDetourMinutes
             lastDepartureAt = departureAt
+            lastRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm
+            lastGasolineReserveRangeKm = reserveGasolineRangeKm
             val suggestion = predictiveResult.getOrThrow()
             val route = suggestion.baseRoute
             return if (route.origin == origin && route.destination == destination) {

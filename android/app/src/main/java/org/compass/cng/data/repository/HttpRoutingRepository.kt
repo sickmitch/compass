@@ -20,6 +20,7 @@ import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.OpeningAtEta
@@ -89,6 +90,8 @@ class HttpRoutingRepository(
         maximumDetourMinutes: Double,
         departureAt: OffsetDateTime,
         excludedMimitStationIds: Set<String>,
+        estimatedRemainingGasolineRangeKm: Double?,
+        reserveGasolineRangeKm: Double?,
     ): PredictiveCngSuggestion = mapFailures {
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
         require(
@@ -99,6 +102,16 @@ class HttpRoutingRepository(
         }
         require(reserveCngRangeKm >= 0 && reserveCngRangeKm < estimatedRemainingCngRangeKm) {
             "reserve range must be below remaining range"
+        }
+        require(
+            (estimatedRemainingGasolineRangeKm == null) == (reserveGasolineRangeKm == null),
+        ) { "gasoline remaining range and reserve must be supplied together" }
+        if (estimatedRemainingGasolineRangeKm != null && reserveGasolineRangeKm != null) {
+            require(
+                estimatedRemainingGasolineRangeKm > 0 &&
+                    reserveGasolineRangeKm >= 0 &&
+                    reserveGasolineRangeKm < estimatedRemainingGasolineRangeKm,
+            ) { "gasoline reserve must be below remaining range" }
         }
         require(maximumDetourMinutes >= 0) { "maximum detour must not be negative" }
         require(excludedMimitStationIds.size <= 32) {
@@ -118,6 +131,8 @@ class HttpRoutingRepository(
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt.toString(),
             excludedMimitStationIds = excludedMimitStationIds,
+            estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
+            reserveGasolineRangeKm = reserveGasolineRangeKm,
         )
         require(response.excludedMimitStationIds.toSet() == excludedMimitStationIds) {
             "server did not acknowledge the excluded MIMIT station IDs"
@@ -204,6 +219,21 @@ class HttpRoutingRepository(
                     totalDurationSeconds = itinerary.totalDurationSeconds,
                     refuelAssumption = itinerary.refuelAssumption,
                     distanceModel = itinerary.distanceModel,
+                )
+            },
+            gasolineFallback = response.gasolineFallback?.let { fallback ->
+                GasolineFallback(
+                    estimatedRemainingGasolineRangeKm = (
+                        fallback.estimatedRemainingGasolineRangeKm
+                    ),
+                    reserveGasolineRangeKm = fallback.reserveGasolineRangeKm,
+                    usableGasolineRangeKm = fallback.usableGasolineRangeKm,
+                    cngRangeUsedBeforeSwitchKm = fallback.cngRangeUsedBeforeSwitchKm,
+                    requiredGasolineRangeKm = fallback.requiredGasolineRangeKm,
+                    gasolineMarginAtDestinationKm = (
+                        fallback.gasolineMarginAtDestinationKm
+                    ),
+                    strategy = fallback.strategy,
                 )
             },
         )
@@ -501,6 +531,7 @@ private fun ApiCngPrice.toCngPrice(): CngPrice = CngPrice(
 private fun String.toPredictiveSuggestionState(): PredictiveSuggestionState = when (this) {
     "not_needed" -> PredictiveSuggestionState.NOT_NEEDED
     "suggested" -> PredictiveSuggestionState.SUGGESTED
+    "gasoline_fallback" -> PredictiveSuggestionState.GASOLINE_FALLBACK
     "no_reachable_station" -> PredictiveSuggestionState.NO_REACHABLE_STATION
     "no_eligible_station" -> PredictiveSuggestionState.NO_ELIGIBLE_STATION
     "no_complete_itinerary" -> PredictiveSuggestionState.NO_COMPLETE_ITINERARY
