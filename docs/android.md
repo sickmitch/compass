@@ -38,6 +38,26 @@ the driver and is optional; when present, Compass may offer a direct gasoline fa
 complete CNG itinerary exists and only if both reserves are preserved. The fallback remains labelled
 in navigation preview and active guidance.
 
+Phase 12 adds destination search and current-location origin selection. The search screen accepts
+addresses, localities, named POIs/businesses and coordinates, then displays only normalized Compass
+results. “Usa la posizione attuale” requests location permission when needed, acquires the first
+available GPS/network fix and writes it into the visible origin fields; the driver confirms it with
+“Calcola percorso”. Selecting a destination then reloads the base route and clears stale
+route-dependent planning state. Navigation startup independently requires the Android notification
+permission on API 33+, even when location was already granted. A debug off-route injection pauses
+demo fixes only while rerouting and resumes replay on the committed replacement route. Zero-cost
+routing responses are rejected as non-navigable. The
+navigation preview separately shows driving time, traffic-delay availability, cumulative CNG dwell
+and total trip duration.
+
+Phase 13 adds durable, versioned private-device caching for the active route, geometry, maneuvers,
+planned CNG waypoints and range policy. A process restart restores an explicitly cached preview;
+`Termina navigazione` clears it. Exact recent place queries can fall back to one of the ten cached
+result sets only after a network/server failure. The active screen distinguishes local cached-route
+guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
+ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
+Android version is `0.10.0` (`versionCode=11`).
+
 ## Navigation Stage 1 device gate
 
 If the backend is remote, first keep this tunnel open in a separate terminal:
@@ -124,6 +144,42 @@ replacement start/commit events, confirms foreground-service continuity, exercis
 range-plan guard, and checks final service/notification teardown. See
 `docs/phases/navigation-stage-4-acceptance.md` for the three required screenshots and diagnostics.
 
+## Phase 12 device gate
+
+After rebuilding/restarting the synchronized API, run from the repository root with the same JDK,
+SDK and optional SSH tunnel used by prior navigation gates:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-phase12-live.sh
+```
+
+The preflight performs real address/locality/POI/coordinate searches, requests a final A-to-B route
+and validates one/multiple-stop journey chronology. It then builds, installs and pauses for the
+current-location, destination-search, maneuver-progress, CNG-preserving reroute, invalid-stop
+replacement and lifecycle checks. Filtered API/navigation logs are captured continuously during
+the operator steps so early search evidence cannot be evicted from logcat. Return the complete
+output and eight requested screenshots. See
+`docs/phases/phase-12-acceptance.md`; the operator accepted this gate on 2026-09-03.
+
+## Phase 13 degraded/offline device gate
+
+Run from the repository root with the same toolchain and loopback/SSH setup:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-phase13-live.sh
+```
+
+The runner populates search and active-route caches, removes only `adb reverse`, validates degraded
+navigation, force-stops/reopens Compass while offline, and then restores connectivity. It captures
+bounded client/navigation/map-cache logs and asks for screenshots A–G. See
+`docs/phases/phase-13-acceptance.md`. The operator accepted this gate on 2026-09-03.
+
 ## Required toolchain
 
 - JDK 17;
@@ -183,6 +239,15 @@ cd android
 ./gradlew --no-daemon \
 -PCOMPASS_MAP_STYLE_URL=https://maps.example.test/style.json \
 assembleDebug
+cd ..
+```
+
+MapLibre caches resources visited during normal use. Its size defaults to 100 MiB and can be changed
+at build time (16–1,024 MiB):
+
+```bash
+cd android
+./gradlew --no-daemon -PCOMPASS_MAP_AMBIENT_CACHE_MB=200 assembleDebug
 cd ..
 ```
 

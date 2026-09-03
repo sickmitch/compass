@@ -193,6 +193,7 @@ data class PredictiveItineraryStop(
     val operator: String?,
     val osmMatchConfidence: Double?,
     val price: CngPrice?,
+    val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 ) {
     init {
         require(sequence > 0) { "itinerary stop sequence must be positive" }
@@ -205,6 +206,7 @@ data class PredictiveItineraryStop(
         require(estimatedRemainingRangeAtArrivalKm >= 0 && reserveMarginAtArrivalKm >= 0) {
             "itinerary stop must be reachable while preserving reserve"
         }
+        require(dwellTimeSeconds >= 0) { "itinerary stop dwell must not be negative" }
     }
 }
 
@@ -234,6 +236,10 @@ data class PredictiveCngItinerary(
     val destinationLeg: PredictiveDestinationLeg,
     val totalDistanceMeters: Double,
     val totalDurationSeconds: Double,
+    val totalRefuelingDwellSeconds: Double = stops.sumOf {
+        it.dwellTimeSeconds.toDouble()
+    },
+    val totalTripDurationSeconds: Double = totalDurationSeconds + totalRefuelingDwellSeconds,
     val refuelAssumption: String,
     val distanceModel: String,
 ) {
@@ -249,6 +255,17 @@ data class PredictiveCngItinerary(
         require(totalDistanceMeters >= 0 && totalDurationSeconds >= 0) {
             "predictive itinerary total cost must not be negative"
         }
+        require(totalRefuelingDwellSeconds >= 0 && totalTripDurationSeconds >= 0) {
+            "predictive itinerary dwell and trip duration must not be negative"
+        }
+        require(
+            abs(stops.sumOf { it.dwellTimeSeconds.toDouble() } - totalRefuelingDwellSeconds) <=
+                COST_SUM_TOLERANCE,
+        ) { "predictive itinerary dwell does not reconcile with its stops" }
+        require(
+            abs(totalDurationSeconds + totalRefuelingDwellSeconds - totalTripDurationSeconds) <=
+                COST_SUM_TOLERANCE,
+        ) { "predictive itinerary total time must include driving and dwell" }
         require(
             abs(
                 stops.sumOf(PredictiveItineraryStop::legDistanceMeters) +
@@ -329,7 +346,7 @@ data class SelectedCngStop(
     val province: String?,
     val location: Coordinate,
     val expectedArrivalAt: OffsetDateTime? = null,
-    val dwellTimeSeconds: Int = 20 * 60,
+    val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 )
 
 enum class CngRouteLegKind {

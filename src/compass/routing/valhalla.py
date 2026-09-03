@@ -287,9 +287,13 @@ def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
         if len(legs) != 1:
             raise RoutingProviderError("A base route must contain exactly one leg")
         leg = _parse_leg(_mapping(legs[0], "trip.legs[0]"), leg_index=0)
+        distance_meters = _number(summary["length"], "trip.summary.length") * 1000
+        duration_seconds = _number(summary["time"], "trip.summary.time")
+        if distance_meters <= 0 or duration_seconds <= 0:
+            raise RoutingProviderError("Valhalla returned a non-navigable zero-cost route")
         return BaseRoute(
-            distance_meters=_number(summary["length"], "trip.summary.length") * 1000,
-            duration_seconds=_number(summary["time"], "trip.summary.time"),
+            distance_meters=distance_meters,
+            duration_seconds=duration_seconds,
             encoded_polyline=leg.encoded_polyline,
             maneuvers=leg.maneuvers,
             provider="valhalla",
@@ -341,9 +345,13 @@ def _parse_leg(value: Mapping[str, Any], *, leg_index: int) -> RouteLeg:
         )
         if not maneuvers:
             raise RoutingProviderError(f"{field} must contain at least one maneuver")
+        distance_meters = _number(summary["length"], f"{field}.summary.length") * 1000
+        duration_seconds = _number(summary["time"], f"{field}.summary.time")
+        if distance_meters <= 0 or duration_seconds <= 0:
+            raise RoutingProviderError(f"{field} contains a non-navigable zero-cost route")
         return RouteLeg(
-            distance_meters=_number(summary["length"], f"{field}.summary.length") * 1000,
-            duration_seconds=_number(summary["time"], f"{field}.summary.time"),
+            distance_meters=distance_meters,
+            duration_seconds=duration_seconds,
             encoded_polyline=shape,
             maneuvers=maneuvers,
         )

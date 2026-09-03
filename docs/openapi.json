@@ -172,7 +172,6 @@
         "additionalProperties": false,
         "properties": {
           "dwell_time_seconds": {
-            "default": 1200,
             "minimum": 0.0,
             "title": "Dwell Time Seconds",
             "type": "integer"
@@ -241,6 +240,7 @@
           "municipality",
           "province",
           "location",
+          "dwell_time_seconds",
           "sequence"
         ],
         "title": "CngItineraryStopResponse",
@@ -936,6 +936,19 @@
         "title": "GasolineFallbackResponse",
         "type": "object"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "data": {
@@ -1214,6 +1227,27 @@
             "title": "Total Trip Duration Seconds",
             "type": "number"
           },
+          "traffic_delay_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traffic Delay Seconds"
+          },
+          "traffic_delay_state": {
+            "default": "unavailable",
+            "enum": [
+              "unavailable",
+              "estimated"
+            ],
+            "title": "Traffic Delay State",
+            "type": "string"
+          },
           "trip_arrival_at": {
             "anyOf": [
               {
@@ -1482,6 +1516,119 @@
           "warnings"
         ],
         "title": "OpeningHoursEvaluationResponse",
+        "type": "object"
+      },
+      "PlaceSearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/PlaceSearchResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "results"
+        ],
+        "title": "PlaceSearchResponse",
+        "type": "object"
+      },
+      "PlaceSearchResultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "address",
+              "locality",
+              "poi",
+              "coordinate",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          },
+          "poi_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poi Name"
+          },
+          "provider": {
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_place_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Place Id"
+          },
+          "result_id": {
+            "minLength": 1,
+            "title": "Result Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result_id",
+          "display_name",
+          "address",
+          "location",
+          "kind",
+          "category",
+          "poi_name",
+          "provider",
+          "provider_place_id"
+        ],
+        "title": "PlaceSearchResultResponse",
         "type": "object"
       },
       "PredictiveCandidatesApiRequest": {
@@ -1794,6 +1941,16 @@
             "minimum": 0.0,
             "title": "Total Duration Seconds",
             "type": "number"
+          },
+          "total_refueling_dwell_seconds": {
+            "minimum": 0.0,
+            "title": "Total Refueling Dwell Seconds",
+            "type": "number"
+          },
+          "total_trip_duration_seconds": {
+            "minimum": 0.0,
+            "title": "Total Trip Duration Seconds",
+            "type": "number"
           }
         },
         "required": [
@@ -1801,6 +1958,8 @@
           "destination_leg",
           "total_distance_meters",
           "total_duration_seconds",
+          "total_refueling_dwell_seconds",
+          "total_trip_duration_seconds",
           "refuel_assumption",
           "distance_model"
         ],
@@ -1830,6 +1989,11 @@
               }
             ],
             "title": "Brand"
+          },
+          "dwell_time_seconds": {
+            "minimum": 0.0,
+            "title": "Dwell Time Seconds",
+            "type": "integer"
           },
           "estimated_remaining_range_at_arrival_km": {
             "minimum": 0.0,
@@ -1968,7 +2132,8 @@
           "phone",
           "brand",
           "operator",
-          "price"
+          "price",
+          "dwell_time_seconds"
         ],
         "title": "PredictiveItineraryStopResponse",
         "type": "object"
@@ -3059,11 +3224,33 @@
         "title": "RouteWithCngStopResponse",
         "type": "object"
       },
+      "SearchCoordinateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "SearchCoordinateResponse",
+        "type": "object"
+      },
       "SelectedCngStopResponse": {
         "additionalProperties": false,
         "properties": {
           "dwell_time_seconds": {
-            "default": 1200,
             "minimum": 0.0,
             "title": "Dwell Time Seconds",
             "type": "integer"
@@ -3126,7 +3313,8 @@
           "name",
           "municipality",
           "province",
-          "location"
+          "location",
+          "dwell_time_seconds"
         ],
         "title": "SelectedCngStopResponse",
         "type": "object"
@@ -3901,6 +4089,39 @@
         ],
         "title": "TrafficHealthResponse",
         "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
       }
     }
   },
@@ -4265,6 +4486,99 @@
         "summary": "Data Freshness",
         "tags": [
           "operations"
+        ]
+      }
+    },
+    "/api/v1/places/search": {
+      "get": {
+        "operationId": "place_search_api_v1_places_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 20,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "default": "it",
+              "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+              "title": "Language",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaceSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid search-provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Search provider unavailable."
+          }
+        },
+        "summary": "Place Search",
+        "tags": [
+          "place-search"
         ]
       }
     },

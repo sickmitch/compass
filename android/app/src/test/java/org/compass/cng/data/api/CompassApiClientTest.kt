@@ -74,6 +74,40 @@ class CompassApiClientTest {
     }
 
     @Test
+    fun searchesPlacesWithGetAndMapsPoiMetadata() = runTest {
+        server.enqueue(
+            successResponse(
+                """
+                {
+                  "query":"Duomo di Milano",
+                  "results":[{
+                    "result_id":"nominatim:node:123",
+                    "display_name":"Duomo di Milano, Milano, Italia",
+                    "address":"Piazza del Duomo, Milano",
+                    "location":{"latitude":45.4641,"longitude":9.1919},
+                    "kind":"poi",
+                    "category":"place_of_worship",
+                    "poi_name":"Duomo di Milano",
+                    "provider":"nominatim",
+                    "provider_place_id":"node:123"
+                  }]
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = client().searchPlaces("Duomo di Milano")
+
+        assertEquals("Duomo di Milano", result.query)
+        assertEquals("poi", result.results.single().kind)
+        assertEquals(45.4641, result.results.single().latitude, 0.0)
+        val recorded = server.takeRequest()
+        assertEquals("GET", recorded.method)
+        assertEquals("Duomo di Milano", recorded.requestUrl?.queryParameter("q"))
+        assertEquals("it", recorded.requestUrl?.queryParameter("language"))
+    }
+
+    @Test
     fun logsBoundedRequestOutcomeWithoutPayload() = runTest {
         server.enqueue(
             MockResponse()
@@ -102,10 +136,62 @@ class CompassApiClientTest {
                     "call_timeout_ms=0 read_timeout_ms=10000",
                 "request completed: method=POST endpoint=/api/v1/routes status=200 " +
                     "duration_ms=125",
+                "route decoded: distance_meters=210925 duration_seconds=6773 maneuvers=1",
             ),
             events,
         )
         assertFalse(events.any { "45.4642" in it || "encoded_polyline" in it })
+    }
+
+    @Test
+    fun logsPlaceSearchGetSoDeviceGateCanRetainEvidence() = runTest {
+        server.enqueue(
+            successResponse(
+                """
+                {"query":"Bologna","results":[]}
+                """.trimIndent(),
+            ),
+        )
+        val events = mutableListOf<String>()
+        val timestamps = listOf(3_000_000_000L, 3_010_000_000L).iterator()
+        val client = CompassApiClient(
+            baseUrl = server.url("/").toString(),
+            httpClient = OkHttpClient(),
+            json = json,
+            eventLogger = events::add,
+            monotonicNanos = { timestamps.next() },
+        )
+
+        client.searchPlaces("Bologna")
+
+        assertEquals(
+            listOf(
+                "request started: method=GET endpoint=/api/v1/places/search",
+                "request completed: method=GET endpoint=/api/v1/places/search status=200 " +
+                    "duration_ms=10",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun rejectsZeroCostRouteResponseInsteadOfPresentingDegradedNavigation() = runTest {
+        server.enqueue(
+            successResponse(
+                SUCCESS_RESPONSE
+                    .replace("\"distance_meters\": 210925.0", "\"distance_meters\": 0.0")
+                    .replace("\"duration_seconds\": 6773.406", "\"duration_seconds\": 0.0"),
+            ),
+        )
+
+        val error = runCatching {
+            client().getRoute(
+                origin = Coordinate(45.4642, 9.19),
+                destination = Coordinate(44.4949, 11.3426),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is ApiClientException.InvalidResponse)
     }
 
     @Test

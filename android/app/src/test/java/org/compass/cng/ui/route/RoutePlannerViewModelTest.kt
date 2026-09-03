@@ -19,6 +19,10 @@ import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.OpeningValidation
+import org.compass.cng.domain.model.PlaceKind
+import org.compass.cng.domain.model.PlaceSearchResult
+import org.compass.cng.domain.model.PlaceSearchSource
+import org.compass.cng.domain.model.PlaceSearchResults
 import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.PredictiveCngStation
 import org.compass.cng.domain.model.PredictiveCngItinerary
@@ -160,6 +164,103 @@ class RoutePlannerViewModelTest {
         assertNull(viewModel.uiState.value.rankedStations)
         assertNull(viewModel.uiState.value.selectedRoute)
         assertNull(viewModel.uiState.value.predictiveSuggestion)
+    }
+
+    @Test
+    fun searchesAndSelectsAPoiAsDestination() = runTest {
+        val poi = PlaceSearchResult(
+            id = "nominatim:node:123",
+            displayName = "Duomo di Milano",
+            address = "Piazza del Duomo, Milano",
+            location = Coordinate(45.4641, 9.1919),
+            kind = PlaceKind.POI,
+            category = "place_of_worship",
+            poiName = "Duomo di Milano",
+            provider = "nominatim",
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
+            placeSearchResult = Result.success(PlaceSearchResults("Duomo di Milano", listOf(poi))),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        viewModel.updatePlaceSearchQuery("Duomo di Milano")
+        viewModel.searchDestinations()
+
+        assertEquals(listOf(poi), viewModel.uiState.value.placeSearchResults)
+        viewModel.selectDestination(poi)
+        assertEquals(poi.location, repository.lastPreviewDestination)
+        assertEquals("Duomo di Milano", viewModel.uiState.value.destinationDisplayName)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun exposesCachedSearchProvenanceToTheUi() = runTest {
+        val cached = PlaceSearchResults(
+            query = "Duomo di Milano",
+            results = emptyList(),
+            source = PlaceSearchSource.CACHE,
+            cachedAtEpochMillis = 1234,
+        )
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(
+                baseResult = Result.success(sampleRoute()),
+                placeSearchResult = Result.success(cached),
+            ),
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        viewModel.updatePlaceSearchQuery(cached.query)
+        viewModel.searchDestinations()
+
+        assertEquals(PlaceSearchSource.CACHE, viewModel.uiState.value.placeSearchSource)
+        assertEquals(1234L, viewModel.uiState.value.placeSearchCachedAtEpochMillis)
+    }
+
+    @Test
+    fun currentDeviceLocationPrefillsVisibleOriginBeforeRouteCalculation() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository)
+        val current = Coordinate(45.5, 9.2)
+
+        viewModel.currentLocationRequested()
+        assertEquals("Acquisizione della posizione attuale…", viewModel.uiState.value.message)
+        viewModel.useCurrentLocationAsOrigin(current)
+
+        assertEquals(1, repository.previewCalls)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertEquals("45.500000", viewModel.uiState.value.originLatitudeInput)
+        assertEquals("9.200000", viewModel.uiState.value.originLongitudeInput)
+        assertEquals(RoutePlannerViewModel.MILAN, repository.lastPreviewOrigin)
+        assertEquals("Posizione attuale", viewModel.uiState.value.originDisplayName)
+        assertEquals(RoutePlannerViewModel.MILAN, viewModel.uiState.value.baseRoute?.origin)
+
+        viewModel.applyRouteInputs()
+
+        assertEquals(2, repository.previewCalls)
+        assertEquals(current, repository.lastPreviewOrigin)
+        assertEquals(current, viewModel.uiState.value.baseRoute?.origin)
+        assertEquals("Posizione attuale", viewModel.uiState.value.originDisplayName)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun explainsWhichNavigationPermissionIsMissing() = runTest {
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+        )
+
+        viewModel.navigationPermissionDenied(
+            locationGranted = true,
+            notificationsGranted = false,
+        )
+
+        assertEquals(
+            "Autorizza le notifiche per mantenere visibile la navigazione in background.",
+            viewModel.uiState.value.message,
+        )
     }
 
     @Test
@@ -533,6 +634,9 @@ class RoutePlannerViewModelTest {
         private val selectedItineraryResult: Result<RouteWithCngItinerary> = Result.failure(
             AssertionError("routeWithCngItinerary was not expected"),
         ),
+        private val placeSearchResult: Result<PlaceSearchResults> = Result.failure(
+            AssertionError("searchPlaces was not expected"),
+        ),
     ) : RoutingRepository {
         var previewCalls = 0
         var candidateCalls = 0
@@ -557,6 +661,9 @@ class RoutePlannerViewModelTest {
         var lastItineraryEffectiveRangeKm = 0.0
         var lastRemainingGasolineRangeKm: Double? = null
         var lastGasolineReserveRangeKm: Double? = null
+
+        override suspend fun searchPlaces(query: String, limit: Int): PlaceSearchResults =
+            placeSearchResult.getOrThrow()
 
         override suspend fun previewRoute(
             origin: Coordinate,

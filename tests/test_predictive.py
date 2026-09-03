@@ -163,10 +163,12 @@ def _evaluate(
     remaining_km: float,
     reserve_km: float = 30,
     opening_hours: str | None = None,
+    opening_hours_by_station: dict[int, str | None] | None = None,
     effective_range_km: float = 300,
     network_result: NetworkDetourResult | None = None,
     remaining_gasoline_km: float | None = None,
     reserve_gasoline_km: float | None = None,
+    dwell_seconds: int = 20 * 60,
 ):
     network_calls = 0
     base_route_calls = 0
@@ -222,7 +224,13 @@ def _evaluate(
     def fake_enrichment(session: object, station_ids: object) -> dict[object, object]:
         loaded_station_ids.extend(station_ids)  # type: ignore[arg-type]
         return {
-            station_id: CandidateEnrichment(opening_hours=opening_hours)
+            station_id: CandidateEnrichment(
+                opening_hours=(
+                    opening_hours_by_station.get(station_id)
+                    if opening_hours_by_station is not None
+                    else opening_hours
+                )
+            )
             for station_id in loaded_station_ids
         }
 
@@ -246,6 +254,7 @@ def _evaluate(
             detour_policy=NetworkDetourPolicy(),
             ranking_policy=RankingPolicy(),
             max_route_geometry_points=100,
+            dwell_seconds_per_refueling_stop=dwell_seconds,
         )
     )
     assert pairwise_matrix_calls == result.reachability.pairwise_matrix_calls
@@ -312,6 +321,7 @@ def test_predictive_planner_builds_complete_multi_refuel_chain(
         reserve_km=30,
         effective_range_km=100,
         network_result=network,
+        dwell_seconds=900,
     )
 
     assert result.suggestion_state == "suggested"
@@ -336,10 +346,55 @@ def test_predictive_planner_builds_complete_multi_refuel_chain(
     assert result.itinerary.destination_leg.distance_meters == 70_000
     assert result.itinerary.destination_leg.reserve_margin_at_arrival_km == 0
     assert result.itinerary.total_distance_meters == 210_000
+    assert result.itinerary.total_duration_seconds == 8_400
+    assert result.itinerary.total_refueling_dwell_seconds == 2_700
+    assert result.itinerary.total_trip_duration_seconds == 11_100
+    assert [stop.dwell_time_seconds for stop in result.itinerary.stops] == [900, 900, 900]
+    assert [stop.arrival_at.isoformat() for stop in result.itinerary.stops] == [
+        "2026-08-30T10:13:20+02:00",
+        "2026-08-30T11:08:20+02:00",
+        "2026-08-30T12:03:20+02:00",
+    ]
+    assert result.itinerary.destination_leg.destination_eta.isoformat() == (
+        "2026-08-30T13:05:00+02:00"
+    )
     assert result.reachability.pairwise_matrix_calls == 1
     assert result.reachability.itinerary_search_labels >= 3
     assert network_calls == 1
     assert base_route_calls == 1
+
+
+def test_later_station_opening_check_includes_previous_refuelling_dwell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    network = _network_result((20_000, 80_000, 140_000))
+    opening_hours = {1: "24/7", 2: "Su 11:00-23:59", 3: "24/7"}
+
+    with_dwell, _, _, _ = _evaluate(
+        monkeypatch,
+        remaining_km=65,
+        reserve_km=30,
+        effective_range_km=100,
+        network_result=network,
+        opening_hours_by_station=opening_hours,
+        dwell_seconds=900,
+    )
+    without_dwell, _, _, _ = _evaluate(
+        monkeypatch,
+        remaining_km=65,
+        reserve_km=30,
+        effective_range_km=100,
+        network_result=network,
+        opening_hours_by_station=opening_hours,
+        dwell_seconds=0,
+    )
+
+    assert with_dwell.suggestion_state == "suggested"
+    assert with_dwell.itinerary is not None
+    assert with_dwell.itinerary.stops[1].arrival_at.isoformat() == (
+        "2026-08-30T11:08:20+02:00"
+    )
+    assert without_dwell.suggestion_state == "no_complete_itinerary"
 
 
 def test_reachable_first_station_without_complete_chain_is_not_suggested(

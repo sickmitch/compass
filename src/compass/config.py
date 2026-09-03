@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from compass.navigation.domain import DEFAULT_CNG_REFUEL_DWELL_SECONDS
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -32,6 +34,16 @@ class Settings(BaseSettings):
     valhalla_read_timeout_seconds: float = Field(default=60, gt=0)
     valhalla_route_language: str = Field(default="it-IT", pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$")
     valhalla_matrix_batch_size: int = Field(default=40, gt=0, le=100)
+    geocoding_provider: Literal["none", "nominatim"] = "nominatim"
+    nominatim_url: str = "https://nominatim.openstreetmap.org"
+    geocoding_timeout_seconds: float = Field(default=15, gt=0)
+    geocoding_country_codes: str = Field(default="it", pattern=r"^[a-z]{2}(,[a-z]{2})*$")
+    geocoding_result_limit: int = Field(default=8, ge=1, le=20)
+    cng_refuel_dwell_seconds: int = Field(
+        default=DEFAULT_CNG_REFUEL_DWELL_SECONDS,
+        ge=0,
+        le=24 * 60 * 60,
+    )
     traffic_enabled: bool = False
     traffic_provider: Literal["none", "mock", "tomtom"] = "none"
     traffic_refresh_mode: Literal["periodic", "on_demand"] = "on_demand"
@@ -127,6 +139,15 @@ class Settings(BaseSettings):
         if not parsed.hostname:
             raise ValueError("tomtom_traffic_url must include a host")
         return value
+
+    @field_validator("nominatim_url")
+    @classmethod
+    def validate_nominatim_url(cls, value: str) -> str:
+        normalized = value.rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("nominatim_url must use http or https and include a host")
+        return normalized
 
     @field_validator("traffic_updater_url")
     @classmethod

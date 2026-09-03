@@ -8,6 +8,8 @@ import okhttp3.OkHttpClient
 import org.compass.cng.BuildConfig
 import org.compass.cng.data.api.CompassApiClient
 import org.compass.cng.data.repository.HttpRoutingRepository
+import org.compass.cng.data.navigation.SharedPreferencesNavigationRouteStore
+import org.compass.cng.data.search.SharedPreferencesPlaceSearchCache
 import org.compass.cng.data.vehicle.SharedPreferencesVehicleProfileRepository
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.navigation.NavigationSession
@@ -34,14 +36,20 @@ class AppContainer(context: Context) {
             json = json,
             eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
         ),
+        placeSearchCache = SharedPreferencesPlaceSearchCache(context),
+        eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
     )
     val vehicleProfileRepository = SharedPreferencesVehicleProfileRepository(context)
 
-    val navigationSession = NavigationSession()
+    val navigationSession = NavigationSession(
+        routeStore = SharedPreferencesNavigationRouteStore(context),
+        eventLogger = { event -> Log.i(COMPASS_NAVIGATION_LOG_TAG, event) },
+    )
     val navigationRouteRecalculator: NavigationRouteRecalculator =
         CompassNavigationRouteRecalculator(routingRepository)
 
     private companion object {
         const val COMPASS_API_LOG_TAG = "CompassApi"
+        const val COMPASS_NAVIGATION_LOG_TAG = "CompassNavigation"
     }
 }

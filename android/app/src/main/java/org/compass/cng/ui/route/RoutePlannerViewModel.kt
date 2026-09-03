@@ -16,6 +16,8 @@ import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.PlaceSearchResult
+import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PredictiveCngSuggestion
 import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.domain.model.RankedCngStation
@@ -32,6 +34,7 @@ import org.compass.cng.domain.vehicle.VehicleProfiles
 
 enum class PlannerStage {
     CONFIGURE_ROUTE,
+    DESTINATION_SEARCH,
     PREVIEW,
     CONFIGURE_CNG,
     CONFIGURE_PREDICTIVE,
@@ -45,6 +48,7 @@ enum class PlannerStage {
 
 enum class PlannerOperation {
     BASE_ROUTE,
+    PLACE_SEARCH,
     CNG_CANDIDATES,
     PREDICTIVE_CANDIDATES,
     SELECTED_ROUTE,
@@ -64,6 +68,12 @@ data class RoutePlannerUiState(
     val originLongitudeInput: String = DEFAULT_ORIGIN_LONGITUDE,
     val destinationLatitudeInput: String = DEFAULT_DESTINATION_LATITUDE,
     val destinationLongitudeInput: String = DEFAULT_DESTINATION_LONGITUDE,
+    val originDisplayName: String = "Milano",
+    val destinationDisplayName: String = "Bologna",
+    val placeSearchQuery: String = "",
+    val placeSearchResults: List<PlaceSearchResult> = emptyList(),
+    val placeSearchSource: PlaceSearchSource = PlaceSearchSource.LIVE,
+    val placeSearchCachedAtEpochMillis: Long? = null,
     val baseRoute: RoutePreview? = null,
     val effectiveRangeKmInput: String = DEFAULT_EFFECTIVE_RANGE_KM,
     val estimatedRemainingRangeKmInput: String = "",
@@ -155,10 +165,111 @@ class RoutePlannerViewModel(
         }
     }
 
+    fun openDestinationSearch() {
+        if (!mutableUiState.value.isBusy) {
+            mutableUiState.value = mutableUiState.value.copy(
+                stage = PlannerStage.DESTINATION_SEARCH,
+                placeSearchQuery = "",
+                placeSearchResults = emptyList(),
+                placeSearchSource = PlaceSearchSource.LIVE,
+                placeSearchCachedAtEpochMillis = null,
+                message = null,
+            )
+        }
+    }
+
+    fun updatePlaceSearchQuery(value: String) {
+        if (value.length <= 200) {
+            mutableUiState.value = mutableUiState.value.copy(
+                placeSearchQuery = value,
+                message = null,
+            )
+        }
+    }
+
+    fun searchDestinations() {
+        val state = mutableUiState.value
+        val query = state.placeSearchQuery.trim()
+        if (query.isEmpty()) {
+            mutableUiState.value = state.copy(message = "Inserisci un indirizzo, luogo o coordinate.")
+            return
+        }
+        requestJob?.cancel()
+        requestJob = viewModelScope.launch {
+            mutableUiState.value = state.copy(
+                operation = PlannerOperation.PLACE_SEARCH,
+                placeSearchResults = emptyList(),
+                message = null,
+            )
+            try {
+                val results = routingRepository.searchPlaces(query)
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    placeSearchResults = results.results,
+                    placeSearchSource = results.source,
+                    placeSearchCachedAtEpochMillis = results.cachedAtEpochMillis,
+                    message = if (results.results.isEmpty()) "Nessun luogo trovato." else null,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: RoutePreviewException) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = error.failure.placeSearchMessage(),
+                )
+            } catch (_: Exception) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = "Ricerca destinazione non disponibile.",
+                )
+            }
+        }
+    }
+
+    fun selectDestination(result: PlaceSearchResult) {
+        val state = mutableUiState.value
+        val draftOrigin = parseCoordinate(
+            latitudeInput = state.originLatitudeInput,
+            longitudeInput = state.originLongitudeInput,
+            label = "partenza",
+        ).coordinate ?: state.activeOrigin
+        loadBaseRoute(
+            origin = draftOrigin,
+            destination = result.location,
+            originDisplayName = state.originDisplayName,
+            destinationDisplayName = result.displayName,
+        )
+    }
+
+    fun currentLocationRequested() {
+        mutableUiState.value = mutableUiState.value.copy(
+            message = "Acquisizione della posizione attuale…",
+        )
+    }
+
+    fun useCurrentLocationAsOrigin(coordinate: Coordinate) {
+        requestJob?.cancel()
+        mutableUiState.value = mutableUiState.value.copy(
+            stage = PlannerStage.CONFIGURE_ROUTE,
+            operation = null,
+            originLatitudeInput = coordinate.latitude.toCoordinateInput(),
+            originLongitudeInput = coordinate.longitude.toCoordinateInput(),
+            originDisplayName = "Posizione attuale",
+            message = "Posizione acquisita. Tocca Calcola percorso per applicarla.",
+        )
+    }
+
+    fun currentLocationUnavailable() {
+        mutableUiState.value = mutableUiState.value.copy(
+            message = "Impossibile ottenere la posizione attuale. Verifica GPS e permessi.",
+        )
+    }
+
     fun updateOriginLatitude(value: String) {
         if (value.isCoordinateInput()) {
             mutableUiState.value = mutableUiState.value.copy(
                 originLatitudeInput = value,
+                originDisplayName = "Coordinate personalizzate",
                 message = null,
             )
         }
@@ -168,6 +279,7 @@ class RoutePlannerViewModel(
         if (value.isCoordinateInput()) {
             mutableUiState.value = mutableUiState.value.copy(
                 originLongitudeInput = value,
+                originDisplayName = "Coordinate personalizzate",
                 message = null,
             )
         }
@@ -177,6 +289,7 @@ class RoutePlannerViewModel(
         if (value.isCoordinateInput()) {
             mutableUiState.value = mutableUiState.value.copy(
                 destinationLatitudeInput = value,
+                destinationDisplayName = "Coordinate personalizzate",
                 message = null,
             )
         }
@@ -186,6 +299,7 @@ class RoutePlannerViewModel(
         if (value.isCoordinateInput()) {
             mutableUiState.value = mutableUiState.value.copy(
                 destinationLongitudeInput = value,
+                destinationDisplayName = "Coordinate personalizzate",
                 message = null,
             )
         }
@@ -217,7 +331,12 @@ class RoutePlannerViewModel(
             return
         }
 
-        loadBaseRoute(origin = origin, destination = destination)
+        loadBaseRoute(
+            origin = origin,
+            destination = destination,
+            originDisplayName = state.originDisplayName,
+            destinationDisplayName = state.destinationDisplayName,
+        )
     }
 
     fun openAddStop() {
@@ -699,6 +818,10 @@ class RoutePlannerViewModel(
                 stage = PlannerStage.PREVIEW,
                 message = null,
             )
+            PlannerStage.DESTINATION_SEARCH -> mutableUiState.value.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                message = null,
+            )
             PlannerStage.CONFIGURE_CNG -> mutableUiState.value.copy(
                 stage = PlannerStage.PREVIEW,
                 message = null,
@@ -789,9 +912,20 @@ class RoutePlannerViewModel(
         navigationSession.stopToPreview()
     }
 
-    fun navigationPermissionDenied() {
+    fun navigationPermissionDenied(
+        locationGranted: Boolean,
+        notificationsGranted: Boolean,
+    ) {
         mutableUiState.value = mutableUiState.value.copy(
-            message = "La posizione è necessaria per iniziare la navigazione.",
+            message = when {
+                !locationGranted && !notificationsGranted -> {
+                    "Posizione e notifiche sono necessarie per la navigazione in background."
+                }
+                !locationGranted -> "La posizione è necessaria per iniziare la navigazione."
+                else -> {
+                    "Autorizza le notifiche per mantenere visibile la navigazione in background."
+                }
+            },
         )
     }
 
@@ -812,6 +946,8 @@ class RoutePlannerViewModel(
     private fun loadBaseRoute(
         origin: Coordinate = mutableUiState.value.activeOrigin,
         destination: Coordinate = mutableUiState.value.activeDestination,
+        originDisplayName: String = mutableUiState.value.originDisplayName,
+        destinationDisplayName: String = mutableUiState.value.destinationDisplayName,
     ) {
         requestJob?.cancel()
         navigationSession.clear()
@@ -825,6 +961,10 @@ class RoutePlannerViewModel(
                 originLongitudeInput = origin.longitude.toCoordinateInput(),
                 destinationLatitudeInput = destination.latitude.toCoordinateInput(),
                 destinationLongitudeInput = destination.longitude.toCoordinateInput(),
+                originDisplayName = originDisplayName,
+                destinationDisplayName = destinationDisplayName,
+                placeSearchQuery = "",
+                placeSearchResults = emptyList(),
                 baseRoute = null,
                 rankedStations = null,
                 predictiveSuggestion = null,
@@ -877,6 +1017,12 @@ class RoutePlannerViewModel(
         val MILAN: Coordinate = RoutePlannerUiState.DEFAULT_ORIGIN
         val BOLOGNA: Coordinate = RoutePlannerUiState.DEFAULT_DESTINATION
     }
+}
+
+private fun RoutePreviewFailure.placeSearchMessage(): String = when (this) {
+    RoutePreviewFailure.NETWORK -> "Ricerca non disponibile: controlla la connessione."
+    RoutePreviewFailure.SERVER -> "Il servizio di ricerca non è disponibile."
+    else -> "La risposta del servizio di ricerca non è valida."
 }
 
 private data class ParsedCoordinate(

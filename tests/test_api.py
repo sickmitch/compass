@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 
 import httpx
@@ -34,7 +34,20 @@ from compass.routing.domain import (
 )
 from compass.traffic.dependencies import get_traffic_route_refresher
 from compass.traffic.domain import TrafficHealth
-from compass.traffic.route_refresh import TrafficRouteRefreshResult
+from compass.traffic.route_refresh import (
+    DisabledTrafficRouteRefresher,
+    TrafficRouteRefreshResult,
+)
+
+
+@pytest.fixture(autouse=True)
+def disable_live_traffic_refresh() -> Iterator[None]:
+    async def override_refresher() -> DisabledTrafficRouteRefresher:
+        return DisabledTrafficRouteRefresher()
+
+    app.dependency_overrides[get_traffic_route_refresher] = override_refresher
+    yield
+    app.dependency_overrides.pop(get_traffic_route_refresher, None)
 
 
 def _get(path: str) -> httpx.Response:
@@ -304,6 +317,8 @@ def test_base_route_contract_is_provider_independent() -> None:
             "departure_at": None,
             "driving_arrival_at": None,
             "trip_arrival_at": None,
+            "traffic_delay_seconds": None,
+            "traffic_delay_state": "unavailable",
         },
     }
     assert provider.request == RouteRequest(

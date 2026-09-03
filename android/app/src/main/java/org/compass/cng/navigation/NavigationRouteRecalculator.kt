@@ -2,7 +2,10 @@ package org.compass.cng.navigation
 
 import java.time.Clock
 import java.time.OffsetDateTime
+import org.compass.cng.domain.RoutePreviewException
+import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
+import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.PredictiveSuggestionState
 
 sealed interface FuelStopReplacementResult {
@@ -44,15 +47,43 @@ class CompassNavigationRouteRecalculator(
             -> state.snappedLocation ?: state.rawLocation?.coordinate
         } ?: route.origin
         val remainingStops = remainingFuelStops(state)
-        return when (remainingStops.size) {
+        return try {
+            preserveRemainingPlan(route, state, origin, remainingStops)
+        } catch (error: RoutePreviewException) {
+            if (error.failure !in FUEL_PLAN_INVALIDATING_FAILURES || route.fuelPlan == null) {
+                throw error
+            }
+            replanInvalidFuelStops(route, state, origin, remainingStops)
+        }
+    }
+
+    private suspend fun preserveRemainingPlan(
+        route: NavigationRoute,
+        state: NavigationState,
+        origin: Coordinate,
+        remainingStops: List<NavigationFuelStop>,
+    ): NavigationRoute = when (remainingStops.size) {
             0 -> routingRepository.previewRoute(origin, route.destination).toNavigationRoute(
                 gasolineFallback = route.gasolineFallback,
             )
-            1 -> routingRepository.routeWithCngStop(
-                origin = origin,
-                destination = route.destination,
-                mimitStationId = remainingStops.single().mimitStationId,
-            ).toNavigationRoute()
+            1 -> route.fuelPlan?.let { plan ->
+                val remainingRange = remainingRangeAtProgress(route, state, plan)
+                routingRepository.routeWithCngItinerary(
+                    origin = origin,
+                    destination = route.destination,
+                    mimitStationIds = listOf(remainingStops.single().mimitStationId),
+                    effectiveCngRangeKm = plan.effectiveCngRangeKm,
+                    estimatedRemainingCngRangeKm = remainingRange,
+                    reserveCngRangeKm = plan.reserveCngRangeKm,
+                ).toNavigationRoute(
+                    maximumDetourMinutes = plan.maximumDetourMinutes,
+                    excludedMimitStationIds = plan.excludedMimitStationIds,
+                )
+            } ?: routingRepository.routeWithCngStop(
+                    origin = origin,
+                    destination = route.destination,
+                    mimitStationId = remainingStops.single().mimitStationId,
+                ).toNavigationRoute()
             else -> {
                 val plan = requireNotNull(route.fuelPlan) {
                     "multi-stop rerouting requires the original fuel range plan"
@@ -65,8 +96,56 @@ class CompassNavigationRouteRecalculator(
                     effectiveCngRangeKm = plan.effectiveCngRangeKm,
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
-                ).toNavigationRoute()
+                ).toNavigationRoute(
+                    maximumDetourMinutes = plan.maximumDetourMinutes,
+                    excludedMimitStationIds = plan.excludedMimitStationIds,
+                )
             }
+        }
+
+    private suspend fun replanInvalidFuelStops(
+        route: NavigationRoute,
+        state: NavigationState,
+        origin: Coordinate,
+        invalidStops: List<NavigationFuelStop>,
+    ): NavigationRoute {
+        val plan = requireNotNull(route.fuelPlan)
+        val maximumDetourMinutes = requireNotNull(plan.maximumDetourMinutes) {
+            "automatic fuel replanning requires the original detour policy"
+        }
+        val remainingRange = remainingRangeAtProgress(route, state, plan)
+        val excludedIds = plan.excludedMimitStationIds +
+            invalidStops.map(NavigationFuelStop::mimitStationId)
+        val suggestion = routingRepository.predictiveCngStations(
+            origin = origin,
+            destination = route.destination,
+            effectiveCngRangeKm = plan.effectiveCngRangeKm,
+            estimatedRemainingCngRangeKm = remainingRange,
+            reserveCngRangeKm = plan.reserveCngRangeKm,
+            maximumDetourMinutes = maximumDetourMinutes,
+            departureAt = OffsetDateTime.now(clock),
+            excludedMimitStationIds = excludedIds,
+        )
+        return when (suggestion.state) {
+            PredictiveSuggestionState.NOT_NEEDED -> routingRepository.previewRoute(
+                origin,
+                route.destination,
+            ).toNavigationRoute()
+            PredictiveSuggestionState.SUGGESTED -> {
+                val itinerary = requireNotNull(suggestion.itinerary)
+                routingRepository.routeWithCngItinerary(
+                    origin = origin,
+                    destination = route.destination,
+                    mimitStationIds = itinerary.stops.map { it.station.mimitStationId },
+                    effectiveCngRangeKm = plan.effectiveCngRangeKm,
+                    estimatedRemainingCngRangeKm = remainingRange,
+                    reserveCngRangeKm = plan.reserveCngRangeKm,
+                ).toNavigationRoute(
+                    maximumDetourMinutes = maximumDetourMinutes,
+                    excludedMimitStationIds = excludedIds,
+                )
+            }
+            else -> throw RoutePreviewException(RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE)
         }
     }
 
@@ -154,5 +233,10 @@ class CompassNavigationRouteRecalculator(
 
     private companion object {
         const val MINIMUM_RANGE_MARGIN_KM = 0.1
+        val FUEL_PLAN_INVALIDATING_FAILURES = setOf(
+            RoutePreviewFailure.STATION_NOT_FOUND,
+            RoutePreviewFailure.STATION_UNAVAILABLE,
+            RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE,
+        )
     }
 }

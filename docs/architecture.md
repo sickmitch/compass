@@ -522,6 +522,43 @@ an acknowledged exclusion plus a complete `suggested` itinerary or a proven `not
 route, then atomically replaces the route and restarts debug replay on the new geometry. Missing
 range state, no complete itinerary and transport failures all retain the downloaded route.
 
+## Phase 12 destination and journey-time flow
+
+```text
+Android text/coordinate query -> Compass /places/search -> PlaceSearchProvider -> Nominatim
+          |                              |
+current device location                 +-> normalized address/locality/POI/coordinate
+          |                                               |
+          +-------------------- selected A/B coordinates -+
+                                                          v
+                                           Compass /routes -> Valhalla maneuvers
+                                                          v
+                                         foreground NavigationSession
+```
+
+Android never contacts Nominatim directly. Coordinate queries are resolved inside Compass; textual
+queries pass through the provider abstraction and return a strict normalized contract. Current
+location is requested by Android only after user action and is then used as an ordinary route
+origin.
+
+The established local matcher, maneuver controller, confirmed off-route state machine and
+foreground service continue to own live progress. A successful reroute first attempts to retain the
+remaining ordered CNG stops and their range policy. If Compass reports a missing, unavailable or
+range-invalid stop, Android excludes that invalid remainder and requests a fresh complete predictive
+plan before atomically replacing the active route. A failure leaves the downloaded route active.
+
+Journey chronology is represented independently from physical route cost:
+
+```text
+total trip duration = Valhalla driving duration + sum(CNG stop dwell)
+stop N ETA = departure + driving through leg N + dwell at stops before N
+```
+
+The default dwell is 1,200 seconds and is injected from server configuration into predictive and
+selected-route responses. It changes later opening-hours evaluations and ETAs, but never the road
+detour comparison. Traffic delay remains a nullable, explicitly unavailable component unless an
+enabled provider can supply a defensible separate estimate.
+
 ## Runtime
 
 The default Compose graph contains:
@@ -552,3 +589,25 @@ traffic helper linked against the router's `libvalhalla`; it remains an internal
 service.
 
 Secrets are environment supplied. No host-specific paths or privileged containers are required.
+
+## Phase 13 device cache and degraded operation
+
+The application-scoped `NavigationSession` sits in front of a versioned private-storage route
+store. Preview/start and successful route replacements persist the complete `NavigationRoute`;
+explicit stop/abandon clears it. On process reconstruction the store creates a cached preview rather
+than silently restarting location or a foreground service.
+
+```text
+Compass live route -> NavigationSession -> versioned route store
+                           |                       |
+                           v                       +-> process-restart cached preview
+                    local matcher/GPS
+                           |
+Compass unavailable ------+-> keep route + REROUTING_UNAVAILABLE
+Compass restored -> successful route replace -> LIVE + ONLINE
+```
+
+The HTTP repository independently keeps ten normalized exact-query search result sets. Only
+network/server failures may read that cache. MapLibre retains already requested style/tile/font
+resources in its bounded ambient database. Neither cache performs routing; any new physical route
+or reroute continues to cross the Compass API and server-side Valhalla boundary. See ADR 0018.

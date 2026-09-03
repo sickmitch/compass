@@ -4,6 +4,7 @@ from math import isclose, isfinite
 from typing import Literal
 
 from compass.candidates.domain import SpatialCandidate
+from compass.navigation.domain import DEFAULT_CNG_REFUEL_DWELL_SECONDS
 from compass.ranking.domain import (
     EvaluatedCngPrice,
     OpeningHoursEvaluation,
@@ -206,6 +207,7 @@ class PredictiveItineraryStop:
     operator: str | None
     osm_match_confidence: float | None
     price: EvaluatedCngPrice | None
+    dwell_time_seconds: int = DEFAULT_CNG_REFUEL_DWELL_SECONDS
 
     def __post_init__(self) -> None:
         if self.sequence <= 0:
@@ -221,6 +223,8 @@ class PredictiveItineraryStop:
             raise ValueError("itinerary stop range and cost values must not be negative")
         if self.arrival_at.tzinfo is None or self.arrival_at.utcoffset() is None:
             raise ValueError("itinerary stop arrival must include a UTC offset")
+        if self.dwell_time_seconds < 0:
+            raise ValueError("itinerary stop dwell must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +256,8 @@ class PredictiveItinerary:
     destination_leg: PredictiveDestinationLeg
     total_distance_meters: float
     total_duration_seconds: float
+    total_refueling_dwell_seconds: float
+    total_trip_duration_seconds: float
     refuel_assumption: Literal["full_effective_range_after_each_stop"] = (
         "full_effective_range_after_each_stop"
     )
@@ -280,6 +286,15 @@ class PredictiveItinerary:
             raise ValueError("itinerary distance must equal its leg sum")
         if not isclose(self.total_duration_seconds, expected_duration, abs_tol=1e-6):
             raise ValueError("itinerary duration must equal its leg sum")
+        expected_dwell = sum(stop.dwell_time_seconds for stop in self.stops)
+        if not isclose(self.total_refueling_dwell_seconds, expected_dwell, abs_tol=1e-6):
+            raise ValueError("itinerary dwell must equal its stop dwell sum")
+        if not isclose(
+            self.total_trip_duration_seconds,
+            self.total_duration_seconds + self.total_refueling_dwell_seconds,
+            abs_tol=1e-6,
+        ):
+            raise ValueError("itinerary trip duration must include driving and dwell")
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,6 +2,7 @@ package org.compass.cng.domain
 
 import java.time.OffsetDateTime
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.PlaceSearchResults
 import org.compass.cng.domain.model.PredictiveCngSuggestion
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
@@ -9,6 +10,11 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 
 interface RoutingRepository {
+    suspend fun searchPlaces(
+        query: String,
+        limit: Int = 8,
+    ): PlaceSearchResults = throw UnsupportedOperationException("place search is unavailable")
+
     suspend fun previewRoute(
         origin: Coordinate,
         destination: Coordinate,

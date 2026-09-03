@@ -7,12 +7,17 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.compass.cng.data.api.CompassApiClient
+import org.compass.cng.data.search.PlaceSearchCache
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.PriceFreshness
+import org.compass.cng.domain.model.PlaceKind
+import org.compass.cng.domain.model.PlaceSearchResult
+import org.compass.cng.domain.model.PlaceSearchResults
+import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.testing.predictiveResponseFixture
 import org.junit.After
@@ -41,6 +46,39 @@ class HttpRoutingRepositoryTest {
     @After
     fun tearDown() {
         server.shutdown()
+    }
+
+    @Test
+    fun fallsBackToExactCachedSearchWhenLiveProviderIsUnavailable() = runTest {
+        val cached = PlaceSearchResults(
+            query = "Duomo di Milano",
+            results = listOf(
+                PlaceSearchResult(
+                    "cached:duomo", "Duomo di Milano", "Piazza del Duomo, Milano",
+                    Coordinate(45.4641, 9.1919), PlaceKind.POI, "place_of_worship",
+                    "Duomo di Milano", "nominatim",
+                ),
+            ),
+            source = PlaceSearchSource.CACHE,
+            cachedAtEpochMillis = 1234,
+        )
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"detail":"down"}"""))
+        val cachedRepository = HttpRoutingRepository(
+            CompassApiClient(
+                baseUrl = server.url("/").toString(),
+                httpClient = OkHttpClient(),
+                json = Json { ignoreUnknownKeys = false },
+            ),
+            placeSearchCache = object : PlaceSearchCache {
+                override fun get(query: String) = if (query == cached.query) cached else null
+                override fun put(results: PlaceSearchResults) = Unit
+            },
+        )
+
+        val result = cachedRepository.searchPlaces("Duomo di Milano")
+
+        assertEquals(PlaceSearchSource.CACHE, result.source)
+        assertEquals("cached:duomo", result.results.single().id)
     }
 
     @Test

@@ -11,6 +11,8 @@ import org.compass.cng.data.api.ApiRankedCandidate
 import org.compass.cng.data.api.ApiRoute
 import org.compass.cng.data.api.ApiNavigationTiming
 import org.compass.cng.data.api.CompassApiClient
+import org.compass.cng.data.search.NoOpPlaceSearchCache
+import org.compass.cng.data.search.PlaceSearchCache
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
@@ -26,6 +28,10 @@ import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.OpeningValidation
+import org.compass.cng.domain.model.PlaceKind
+import org.compass.cng.domain.model.PlaceSearchResult
+import org.compass.cng.domain.model.PlaceSearchResults
+import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.PredictiveCngStation
 import org.compass.cng.domain.model.PredictiveCngItinerary
@@ -44,7 +50,53 @@ import org.compass.cng.domain.model.SelectedCngStop
 
 class HttpRoutingRepository(
     private val apiClient: CompassApiClient,
+    private val placeSearchCache: PlaceSearchCache = NoOpPlaceSearchCache,
+    private val eventLogger: (String) -> Unit = {},
 ) : RoutingRepository {
+    override suspend fun searchPlaces(query: String, limit: Int): PlaceSearchResults {
+        return try {
+            val live = mapFailures {
+                val response = apiClient.searchPlaces(query, limit)
+                PlaceSearchResults(
+                    query = response.query,
+                    results = response.results.map { result ->
+                        PlaceSearchResult(
+                            id = result.id,
+                            displayName = result.displayName,
+                            address = result.address,
+                            location = Coordinate(result.latitude, result.longitude),
+                            kind = when (result.kind) {
+                                "address" -> PlaceKind.ADDRESS
+                                "locality" -> PlaceKind.LOCALITY
+                                "poi" -> PlaceKind.POI
+                                "coordinate" -> PlaceKind.COORDINATE
+                                else -> PlaceKind.UNKNOWN
+                            },
+                            category = result.category,
+                            poiName = result.poiName,
+                            provider = result.provider,
+                        )
+                    },
+                    source = PlaceSearchSource.LIVE,
+                )
+            }
+            placeSearchCache.put(live)
+            eventLogger("place search cached: result_count=${live.results.size}")
+            live
+        } catch (error: RoutePreviewException) {
+            if (error.failure in setOf(RoutePreviewFailure.NETWORK, RoutePreviewFailure.SERVER)) {
+                placeSearchCache.get(query)?.let { cached ->
+                    eventLogger(
+                        "place search cache fallback: failure=${error.failure.name} " +
+                            "result_count=${cached.results.size}",
+                    )
+                    return cached
+                }
+            }
+            throw error
+        }
+    }
+
     override suspend fun previewRoute(
         origin: Coordinate,
         destination: Coordinate,
@@ -197,6 +249,7 @@ class HttpRoutingRepository(
                             operator = stop.operator,
                             osmMatchConfidence = stop.osmMatchConfidence,
                             price = stop.price?.toCngPrice(),
+                            dwellTimeSeconds = stop.dwellTimeSeconds,
                         )
                     },
                     destinationLeg = PredictiveDestinationLeg(
@@ -217,6 +270,8 @@ class HttpRoutingRepository(
                     ),
                     totalDistanceMeters = itinerary.totalDistanceMeters,
                     totalDurationSeconds = itinerary.totalDurationSeconds,
+                    totalRefuelingDwellSeconds = itinerary.totalRefuelingDwellSeconds,
+                    totalTripDurationSeconds = itinerary.totalTripDurationSeconds,
                     refuelAssumption = itinerary.refuelAssumption,
                     distanceModel = itinerary.distanceModel,
                 )
@@ -459,6 +514,8 @@ private fun ApiNavigationTiming.toNavigationTiming(): NavigationTiming = Navigat
     departureAt = departureAt?.let(OffsetDateTime::parse),
     drivingArrivalAt = drivingArrivalAt?.let(OffsetDateTime::parse),
     tripArrivalAt = tripArrivalAt?.let(OffsetDateTime::parse),
+    trafficDelaySeconds = trafficDelaySeconds,
+    trafficDelayState = trafficDelayState,
 )
 
 private fun ApiNavigationTiming.toLegNavigationTiming(

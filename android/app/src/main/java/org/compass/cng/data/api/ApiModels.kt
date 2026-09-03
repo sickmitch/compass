@@ -1,5 +1,22 @@
 package org.compass.cng.data.api
 
+data class ApiPlaceSearchResults(
+    val query: String,
+    val results: List<ApiPlaceSearchResult>,
+)
+
+data class ApiPlaceSearchResult(
+    val id: String,
+    val displayName: String,
+    val address: String?,
+    val latitude: Double,
+    val longitude: Double,
+    val kind: String,
+    val category: String?,
+    val poiName: String?,
+    val provider: String,
+)
+
 data class ApiRoute(
     val distanceMeters: Double,
     val durationSeconds: Double,
@@ -20,6 +37,8 @@ data class ApiNavigationTiming(
     val departureAt: String?,
     val drivingArrivalAt: String?,
     val tripArrivalAt: String?,
+    val trafficDelaySeconds: Double? = null,
+    val trafficDelayState: String = "unavailable",
 )
 
 data class ApiManeuver(
@@ -110,6 +129,7 @@ data class ApiPredictiveItineraryStop(
     val operator: String?,
     val osmMatchConfidence: Double?,
     val price: ApiCngPrice?,
+    val dwellTimeSeconds: Int,
 )
 
 data class ApiPredictiveDestinationLeg(
@@ -126,6 +146,8 @@ data class ApiPredictiveItinerary(
     val destinationLeg: ApiPredictiveDestinationLeg,
     val totalDistanceMeters: Double,
     val totalDurationSeconds: Double,
+    val totalRefuelingDwellSeconds: Double,
+    val totalTripDurationSeconds: Double,
     val refuelAssumption: String,
     val distanceModel: String,
 )

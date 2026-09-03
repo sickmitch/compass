@@ -1,0 +1,1 @@
+"""Normalized place-search boundary."""

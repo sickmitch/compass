@@ -53,6 +53,9 @@ import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.OpeningState
+import org.compass.cng.domain.model.PlaceKind
+import org.compass.cng.domain.model.PlaceSearchResult
+import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.PredictiveCngStation
 import org.compass.cng.domain.model.PredictiveCngSuggestion
@@ -68,6 +71,8 @@ import org.compass.cng.domain.vehicle.VehicleProfiles
 import org.compass.cng.navigation.NavigationRoute
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.NavigationPhase
+import org.compass.cng.navigation.NavigationConnectivity
+import org.compass.cng.navigation.NavigationRouteSource
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.OffRouteStatus
@@ -86,6 +91,7 @@ fun RoutePlannerScreen(
     onRequestRouteUpdate: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -148,12 +154,27 @@ fun RoutePlannerScreen(
                         originLongitudeInput = state.originLongitudeInput,
                         destinationLatitudeInput = state.destinationLatitudeInput,
                         destinationLongitudeInput = state.destinationLongitudeInput,
+                        originDisplayName = state.originDisplayName,
+                        destinationDisplayName = state.destinationDisplayName,
                         message = state.message,
                         onOriginLatitudeChanged = viewModel::updateOriginLatitude,
                         onOriginLongitudeChanged = viewModel::updateOriginLongitude,
                         onDestinationLatitudeChanged = viewModel::updateDestinationLatitude,
                         onDestinationLongitudeChanged = viewModel::updateDestinationLongitude,
+                        onSearchDestination = viewModel::openDestinationSearch,
+                        onUseCurrentLocation = onUseCurrentLocation,
                         onApply = viewModel::applyRouteInputs,
+                    )
+                    PlannerStage.DESTINATION_SEARCH -> DestinationSearchContent(
+                        query = state.placeSearchQuery,
+                        results = state.placeSearchResults,
+                        isSearching = state.operation == PlannerOperation.PLACE_SEARCH,
+                        message = state.message,
+                        source = state.placeSearchSource,
+                        cachedAtEpochMillis = state.placeSearchCachedAtEpochMillis,
+                        onQueryChanged = viewModel::updatePlaceSearchQuery,
+                        onSearch = viewModel::searchDestinations,
+                        onSelect = viewModel::selectDestination,
                     )
                     PlannerStage.PREVIEW -> PreviewContent(
                         route = baseRoute,
@@ -295,6 +316,7 @@ private fun Header(
             Text(
                 text = when (stage) {
                     PlannerStage.CONFIGURE_ROUTE -> "Modifica partenza e destinazione"
+                    PlannerStage.DESTINATION_SEARCH -> "Cerca destinazione"
                     PlannerStage.PREVIEW -> "Anteprima percorso"
                     PlannerStage.CONFIGURE_CNG -> "Aggiungi tappa · Metano"
                     PlannerStage.CONFIGURE_PREDICTIVE -> "Valuta autonomia CNG"
@@ -520,6 +542,14 @@ private fun NavigationPreviewContent(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
+                    if (state.routeSource == NavigationRouteSource.CACHE) {
+                        Text(
+                            "Percorso e manovre recuperati dalla cache del dispositivo.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                     Text(
                         "${formatDistance(route.totalDistanceMeters)} · " +
                             "${formatDuration(route.drivingDurationSeconds)} di guida",
@@ -529,6 +559,16 @@ private fun NavigationPreviewContent(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
+                    val trafficDelay = route.timing.trafficDelaySeconds
+                    Text(
+                        if (route.timing.trafficDelayState == "estimated" && trafficDelay != null) {
+                            "Ritardo traffico ${formatDuration(trafficDelay)}"
+                        } else {
+                            "Ritardo traffico non disponibile"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     if (route.fuelStops.isNotEmpty()) {
                         Text(
                             "${route.fuelStops.size} soste CNG · " +
@@ -536,6 +576,13 @@ private fun NavigationPreviewContent(
                                 "di rifornimento",
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        if (state.routeSource == NavigationRouteSource.CACHE) {
+                            Text(
+                                "Tappe CNG salvate: prezzi, orari e dati live possono non essere aggiornati.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                     route.gasolineFallback?.let { fallback ->
                         Text(
@@ -779,6 +826,35 @@ private fun ActiveNavigationContent(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                if (state.routeSource == NavigationRouteSource.CACHE) {
+                    Text(
+                        "Navigazione disponibile sulla rotta salvata nel dispositivo.",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (state.route.timing.trafficDelayState != "estimated") {
+                    Text(
+                        "Traffico live non disponibile: tempi di guida senza ritardo live.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.connectivity == NavigationConnectivity.REROUTING_UNAVAILABLE) {
+                    Text(
+                        "Connessione Compass assente: navigazione locale attiva, ricalcolo non disponibile.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.routeSource == NavigationRouteSource.CACHE && state.route.fuelStops.isNotEmpty()) {
+                    Text(
+                        "Dati CNG in cache: prezzi e orari non sono presentati come aggiornati.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 state.route.gasolineFallback?.let { fallback ->
                     Text(
                         "Fallback benzina attivo · uso stimato fino a " +
@@ -886,11 +962,15 @@ private fun ConfigureRouteContent(
     originLongitudeInput: String,
     destinationLatitudeInput: String,
     destinationLongitudeInput: String,
+    originDisplayName: String,
+    destinationDisplayName: String,
     message: String?,
     onOriginLatitudeChanged: (String) -> Unit,
     onOriginLongitudeChanged: (String) -> Unit,
     onDestinationLatitudeChanged: (String) -> Unit,
     onDestinationLongitudeChanged: (String) -> Unit,
+    onSearchDestination: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
     onApply: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -932,7 +1012,7 @@ private fun ConfigureRouteContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "Partenza",
+                    "Partenza · $originDisplayName",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -950,8 +1030,14 @@ private fun ConfigureRouteContent(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                OutlinedButton(
+                    onClick = onUseCurrentLocation,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Usa la posizione attuale")
+                }
                 Text(
-                    "Destinazione",
+                    "Destinazione · $destinationDisplayName",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -969,11 +1055,106 @@ private fun ConfigureRouteContent(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                OutlinedButton(
+                    onClick = onSearchDestination,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Cerca indirizzo o luogo")
+                }
                 message?.let { InlineError(it) }
                 Button(onClick = onApply, modifier = Modifier.fillMaxWidth()) {
                     Text("Calcola percorso")
                 }
                 Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DestinationSearchContent(
+    query: String,
+    results: List<PlaceSearchResult>,
+    isSearching: Boolean,
+    message: String?,
+    source: PlaceSearchSource,
+    cachedAtEpochMillis: Long?,
+    onQueryChanged: (String) -> Unit,
+    onSearch: () -> Unit,
+    onSelect: (PlaceSearchResult) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Text(
+                "Indirizzo, città, attività, POI oppure coordinate",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChanged,
+                label = { Text("Destinazione") },
+                placeholder = { Text("es. Duomo di Milano") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onSearch,
+                enabled = !isSearching,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (isSearching) "Ricerca…" else "Cerca")
+            }
+            if (isSearching) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            message?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                InlineError(it)
+            }
+            if (source == PlaceSearchSource.CACHE && results.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Risultati salvati sul dispositivo: ricerca live non disponibile" +
+                        (cachedAtEpochMillis?.let { " · cache ${formatCacheTime(it)}" } ?: "") + ".",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        itemsIndexed(results, key = { _, result -> result.id }) { _, result ->
+            Card(onClick = { onSelect(result) }, modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(result.displayName, fontWeight = FontWeight.SemiBold)
+                    result.address?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        when (result.kind) {
+                            PlaceKind.ADDRESS -> "Indirizzo"
+                            PlaceKind.LOCALITY -> "Città o località"
+                            PlaceKind.POI -> result.category?.let { "Luogo · $it" } ?: "Luogo"
+                            PlaceKind.COORDINATE -> "Coordinate"
+                            PlaceKind.UNKNOWN -> "Risultato"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
@@ -2143,6 +2324,10 @@ private fun formatKilometers(kilometers: Double): String = String.format(
     "%.1f km",
     kilometers,
 )
+
+private fun formatCacheTime(epochMillis: Long): String = DateTimeFormatter.ofPattern("dd/MM HH:mm")
+    .withZone(ZoneId.systemDefault())
+    .format(java.time.Instant.ofEpochMilli(epochMillis))
 
 private fun formatSignedKilometers(kilometers: Double): String = String.format(
     Locale.ITALY,

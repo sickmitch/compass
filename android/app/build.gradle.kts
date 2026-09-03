@@ -15,9 +15,16 @@ val compassApiBaseUrl = providers.gradleProperty("COMPASS_API_BASE_URL")
 val compassMapStyleUrl = providers.gradleProperty("COMPASS_MAP_STYLE_URL")
     .orElse("https://demotiles.maplibre.org/style.json")
     .get()
+val compassMapAmbientCacheMb = providers.gradleProperty("COMPASS_MAP_AMBIENT_CACHE_MB")
+    .orElse("100")
+    .get()
+    .toLong()
 
 require(compassApiBaseUrl.endsWith("/")) {
     "COMPASS_API_BASE_URL must end with '/': $compassApiBaseUrl"
+}
+require(compassMapAmbientCacheMb in 16..1024) {
+    "COMPASS_MAP_AMBIENT_CACHE_MB must be between 16 and 1024"
 }
 
 android {
@@ -28,12 +35,17 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 9
-        versionName = "0.8.0"
+        versionCode = 11
+        versionName = "0.10.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())
         buildConfigField("String", "COMPASS_MAP_STYLE_URL", compassMapStyleUrl.asBuildConfigString())
+        buildConfigField(
+            "long",
+            "COMPASS_MAP_AMBIENT_CACHE_BYTES",
+            "${compassMapAmbientCacheMb * 1024L * 1024L}L",
+        )
     }
 
     buildTypes {

@@ -19,6 +19,7 @@ from compass.detours.domain import (
     NetworkEvaluationMetrics,
 )
 from compass.detours.service import evaluate_cng_detours
+from compass.navigation.domain import DEFAULT_CNG_REFUEL_DWELL_SECONDS
 from compass.predictive.domain import (
     MAX_CNG_ITINERARY_STOPS,
     GasolineFallback,
@@ -83,7 +84,10 @@ async def evaluate_predictive_cng_candidates(
     ranking_policy: RankingPolicy,
     max_route_geometry_points: int,
     cost_basis: NetworkCostBasis | None = None,
+    dwell_seconds_per_refueling_stop: int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 ) -> PredictiveCandidatesResult:
+    if dwell_seconds_per_refueling_stop < 0:
+        raise ValueError("refuelling dwell must not be negative")
     remaining_range_km = request.estimated_remaining_cng_range_km
     reserve_range_km = request.reserve_cng_range_km
     effective_range_km = (
@@ -163,6 +167,7 @@ async def evaluate_predictive_cng_candidates(
                 enrichments=enrichments,
                 ranking_policy=ranking_policy,
                 include_closed=request.ranked_request.include_closed,
+                dwell_seconds_per_refueling_stop=dwell_seconds_per_refueling_stop,
             )
 
     selected_first = (
@@ -206,6 +211,7 @@ async def evaluate_predictive_cng_candidates(
             request,
             enrichments,
             ranking_policy,
+            dwell_seconds_per_refueling_stop,
         )
         if path is not None
         else None
@@ -371,6 +377,7 @@ def _search_complete_itinerary(
     enrichments: dict[int, CandidateEnrichment],
     ranking_policy: RankingPolicy,
     include_closed: bool,
+    dwell_seconds_per_refueling_stop: int,
 ) -> _Path | None:
     index_by_station = {
         candidate.station.station_id: index for index, candidate in enumerate(candidates)
@@ -416,7 +423,9 @@ def _search_complete_itinerary(
                 >= current_remaining_distance - 1.0
             ):
                 continue
-            next_elapsed = elapsed_seconds + edge.duration_seconds
+            next_elapsed = (
+                elapsed_seconds + dwell_seconds_per_refueling_stop + edge.duration_seconds
+            )
             arrival_at = departure_at + timedelta(seconds=next_elapsed)
             if not _station_is_allowed(
                 next_candidate.station,
@@ -445,6 +454,7 @@ def _build_itinerary(
     request: PredictiveCandidatesRequest,
     enrichments: dict[int, CandidateEnrichment],
     ranking_policy: RankingPolicy,
+    dwell_seconds_per_refueling_stop: int,
 ) -> PredictiveItinerary:
     departure_at = request.ranked_request.network_request.departure_at
     remaining_range_km = request.estimated_remaining_cng_range_km
@@ -493,20 +503,26 @@ def _build_itinerary(
                     eta=arrival_at,
                     freshness_seconds=ranking_policy.price_freshness_seconds,
                 ),
+                dwell_time_seconds=dwell_seconds_per_refueling_stop,
             )
         )
+        elapsed_seconds += dwell_seconds_per_refueling_stop
 
     destination_remaining = (
         effective_range_km - path.destination_cost.distance_meters / 1_000
     )
-    total_duration = elapsed_seconds + path.destination_cost.duration_seconds
+    total_duration = (
+        sum(cost.duration_seconds for cost in path.leg_costs)
+        + path.destination_cost.duration_seconds
+    )
+    total_dwell = len(stops) * dwell_seconds_per_refueling_stop
     destination_leg = PredictiveDestinationLeg(
         distance_meters=path.destination_cost.distance_meters,
         duration_seconds=path.destination_cost.duration_seconds,
         available_range_at_departure_km=effective_range_km,
         estimated_remaining_range_at_arrival_km=destination_remaining,
         reserve_margin_at_arrival_km=destination_remaining - reserve_range_km,
-        destination_eta=departure_at + timedelta(seconds=total_duration),
+        destination_eta=departure_at + timedelta(seconds=total_duration + total_dwell),
     )
     return PredictiveItinerary(
         stops=tuple(stops),
@@ -516,6 +532,8 @@ def _build_itinerary(
             + path.destination_cost.distance_meters
         ),
         total_duration_seconds=total_duration,
+        total_refueling_dwell_seconds=total_dwell,
+        total_trip_duration_seconds=total_duration + total_dwell,
     )
 
 

@@ -105,7 +105,7 @@ class SelectedCngStopResponse(StrictModel):
     province: str | None
     location: CoordinateRequest
     expected_arrival_at: datetime | None = None
-    dwell_time_seconds: int = Field(default=20 * 60, ge=0)
+    dwell_time_seconds: int = Field(ge=0)
 
 
 class RouteLegResponse(StrictModel):
@@ -296,12 +296,14 @@ async def route_with_cng_stop(
         departure_at=departure_at,
         leg_durations_seconds=(leg.duration_seconds for leg in route.legs),
         stop_count=1,
+        dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
     )[0]
     navigation = build_navigation_timing(
         encoded_polylines=(leg.encoded_polyline for leg in route.legs),
         driving_duration_seconds=route.duration_seconds,
         fuel_stop_ids=(station.mimit_station_id,),
         departure_at=departure_at,
+        dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
     )
     coordinates = (origin, stop, destination)
     kinds = ("origin_to_cng_station", "cng_station_to_destination")
@@ -333,6 +335,7 @@ async def route_with_cng_stop(
             province=station.province,
             location=CoordinateRequest(latitude=stop.latitude, longitude=stop.longitude),
             expected_arrival_at=stop_arrival_at,
+            dwell_time_seconds=settings.cng_refuel_dwell_seconds,
         ),
         distance_meters=route.distance_meters,
         duration_seconds=route.duration_seconds,
@@ -491,12 +494,14 @@ async def route_with_cng_itinerary(
         departure_at=departure_at,
         leg_durations_seconds=(leg.duration_seconds for leg in route.legs),
         stop_count=len(stations),
+        dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
     )
     navigation = build_navigation_timing(
         encoded_polylines=(leg.encoded_polyline for leg in route.legs),
         driving_duration_seconds=duration_seconds,
         fuel_stop_ids=station_ids,
         departure_at=departure_at,
+        dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
     )
     return RouteWithCngItineraryResponse(
         selected_stops=[
@@ -511,6 +516,7 @@ async def route_with_cng_itinerary(
                     longitude=stop.longitude,
                 ),
                 expected_arrival_at=stop_arrivals[index - 1],
+                dwell_time_seconds=settings.cng_refuel_dwell_seconds,
             )
             for index, (station, stop) in enumerate(
                 zip(stations, stop_coordinates, strict=True),

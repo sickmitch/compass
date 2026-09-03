@@ -4,6 +4,22 @@ The runtime contract is [openapi.json](openapi.json). All distances are metres, 
 timestamps ISO 8601, and CNG prices explicit unit prices (normally EUR/kg). Unknown request fields
 are rejected. Errors use `{"code":"...","message":"..."}` except dependency-state health responses.
 
+## Place search
+
+```http
+GET /api/v1/places/search?q=Duomo%20di%20Milano&limit=8&language=it
+```
+
+The endpoint accepts addresses, cities/localities, POI/business/place names and decimal coordinate
+pairs. Text is resolved by the configured server-side `PlaceSearchProvider`; Android never talks to
+that provider directly. Coordinate input such as `45.4642, 9.19` is normalized locally even when
+external geocoding is disabled.
+
+Each result contains `display_name`, nullable normalized `address`, `location`, `kind` (`address`,
+`locality`, `poi`, `coordinate` or `unknown`), optional `category`/`poi_name`, and provider identity.
+Provider outages return `503 search_unavailable`; invalid upstream data returns
+`502 search_provider_error` without raw provider details.
+
 ## Station detail
 
 ```http
@@ -64,10 +80,12 @@ example readable; OpenAPI defines every maneuver field.
 
 Every route response also contains `navigation`. `duration_seconds` remains driving time for
 backwards compatibility and for Valhalla cost comparisons. `navigation.total_trip_duration_seconds`
-adds exactly 1,200 seconds for every CNG stop, while
+adds `CNG_REFUEL_DWELL_SECONDS` for every CNG stop (1,200 seconds by default), while
 `navigation.total_refueling_dwell_seconds` exposes that non-driving component explicitly. Route
 IDs are derived from the returned geometry and ordered fuel-stop IDs; they change when the route or
 fuel plan changes. Selected stops expose `expected_arrival_at` and `dwell_time_seconds`.
+`traffic_delay_state=unavailable` pairs with a null delay when no defensible separate live-delay
+estimate exists; the client must not turn that into zero delay.
 
 ## Route through a predictive CNG itinerary
 
@@ -145,6 +163,11 @@ session exclusions in `excluded_mimit_station_ids`. The list accepts at most 32 
 official IDs. Compass removes them in the PostGIS corridor query before applying the candidate
 limit or calling Valhalla matrices, and echoes the applied list in the response. A strict client
 must verify that echo before accepting the replacement plan.
+
+Each itinerary stop also exposes its configured `dwell_time_seconds`. Later station ETAs and their
+opening-hours evaluations include dwell at all previous stops. The itinerary's
+`total_duration_seconds` remains driving time; `total_refueling_dwell_seconds` is the stop sum and
+`total_trip_duration_seconds` is their total.
 
 The two gasoline fields are optional but must be supplied together. They are caller estimates, not
 telemetry. `gasoline_fallback` never outranks an available complete CNG itinerary and does not assume

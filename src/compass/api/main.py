@@ -12,6 +12,7 @@ from compass import __version__
 from compass.api.predictive import router as predictive_router
 from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
+from compass.api.search import router as search_router
 from compass.api.stations import router as stations_router
 from compass.api.system import router as system_router
 from compass.api.traffic import router as traffic_router
@@ -32,6 +33,7 @@ app = FastAPI(
     description="CNG-aware navigation API foundations for Italy.",
 )
 app.include_router(routes_router)
+app.include_router(search_router)
 app.include_router(ranking_router)
 app.include_router(predictive_router)
 app.include_router(stations_router)

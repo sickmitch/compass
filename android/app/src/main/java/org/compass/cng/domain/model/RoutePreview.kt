@@ -2,6 +2,8 @@ package org.compass.cng.domain.model
 
 import java.time.OffsetDateTime
 
+const val DEFAULT_CNG_REFUEL_DWELL_SECONDS = 20 * 60
+
 data class NavigationTiming(
     val routeId: String,
     val drivingDurationSeconds: Double,
@@ -13,6 +15,8 @@ data class NavigationTiming(
     val departureAt: OffsetDateTime?,
     val drivingArrivalAt: OffsetDateTime?,
     val tripArrivalAt: OffsetDateTime?,
+    val trafficDelaySeconds: Double? = null,
+    val trafficDelayState: String = "unavailable",
 ) {
     init {
         require(routeId.isNotBlank()) { "route identity must not be blank" }
@@ -26,6 +30,12 @@ data class NavigationTiming(
         require(totalTripDurationSeconds >= drivingDurationSeconds) {
             "trip duration must include driving duration"
         }
+        require(trafficDelaySeconds == null || trafficDelaySeconds >= 0) {
+            "traffic delay must not be negative"
+        }
+        require(trafficDelayState in setOf("unavailable", "estimated")) {
+            "unsupported traffic delay state"
+        }
     }
 
     companion object {
@@ -35,10 +45,12 @@ data class NavigationTiming(
                 drivingDurationSeconds = drivingDurationSeconds,
                 remainingDrivingDurationSeconds = drivingDurationSeconds,
                 refuelingStopCount = refuelingStopCount,
-                dwellSecondsPerRefuelingStop = 20 * 60,
-                totalRefuelingDwellSeconds = refuelingStopCount * 20.0 * 60.0,
+                dwellSecondsPerRefuelingStop = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
+                totalRefuelingDwellSeconds =
+                    refuelingStopCount * DEFAULT_CNG_REFUEL_DWELL_SECONDS.toDouble(),
                 totalTripDurationSeconds =
-                    drivingDurationSeconds + refuelingStopCount * 20.0 * 60.0,
+                    drivingDurationSeconds +
+                        refuelingStopCount * DEFAULT_CNG_REFUEL_DWELL_SECONDS.toDouble(),
                 departureAt = null,
                 drivingArrivalAt = null,
                 tripArrivalAt = null,

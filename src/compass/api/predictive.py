@@ -172,6 +172,7 @@ class PredictiveItineraryStopResponse(StrictModel):
     operator: str | None
     osm_match_confidence: float | None = Field(default=None, ge=0, le=1)
     price: CurrentCngPriceResponse | None
+    dwell_time_seconds: int = Field(ge=0)
 
 
 class PredictiveDestinationLegResponse(StrictModel):
@@ -188,6 +189,8 @@ class PredictiveItineraryResponse(StrictModel):
     destination_leg: PredictiveDestinationLegResponse
     total_distance_meters: float = Field(ge=0)
     total_duration_seconds: float = Field(ge=0)
+    total_refueling_dwell_seconds: float = Field(ge=0)
+    total_trip_duration_seconds: float = Field(ge=0)
     refuel_assumption: Literal["full_effective_range_after_each_stop"]
     distance_model: Literal["road_network"]
 
@@ -290,6 +293,7 @@ async def predictive_candidates(
             ranking_policy=ranking_policy,
             max_route_geometry_points=settings.route_geometry_max_points,
             cost_basis=network_cost_basis_from_settings(settings),
+            dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -372,6 +376,8 @@ def _predictive_itinerary_response(
         ),
         total_distance_meters=itinerary.total_distance_meters,
         total_duration_seconds=itinerary.total_duration_seconds,
+        total_refueling_dwell_seconds=itinerary.total_refueling_dwell_seconds,
+        total_trip_duration_seconds=itinerary.total_trip_duration_seconds,
         refuel_assumption=itinerary.refuel_assumption,
         distance_model=itinerary.distance_model,
     )
@@ -411,5 +417,6 @@ def _predictive_itinerary_stop_response(
                 if price is not None
                 else None
             ),
+            "dwell_time_seconds": stop.dwell_time_seconds,
         }
     )

@@ -96,6 +96,21 @@ def test_route_translates_request_and_normalizes_response() -> None:
     assert route.maneuvers[1].street_names == ("Via Milano",)
 
 
+def test_route_rejects_zero_cost_provider_result_as_non_navigable() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    fixture["trip"]["summary"]["length"] = 0
+    fixture["trip"]["summary"]["time"] = 0
+
+    adapter, client = _adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json=fixture))
+    )
+    try:
+        with pytest.raises(RoutingProviderError, match="zero-cost route"):
+            asyncio.run(adapter.route(_request()))
+    finally:
+        asyncio.run(client.aclose())
+
+
 def test_traffic_aware_route_uses_current_time_when_departure_is_omitted() -> None:
     fixture = json.loads(FIXTURE.read_text())
 

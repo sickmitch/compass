@@ -109,7 +109,20 @@ data class NavigationState(
     val lastSuccessfulRouteRefreshEpochMillis: Long? = null,
     val lastSpokenInstruction: String? = null,
     val rejectedLocationCount: Int = 0,
+    val routeSource: NavigationRouteSource = NavigationRouteSource.LIVE,
+    val routeCachedAtEpochMillis: Long? = null,
+    val connectivity: NavigationConnectivity = NavigationConnectivity.ONLINE,
 )
+
+enum class NavigationRouteSource {
+    LIVE,
+    CACHE,
+}
+
+enum class NavigationConnectivity {
+    ONLINE,
+    REROUTING_UNAVAILABLE,
+}
 
 enum class ReroutingStatus {
     IDLE,

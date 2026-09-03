@@ -18,6 +18,8 @@ class NavigationTiming:
     departure_at: datetime | None
     driving_arrival_at: datetime | None
     trip_arrival_at: datetime | None
+    traffic_delay_seconds: float | None = None
+    traffic_delay_state: str = "unavailable"
 
 
 def build_navigation_timing(
@@ -73,6 +75,8 @@ def build_navigation_timing(
         departure_at=departure_at,
         driving_arrival_at=driving_arrival,
         trip_arrival_at=trip_arrival,
+        traffic_delay_seconds=None,
+        traffic_delay_state="unavailable",
     )
 
 

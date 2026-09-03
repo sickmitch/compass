@@ -36,7 +36,11 @@ class NavigationEngine(
     private var fuelStopDistances = emptyList<Pair<NavigationFuelStop, Double>>()
     private var phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
 
-    fun preview(route: NavigationRoute) {
+    fun preview(
+        route: NavigationRoute,
+        source: NavigationRouteSource = NavigationRouteSource.LIVE,
+        cachedAtEpochMillis: Long? = null,
+    ) {
         resetTracking(route)
         mutableState.value = NavigationState(
             phase = NavigationPhase.ROUTE_PREVIEW,
@@ -46,6 +50,8 @@ class NavigationEngine(
             totalDurationRemainingSeconds = route.totalTripDurationSeconds,
             currentManeuver = route.maneuvers.firstOrNull(),
             nextManeuver = route.maneuvers.getOrNull(1),
+            routeSource = source,
+            routeCachedAtEpochMillis = cachedAtEpochMillis,
         )
     }
 
@@ -62,7 +68,11 @@ class NavigationEngine(
 
     fun stopToPreview() {
         val route = mutableState.value.route ?: return clear()
-        preview(route)
+        preview(
+            route = route,
+            source = mutableState.value.routeSource,
+            cachedAtEpochMillis = mutableState.value.routeCachedAtEpochMillis,
+        )
     }
 
     fun clear() {
@@ -208,6 +218,8 @@ class NavigationEngine(
             nextManeuver = route.maneuvers.getOrNull(1),
             gpsStatus = GpsStatus.ACQUIRING,
             lastSuccessfulRouteRefreshEpochMillis = refreshedAtEpochMillis,
+            routeSource = NavigationRouteSource.LIVE,
+            connectivity = NavigationConnectivity.ONLINE,
         )
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
         currentLocation?.let {
@@ -224,6 +236,11 @@ class NavigationEngine(
             phase = phaseBehindRouteUpdate,
             reroutingStatus = ReroutingStatus.FAILED,
             routeUpdateFailure = failure,
+            connectivity = if (failure == RouteUpdateFailure.NETWORK_OR_SERVER) {
+                NavigationConnectivity.REROUTING_UNAVAILABLE
+            } else {
+                current.connectivity
+            },
         )
     }
 

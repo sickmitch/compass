@@ -10,6 +10,21 @@ def test_valhalla_url_is_normalized() -> None:
     assert settings.valhalla_url == "http://router.internal:8002"
 
 
+def test_phase12_search_and_refuelling_defaults_are_explicit() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.geocoding_provider == "nominatim"
+    assert settings.geocoding_country_codes == "it"
+    assert settings.geocoding_result_limit == 8
+    assert settings.cng_refuel_dwell_seconds == 20 * 60
+
+
+def test_refuelling_dwell_is_configurable() -> None:
+    settings = Settings(_env_file=None, cng_refuel_dwell_seconds=900)
+
+    assert settings.cng_refuel_dwell_seconds == 900
+
+
 @pytest.mark.parametrize("value", ["router.internal:8002", "file:///tiles", "http:///route"])
 def test_valhalla_url_requires_http_host(value: str) -> None:
     with pytest.raises(ValidationError, match="valhalla_url"):

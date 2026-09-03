@@ -42,9 +42,9 @@ class NavigationForegroundService : Service(), LocationListener {
     private val maneuverController = ManeuverController()
     private val routeUpdateController = RouteUpdateController()
     private val handler = Handler(Looper.getMainLooper())
+    private val replayLifecycle = ReplayLifecycleController()
     private var replayRunnable: Runnable? = null
     private var routeUpdateJob: Job? = null
-    private var isReplay = false
     private var updateControllerStarted = false
     private val gpsLossCheck = object : Runnable {
         override fun run() {
@@ -97,10 +97,10 @@ class NavigationForegroundService : Service(), LocationListener {
             updateControllerStarted = true
         }
         if (intent?.action == ACTION_START_REPLAY) {
-            isReplay = true
+            replayLifecycle.navigationStarted(replay = true)
             startRouteReplay()
         } else {
-            isReplay = false
+            replayLifecycle.navigationStarted(replay = false)
             startLocationUpdates()
         }
         handler.removeCallbacks(gpsLossCheck)
@@ -226,7 +226,7 @@ class NavigationForegroundService : Service(), LocationListener {
             NOTIFICATION_ID,
             buildNotification(),
         )
-        if (!isReplay) {
+        if (!replayLifecycle.isReplayActive) {
             routeUpdateController.nextUpdate(state, nowEpochMillis)?.let { reason ->
                 requestRouteUpdate(reason, nowEpochMillis)
             }
@@ -239,7 +239,10 @@ class NavigationForegroundService : Service(), LocationListener {
         if (snapshot.route == null) return
         routeUpdateController.attemptStarted(nowEpochMillis)
         session.beginRouteUpdate(reason)
-        Log.i(LOG_TAG, "route update started: $reason")
+        Log.i(
+            LOG_TAG,
+            "route update started: $reason stops=${snapshot.route.fuelStopIdsForLog()}",
+        )
         routeUpdateJob = serviceScope.launch {
             try {
                 val route = routeRecalculator.recalculate(snapshot, reason)
@@ -247,7 +250,12 @@ class NavigationForegroundService : Service(), LocationListener {
                 session.replaceRoute(route, completedAt, snapshot.rawLocation)
                 routeUpdateController.updateSucceeded(completedAt)
                 maneuverController.reset()
-                Log.i(LOG_TAG, "route update committed: $reason route=${route.routeId}")
+                Log.i(
+                    LOG_TAG,
+                    "route update committed: $reason route=${route.routeId} " +
+                        "stops=${route.fuelStopIdsForLog()}",
+                )
+                resumeReplayAfterRouteUpdateIfNeeded()
                 processNavigationState(completedAt)
             } catch (error: CancellationException) {
                 session.failRouteUpdate()
@@ -256,6 +264,7 @@ class NavigationForegroundService : Service(), LocationListener {
                 session.failRouteUpdate()
                 routeUpdateController.updateFailed()
                 Log.w(LOG_TAG, "route update failed: $reason; continuing downloaded route")
+                resumeReplayAfterRouteUpdateIfNeeded()
                 getSystemService(NotificationManager::class.java).notify(
                     NOTIFICATION_ID,
                     buildNotification(),
@@ -279,7 +288,7 @@ class NavigationForegroundService : Service(), LocationListener {
                         session.replaceRoute(result.route, completedAt, snapshot.rawLocation)
                         routeUpdateController.updateSucceeded(completedAt)
                         maneuverController.reset()
-                        if (isReplay) startRouteReplay()
+                        if (replayLifecycle.isReplayActive) startRouteReplay()
                         Log.i(
                             LOG_TAG,
                             "fuel stop replacement committed: excluded=" +
@@ -327,11 +336,11 @@ class NavigationForegroundService : Service(), LocationListener {
     }
 
     private fun simulateOffRoute() {
-        isReplay = false
-        replayRunnable?.let(handler::removeCallbacks)
-        replayRunnable = null
         val state = session.state.value
         val reference = state.rawLocation ?: return
+        replayLifecycle.simulatedOffRouteStarted()
+        replayRunnable?.let(handler::removeCallbacks)
+        replayRunnable = null
         repeat(3) { index ->
             val offset = 0.0015 + index * 0.0001
             val fix = NavigationLocation(
@@ -347,6 +356,12 @@ class NavigationForegroundService : Service(), LocationListener {
             session.updateLocation(fix)
             processNavigationState(System.currentTimeMillis())
         }
+    }
+
+    private fun resumeReplayAfterRouteUpdateIfNeeded() {
+        if (!replayLifecycle.routeUpdateFinished()) return
+        Log.i(LOG_TAG, "demo replay resumed after route update")
+        startRouteReplay()
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -415,3 +430,6 @@ class NavigationForegroundService : Service(), LocationListener {
         private const val LOG_TAG = "CompassNavigation"
     }
 }
+
+private fun NavigationRoute.fuelStopIdsForLog(): String =
+    fuelStops.joinToString(",") { it.mimitStationId }.ifEmpty { "direct" }

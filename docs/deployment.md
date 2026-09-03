@@ -979,3 +979,49 @@ docker compose --profile routing logs --no-color --tail=300 api valhalla db migr
 For device connectivity and crash diagnostics use
 [Android client diagnostics](android.md#diagnostics). Return only the failing artifact and bounded
 logs.
+
+## Phase 12 search/navigation validation
+
+Set an identifying `HTTP_USER_AGENT` and the desired server-side geocoder in `.env`. The default is
+Nominatim with Italy-only results. Rebuild and recreate the API so the search/timing contract and
+configuration are active:
+
+```bash
+docker compose build api
+docker compose --profile routing up -d --force-recreate migrate api valhalla
+```
+
+On the Android workstation, keep the usual SSH tunnel open when the backend is remote, then run:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-phase12-live.sh
+```
+
+The runner saves all API artifacts under `/tmp/compass-phase12-*`. It rejects a stale OpenAPI image,
+missing normalized search modes, missing Valhalla geometry/maneuvers, incorrect default dwell,
+non-cumulative multi-stop timing and missing chronological dwell in subsequent ETAs. Its Android
+half verifies client requests, CNG-stop preservation across automatic rerouting, replacement of a
+simulated invalid stop, foreground lifecycle continuity and teardown. Human screenshots remain
+mandatory; automated output alone does not accept Phase 12.
+
+## Phase 13 degraded/offline navigation validation
+
+Phase 13 adds no server workload or secret. Build-time Android configuration
+`COMPASS_MAP_AMBIENT_CACHE_MB` defaults to 100 and accepts 16–1,024 MiB. After synchronizing the
+repository, keep the API/Valhalla deployment and optional SSH tunnel running, then execute:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
+bash scripts/run-phase13-live.sh
+```
+
+The script clears only the debug application's data at the start, builds/installs it, populates the
+device caches and temporarily removes `adb reverse`. General device networking is not disabled. It
+then checks search fallback, route continuity, foreground lifecycle, process-death recovery, ambient
+cache initialization, recovery through a fresh route response and final cache/service teardown.
+Return all screenshots and bounded artifacts requested by the runner.

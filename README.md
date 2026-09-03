@@ -4,8 +4,7 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–11** foundation, including predictive CNG
-reachability and Android route-endpoint editing:
+This repository implements the accepted **Phases 0–13** foundation:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -70,11 +69,25 @@ reachability and Android route-endpoint editing:
 - explicit in-navigation CNG stop skip/replacement with server-acknowledged station exclusion,
   predictive range/reserve preservation and a safe keep-current-route fallback, accepted on a
   physical Android device.
+- a provider-neutral server-side place-search API for Italian addresses, localities, POIs and raw
+  coordinates, consumed by Android without direct provider coupling;
+- Android current-location origin selection and named destination results feeding the same Compass
+  A-to-B routing contract;
+- configurable CNG waypoint dwell (20 minutes by default), kept separate from driving cost and
+  accumulated in stop/destination ETA, opening-hours chronology and total journey time;
+- rerouting that preserves still-valid planned CNG stops and automatically requests a replacement
+  predictive plan when the existing stop chain becomes invalid.
+- a versioned device cache for active route geometry, maneuvers, timing, CNG waypoints/range policy
+  and optional gasoline fallback, restored explicitly after process death;
+- bounded exact-query recent destination caching with visible cache timestamps and no silent
+  fallback for malformed input/response data;
+- explicit downloaded-route, rerouting-unavailable, traffic-unavailable and cached-CNG UI states;
+- configurable MapLibre ambient caching for resources already visited and live-route recovery after
+  Compass connectivity returns.
 
 It intentionally does **not** yet provide nationwide traffic coverage from the point-based TomTom
 base API, independent LRP-to-GraphId resolution, historical traffic ingestion, vehicle telemetry,
-address search/current-location selection, automatic vehicle tank telemetry or automatic inference
-that a station is unexpectedly closed.
+automatic vehicle tank telemetry or automatic inference that a station is unexpectedly closed.
 
 ## Quick local validation
 
@@ -281,6 +294,30 @@ predictive CNG planning then use the active route returned by the backend.
 This increment deliberately does not add address search, current-location permissions, saved places
 or geocoding. The accepted live/device gate is automated by `scripts/run-phase11-live.sh`.
 
+## Phase 12 destination search and navigation completion
+
+Android can use the current device location as origin and search a destination by address, city,
+POI/business name or coordinates. It calls `GET /api/v1/places/search`; only Compass knows the
+configured geocoder. The acquired GPS/network origin is shown in the coordinate form before the
+user applies it. Selecting a normalized result requests the final route through the existing
+backend contract and hands its geometry and Valhalla maneuvers to the established foreground
+navigation session; zero-cost provider results are rejected as non-navigable.
+
+Route timing now separates driving duration, an explicit nullable traffic-delay component,
+refuelling dwell and total journey duration. `CNG_REFUEL_DWELL_SECONDS` defaults to 1,200 seconds.
+Predictive stop ETAs and opening-hours checks include all earlier dwell, while detour road cost does
+not. The accepted Phase 12 live gate is `bash scripts/run-phase12-live.sh`.
+
+## Phase 13 offline and degraded navigation
+
+Android persists the active route, geometry, maneuvers, timing and CNG plan in versioned private
+storage. A process restart restores a visibly cached preview; an explicit navigation stop clears it.
+Local GPS matching continues on a downloaded route when Compass is unreachable, while the UI
+separately identifies unavailable rerouting, unavailable traffic and cached CNG data. Ten recent
+exact-query search result sets can be used after network/server failure with cache provenance shown.
+MapLibre's bounded ambient cache retains already visited resources without promising full regional
+offline coverage. Run the pending device gate with `bash scripts/run-phase13-live.sh`.
+
 ## Repository layout
 
 ```text
@@ -294,6 +331,7 @@ src/compass/detours/  batched network-cost evaluation and deterministic detour m
 src/compass/ranking/  arrival-time opening evaluation, price freshness and explainable ranking
 src/compass/predictive/ reserve-aware road reachability and predictive suggestion states
 src/compass/stations/ public station detail reads and provenance
+src/compass/search/   provider-neutral place search and Nominatim adapter
 src/compass/freshness/ ingestion/reconciliation freshness policy
 android/               native Kotlin/Compose/MapLibre device client
 migrations/            Alembic schema history
@@ -305,7 +343,7 @@ compose.yaml           reference server-side deployment
 
 ## Project status and licensing
 
-Phases 2–11 have passed repository-local checks and their documented operator-run live or device
+Phases 2–13 have passed repository-local checks and their documented operator-run live or device
 tests.
 Phase 3 validated the digest-pinned Valhalla 3.8.3 runtime against a full Italy graph and a
 representative Milan A-to-B API route. Phase 4 validated autonomy-aware PostGIS corridor pruning on
@@ -334,6 +372,9 @@ system-bar overlap.
 Phase 11 passed after explicit Android route-coordinate editing was validated on device: the edited
 Rome-to-Florence route preview, manual CNG search, selected-stop route, predictive CNG flow and
 invalid-coordinate guard all behaved as expected, with generic destination labels on edited routes.
+Phase 12 was accepted on 2026-09-03 after the operator returned normalized address/POI search,
+positive A-to-B route and guidance, cumulative CNG dwell, preserved/replanned fuel stops and
+foreground-notification evidence from the physical-device gate.
 
 Compass source code is licensed under the
 [GNU General Public License version 3 only](LICENSE). Source datasets retain their own licenses;

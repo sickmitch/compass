@@ -133,6 +133,8 @@ class NavigationTimingResponse(StrictModel):
     departure_at: datetime | None
     driving_arrival_at: datetime | None
     trip_arrival_at: datetime | None
+    traffic_delay_seconds: float | None = Field(default=None, ge=0)
+    traffic_delay_state: Literal["unavailable", "estimated"] = "unavailable"
 
 
 class BaseRouteResponse(StrictModel):

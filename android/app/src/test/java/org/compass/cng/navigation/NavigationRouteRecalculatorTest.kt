@@ -3,6 +3,8 @@ package org.compass.cng.navigation
 import java.time.OffsetDateTime
 import kotlinx.coroutines.test.runTest
 import org.compass.cng.domain.RoutingRepository
+import org.compass.cng.domain.RoutePreviewException
+import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
@@ -154,6 +156,42 @@ class NavigationRouteRecalculatorTest {
         assertEquals(FuelStopReplacementResult.RangePlanRequired, result)
     }
 
+    @Test
+    fun rerouteReplansAutomaticallyWhenPreservedFuelStopBecomesInvalid() = runTest {
+        val repository = RecordingRepository().apply { failNextItinerary = true }
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val destination = Coordinate(44.0, 11.0)
+        val stop = fuelStop(1, "1001", Coordinate(44.5, 10.0))
+        val route = NavigationRoute(
+            routeId = "invalid-stop",
+            origin = origin,
+            destination = destination,
+            totalDistanceMeters = 10_000.0,
+            drivingDurationSeconds = 600.0,
+            totalTripDurationSeconds = 1_800.0,
+            geometry = listOf(origin, stop.location, destination),
+            legs = listOf(navigationLeg(1, origin, stop.location, 10_000.0, 65.0)),
+            maneuvers = emptyList(),
+            fuelStops = listOf(stop),
+            fuelPlan = NavigationFuelPlan(100.0, 65.0, 30.0, 12.0),
+            timing = timing("invalid-stop", 600.0, 1),
+            provider = "valhalla",
+        )
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            snappedLocation = origin,
+            nextFuelStop = NavigationFuelStopProgress(stop, 9_000.0),
+        )
+
+        val replacement = recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
+
+        assertTrue(replacement.fuelStops.isEmpty())
+        assertEquals(setOf("1001"), repository.lastExcludedIds)
+        assertEquals(12.0, repository.lastMaximumDetourMinutes)
+    }
+
     private fun fuelStop(sequence: Int, id: String, location: Coordinate) = NavigationFuelStop(
         sequence = sequence,
         mimitStationId = id,
@@ -207,6 +245,7 @@ class NavigationRouteRecalculatorTest {
         var lastReserveRangeKm: Double? = null
         var lastMaximumDetourMinutes: Double? = null
         var lastExcludedIds: Set<String>? = null
+        var failNextItinerary: Boolean = false
 
         override suspend fun previewRoute(
             origin: Coordinate,
@@ -313,6 +352,10 @@ class NavigationRouteRecalculatorTest {
             estimatedRemainingCngRangeKm: Double,
             reserveCngRangeKm: Double,
         ): RouteWithCngItinerary {
+            if (failNextItinerary) {
+                failNextItinerary = false
+                throw RoutePreviewException(RoutePreviewFailure.STATION_UNAVAILABLE)
+            }
             lastItineraryIds = mimitStationIds
             lastEffectiveRangeKm = effectiveCngRangeKm
             lastRemainingRangeKm = estimatedRemainingCngRangeKm

@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.DEFAULT_CNG_REFUEL_DWELL_SECONDS
 
 class CompassApiClient(
     baseUrl: String,
@@ -27,6 +28,7 @@ class CompassApiClient(
 ) {
     private val apiBaseUrl = baseUrl.toHttpUrl()
     private val routeUrl = resolve("api/v1/routes")
+    private val placeSearchUrl = resolve("api/v1/places/search")
     private val rankedCandidatesUrl = resolve("api/v1/cng/ranked-candidates")
     private val predictiveCandidatesUrl = resolve("api/v1/cng/predictive-candidates")
     private val routeWithCngStopUrl = resolve("api/v1/routes/with-cng-stop")
@@ -35,6 +37,17 @@ class CompassApiClient(
         .readTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
+
+    suspend fun searchPlaces(query: String, limit: Int = 8): ApiPlaceSearchResults {
+        require(query.isNotBlank()) { "search query must not be blank" }
+        require(limit in 1..20) { "search limit must be between 1 and 20" }
+        val url = placeSearchUrl.newBuilder()
+            .addQueryParameter("q", query.trim())
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("language", "it")
+            .build()
+        return get<PlaceSearchResponseDto>(url).toApiPlaceSearchResults()
+    }
 
     suspend fun getRoute(
         origin: Coordinate,
@@ -46,7 +59,19 @@ class CompassApiClient(
             costing = "auto",
             language = "it-IT",
         )
-        return post<RouteResponseDto>(routeUrl, json.encodeToString(payload)).toApiRoute()
+        val response = post<RouteResponseDto>(routeUrl, json.encodeToString(payload))
+        return try {
+            response.toApiRoute().also { route ->
+                eventLogger(
+                    "route decoded: distance_meters=${route.distanceMeters.toLong()} " +
+                        "duration_seconds=${route.durationSeconds.toLong()} " +
+                        "maneuvers=${route.maneuvers.size}",
+                )
+            }
+        } catch (error: IllegalArgumentException) {
+            eventLogger("route rejected: kind=invalid_response cause=${error.causesForLog()}")
+            throw ApiClientException.InvalidResponse(error)
+        }
     }
 
     suspend fun getRankedCngCandidates(
@@ -227,7 +252,70 @@ class CompassApiClient(
         const val NANOS_PER_MILLISECOND = 1_000_000L
         const val PREDICTIVE_TIMEOUT_SECONDS = 240L
     }
+
+    private suspend inline fun <reified ResponseDto> get(url: HttpUrl): ResponseDto =
+        withContext(Dispatchers.IO) {
+            val endpoint = url.encodedPath
+            val startedAtNanos = monotonicNanos()
+            val request = Request.Builder().url(url).get().build()
+            eventLogger("request started: method=GET endpoint=$endpoint")
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    val body = response.body.string()
+                    eventLogger(
+                        "request completed: method=GET endpoint=$endpoint status=${response.code} " +
+                            "duration_ms=${elapsedMillis(startedAtNanos)}",
+                    )
+                    if (!response.isSuccessful) {
+                        val error = runCatching { json.decodeFromString<ErrorResponseDto>(body) }
+                            .getOrNull()
+                        throw ApiClientException.Http(
+                            statusCode = response.code,
+                            code = error?.code ?: "http_${response.code}",
+                        )
+                    }
+                    try {
+                        json.decodeFromString<ResponseDto>(body)
+                    } catch (error: SerializationException) {
+                        throw ApiClientException.InvalidResponse(error)
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: ApiClientException.Http) {
+                throw error
+            } catch (error: ApiClientException.InvalidResponse) {
+                throw error
+            } catch (error: IOException) {
+                eventLogger(
+                    "request failed: method=GET endpoint=$endpoint kind=network " +
+                        "duration_ms=${elapsedMillis(startedAtNanos)} cause=${error.causesForLog()}",
+                )
+                throw ApiClientException.Network(error)
+            } catch (error: IllegalArgumentException) {
+                throw ApiClientException.InvalidResponse(error)
+            }
+        }
 }
+
+@Serializable
+private data class PlaceSearchResponseDto(
+    val query: String,
+    val results: List<PlaceSearchResultDto>,
+)
+
+@Serializable
+private data class PlaceSearchResultDto(
+    @SerialName("result_id") val resultId: String,
+    @SerialName("display_name") val displayName: String,
+    val address: String?,
+    val location: CoordinateDto,
+    val kind: String,
+    val category: String?,
+    @SerialName("poi_name") val poiName: String?,
+    val provider: String,
+    @SerialName("provider_place_id") val providerPlaceId: String?,
+)
 
 private fun Throwable?.causesForLog(): String {
     if (this == null) return "unknown"
@@ -367,6 +455,8 @@ private data class NavigationTimingDto(
     @SerialName("departure_at") val departureAt: String?,
     @SerialName("driving_arrival_at") val drivingArrivalAt: String?,
     @SerialName("trip_arrival_at") val tripArrivalAt: String?,
+    @SerialName("traffic_delay_seconds") val trafficDelaySeconds: Double? = null,
+    @SerialName("traffic_delay_state") val trafficDelayState: String = "unavailable",
 )
 
 @Serializable
@@ -603,6 +693,8 @@ private data class PredictiveItineraryStopDto(
     val operator: String?,
     @SerialName("osm_match_confidence") val osmMatchConfidence: Double?,
     val price: CngPriceDto?,
+    @SerialName("dwell_time_seconds")
+    val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 )
 
 @Serializable
@@ -622,6 +714,10 @@ private data class PredictiveItineraryDto(
     @SerialName("destination_leg") val destinationLeg: PredictiveDestinationLegDto,
     @SerialName("total_distance_meters") val totalDistanceMeters: Double,
     @SerialName("total_duration_seconds") val totalDurationSeconds: Double,
+    @SerialName("total_refueling_dwell_seconds")
+    val totalRefuelingDwellSeconds: Double = stops.sumOf { it.dwellTimeSeconds.toDouble() },
+    @SerialName("total_trip_duration_seconds")
+    val totalTripDurationSeconds: Double = totalDurationSeconds + totalRefuelingDwellSeconds,
     @SerialName("refuel_assumption") val refuelAssumption: String,
     @SerialName("distance_model") val distanceModel: String,
 )
@@ -670,7 +766,8 @@ private data class SelectedCngStopDto(
     val province: String?,
     val location: CoordinateDto,
     @SerialName("expected_arrival_at") val expectedArrivalAt: String? = null,
-    @SerialName("dwell_time_seconds") val dwellTimeSeconds: Int = 20 * 60,
+    @SerialName("dwell_time_seconds")
+    val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 )
 
 @Serializable
@@ -703,7 +800,8 @@ private data class CngItineraryStopDto(
     val province: String?,
     val location: CoordinateDto,
     @SerialName("expected_arrival_at") val expectedArrivalAt: String? = null,
-    @SerialName("dwell_time_seconds") val dwellTimeSeconds: Int = 20 * 60,
+    @SerialName("dwell_time_seconds")
+    val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 )
 
 @Serializable
@@ -744,9 +842,35 @@ private fun Coordinate.toDto(): CoordinateDto = CoordinateDto(
     longitude = longitude,
 )
 
+private fun PlaceSearchResponseDto.toApiPlaceSearchResults(): ApiPlaceSearchResults =
+    ApiPlaceSearchResults(
+        query = query,
+        results = results.map { result ->
+            require(result.resultId.isNotBlank() && result.displayName.isNotBlank()) {
+                "place result identity must not be blank"
+            }
+            require(result.kind in setOf("address", "locality", "poi", "coordinate", "unknown")) {
+                "unsupported place result kind"
+            }
+            ApiPlaceSearchResult(
+                id = result.resultId,
+                displayName = result.displayName,
+                address = result.address,
+                latitude = result.location.latitude,
+                longitude = result.location.longitude,
+                kind = result.kind,
+                category = result.category,
+                poiName = result.poiName,
+                provider = result.provider,
+            )
+        },
+    )
+
 private fun RouteResponseDto.toApiRoute(): ApiRoute {
     require(geometry.format == "polyline6") { "unsupported route geometry format" }
-    require(distanceMeters >= 0 && durationSeconds >= 0) { "negative route cost" }
+    require(distanceMeters > 0 && durationSeconds > 0) { "route cost must be positive" }
+    require(geometry.encodedPolyline.isNotBlank()) { "route geometry must not be blank" }
+    require(maneuvers.isNotEmpty()) { "route maneuvers must not be empty" }
     return ApiRoute(
         distanceMeters = distanceMeters,
         durationSeconds = durationSeconds,
@@ -907,6 +1031,7 @@ private fun PredictiveItineraryDto.toApiPredictiveItinerary(): ApiPredictiveItin
                 operator = stop.operator,
                 osmMatchConfidence = stop.osmMatchConfidence,
                 price = stop.price?.toApiCngPrice(),
+                dwellTimeSeconds = stop.dwellTimeSeconds,
             )
         },
         destinationLeg = ApiPredictiveDestinationLeg(
@@ -921,6 +1046,8 @@ private fun PredictiveItineraryDto.toApiPredictiveItinerary(): ApiPredictiveItin
         ),
         totalDistanceMeters = totalDistanceMeters,
         totalDurationSeconds = totalDurationSeconds,
+        totalRefuelingDwellSeconds = totalRefuelingDwellSeconds,
+        totalTripDurationSeconds = totalTripDurationSeconds,
         refuelAssumption = refuelAssumption,
         distanceModel = distanceModel,
     )
@@ -1082,13 +1209,14 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
     refuelingStopCount: Int,
 ): ApiNavigationTiming {
     if (this == null) {
-        val dwellSeconds = refuelingStopCount * 20.0 * 60.0
+        val dwellSeconds =
+            refuelingStopCount * DEFAULT_CNG_REFUEL_DWELL_SECONDS.toDouble()
         return ApiNavigationTiming(
             routeId = "route_00000000000000000000000000000000",
             drivingDurationSeconds = fallbackDrivingDurationSeconds,
             remainingDrivingDurationSeconds = fallbackDrivingDurationSeconds,
             refuelingStopCount = refuelingStopCount,
-            dwellSecondsPerRefuelingStop = 20 * 60,
+            dwellSecondsPerRefuelingStop = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
             totalRefuelingDwellSeconds = dwellSeconds,
             totalTripDurationSeconds = fallbackDrivingDurationSeconds + dwellSeconds,
             departureAt = null,
@@ -1117,6 +1245,12 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
                 drivingDurationSeconds - totalRefuelingDwellSeconds,
         ) <= 0.001,
     ) { "navigation trip duration does not reconcile" }
+    require(trafficDelaySeconds == null || trafficDelaySeconds >= 0) {
+        "navigation traffic delay must not be negative"
+    }
+    require(trafficDelayState in setOf("unavailable", "estimated")) {
+        "unsupported navigation traffic delay state"
+    }
     return ApiNavigationTiming(
         routeId = routeId,
         drivingDurationSeconds = drivingDurationSeconds,
@@ -1128,6 +1262,8 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
         departureAt = departureAt,
         drivingArrivalAt = drivingArrivalAt,
         tripArrivalAt = tripArrivalAt,
+        trafficDelaySeconds = trafficDelaySeconds,
+        trafficDelayState = trafficDelayState,
     )
 }
 
