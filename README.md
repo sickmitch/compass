@@ -316,7 +316,17 @@ Local GPS matching continues on a downloaded route when Compass is unreachable, 
 separately identifies unavailable rerouting, unavailable traffic and cached CNG data. Ten recent
 exact-query search result sets can be used after network/server failure with cache provenance shown.
 MapLibre's bounded ambient cache retains already visited resources without promising full regional
-offline coverage. Run the pending device gate with `bash scripts/run-phase13-live.sh`.
+offline coverage. The operator accepted the device gate on 2026-09-03; its runner remains available
+as `bash scripts/run-phase13-live.sh`.
+
+## Navigation UI upgrade
+
+Navigation UI Phase 1 was accepted on-device on 2026-09-03. During active guidance MapLibre fills
+the screen behind a compact maneuver card and trip/CNG bottom overlay. Detailed route, status and
+CNG actions move into an expandable sheet; raw diagnostics and simulation controls are isolated in
+a debug-build-only developer screen. Routing, map matching, camera behavior, offline recovery and
+CNG planning remain unchanged. Android version is `0.11.0` (`versionCode=12`). See
+`docs/phases/navigation-ui-phase-1-acceptance.md`.
 
 ## Repository layout
 

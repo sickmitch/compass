@@ -56,7 +56,17 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.10.0` (`versionCode=11`).
+Android version is `0.11.0` (`versionCode=12`).
+
+Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
+overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
+Traffic, GPS, cache/connectivity state, planned stops and trip actions are available in an
+expandable bottom sheet. Debug-build simulation controls and raw state have a separate
+`Strumenti sviluppatore` screen and are not composed into the normal driving interface. The UI
+derives its display model from the existing authoritative `NavigationState`; routing and navigation
+logic remain outside Compose. The operator accepted the Phase 1 device gate on 2026-09-03 after
+validating the driving surface, expandable details, developer-tool isolation, foreground-service
+continuity and clean notification teardown.
 
 ## Navigation Stage 1 device gate
 

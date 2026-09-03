@@ -108,6 +108,21 @@ fun RoutePlannerScreen(
             }
         },
     )
+    val showDrivingSurface = state.stage == PlannerStage.NAVIGATION_PREVIEW &&
+        navigationState.route != null &&
+        navigationState.phase != NavigationPhase.ROUTE_PREVIEW
+    if (showDrivingSurface) {
+        Surface(modifier = modifier.fillMaxSize()) {
+            ActiveNavigationScreen(
+                state = navigationState,
+                onRequestRouteUpdate = onRequestRouteUpdate,
+                onSimulateOffRoute = onSimulateOffRoute,
+                onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
+                onStopNavigation = onStopNavigation,
+            )
+        }
+        return
+    }
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -506,7 +521,7 @@ private fun NavigationPreviewContent(
     onStopNavigation: () -> Unit,
 ) {
     if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
-        ActiveNavigationContent(
+        ActiveNavigationScreen(
             state = state,
             onRequestRouteUpdate = onRequestRouteUpdate,
             onSimulateOffRoute = onSimulateOffRoute,
