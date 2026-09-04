@@ -56,7 +56,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.11.0` (`versionCode=12`).
+Android version is `0.12.0` (`versionCode=13`).
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
 overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
@@ -67,6 +67,23 @@ derives its display model from the existing authoritative `NavigationState`; rou
 logic remain outside Compose. The operator accepted the Phase 1 device gate on 2026-09-03 after
 validating the driving surface, expandable details, developer-tool isolation, foreground-service
 continuity and clean notification teardown.
+
+Navigation UI Phase 2 centralizes driving-camera parameters in `NavigationCameraConfig`. Follow
+mode eases toward a speed- and maneuver-density-aware, pitched and heading-aligned camera target
+projected ahead on the
+remaining route. Heading follows a short matched-route tangent so a lagging GPS bearing cannot
+leave the road diagonal after recentering. Centralized top padding places the directional vehicle
+lower in the viewport. The vehicle stays vertically aligned in follow while retaining route-bearing
+rotation in free/overview mode. Nearby consecutive maneuvers increase zoom; sparse maneuvers widen
+the view within centralized bounds. MapLibre pan, rotate or zoom gestures enter free mode and expose a
+contrasting `Ricentra`; ten seconds without a gesture restore follow automatically. Overview remains
+north-up and uses only untravelled geometry. Name-bearing style layers prefer Italian labels, map
+waypoints and the optional trip summary use CNG-specific markers, and the summary is hidden until
+the driver taps `Viaggio`. During active navigation, generic basemap POIs are filtered out while
+fuel/charging stations, toll booths, border control and available traffic signals are retained;
+Compass CNG waypoints are unaffected. This reuses the existing matched position and MapLibre APIs without
+adding a navigation SDK. The device gate is `bash scripts/run-navigation-ui-phase2-live.sh`.
+The operator accepted this gate on 2026-09-04, including the final navigation-only POI filter.
 
 ## Navigation Stage 1 device gate
 
@@ -242,7 +259,10 @@ assembleDebug
 cd ..
 ```
 
-The default public demo map style is also replaceable:
+The development build defaults to the road-capable OpenFreeMap Liberty style
+(`https://tiles.openfreemap.org/styles/liberty`). It uses OpenStreetMap/OpenMapTiles data and is
+self-hostable. This is a functional baseline; the Compass-specific day/night navigation style is
+reserved for Navigation UI Phase 5. The style remains replaceable at build time:
 
 ```bash
 cd android

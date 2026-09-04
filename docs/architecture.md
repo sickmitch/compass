@@ -508,6 +508,41 @@ backgrounding and screen-off operation without losing the downloaded route. Stag
 TextToSpeech in that service, deduplicates early/prepare/immediate announcements and applies a
 smoothed, speed-aware MapLibre camera with explicit follow and overview modes.
 
+Navigation UI Phase 2 formalizes that camera boundary. `NavigationCameraConfig` owns the driving
+pitch, continuous speed- and maneuver-density-dependent zoom, forward look-ahead and transition
+timing policy;
+`NavigationCameraController` converts the current `NavigationState` into a MapLibre-independent
+camera instruction whose target lies ahead on the remaining route and whose bearing follows a
+short forward route tangent instead of a potentially lagging location heading. `NavigationMap`
+only renders that instruction with an eased transition. A MapLibre gesture changes UI-owned camera mode to
+`FREE`, suppressing later automatic camera updates until `Ricentra` or the inactivity timeout;
+north-up overview continues to fit only remaining geometry. This keeps camera presentation out of route matching and avoids a
+second copy of navigation progress.
+
+The free-camera state has a UI-owned ten-second inactivity timeout, reset by each MapLibre gesture;
+the navigation engine remains unaware of this presentation timer. Follow instructions also carry
+centralized asymmetric top padding. The matched vehicle is rendered by a vector locked vertically
+to the viewport during heading-up follow, then rotated against the map in free and overview modes.
+Consecutive-maneuver spacing contributes a bounded continuous zoom adjustment: dense junction
+sequences move closer and sparse stretches widen the view. The primary trip summary is opt-in
+through a compact map control rather than permanently covering the lower map.
+
+The Android development build uses the keyless OpenFreeMap Liberty style as its road-capable
+MapLibre baseline. `COMPASS_MAP_STYLE_URL` remains injectable for self-hosted/deployment styles.
+This selection fixes the absence of local streets in the former low-zoom demo tiles; it does not
+pre-empt the dedicated Compass day/night cartographic work in Navigation UI Phase 5.
+After a style loads, Compass rewrites only name-bearing symbol layers to prefer Italian names with
+neutral/local fallbacks, leaving route shields untouched. This is deliberately a rendering policy,
+not a mutation of OpenStreetMap or backend data.
+
+The active-navigation renderer also intersects every basemap `poi` symbol layer with a conservative
+driving whitelist while preserving that layer's original rank and geometry filter. Fuel/charging,
+toll booths, border control and traffic signals are eligible; transit, retail, tourism and civic
+POIs are suppressed. Traffic signals remain absent with the current OpenMapTiles schema rather than
+being inferred or fabricated. Compass-owned CNG waypoint sources are not part of this filtering.
+The combined Phase 2 camera, interaction, cartographic-context and lifecycle gate was accepted on
+an Android device on 2026-09-04.
+
 Confirmed deviations and five-minute active-navigation refreshes call Compass—not Valhalla
 directly—so Valhalla traffic costing and the remaining selected CNG itinerary stay authoritative.
 The current route remains active while the request is in flight and after a failure; a successful

@@ -328,6 +328,21 @@ a debug-build-only developer screen. Routing, map matching, camera behavior, off
 CNG planning remain unchanged. Android version is `0.11.0` (`versionCode=12`). See
 `docs/phases/navigation-ui-phase-1-acceptance.md`.
 
+Navigation UI Phase 2 was accepted on-device on 2026-09-04. The existing Compass camera policy now
+uses a centralized configuration, a forward target and heading
+derived from the remaining matched route, continuous speed/maneuver-aware pitch and zoom, and eased
+MapLibre transitions. Manual pan/rotate/zoom suspends follow until `Ricentra` or ten seconds of
+inactivity; overview is north-up and bounded to the remaining route. The vehicle stays vertical in
+heading-up follow, and bounded zoom now responds to both speed and the spacing of consecutive
+maneuvers. The development map now uses
+an OpenFreeMap road style so streets remain visible beneath the route and name layers prefer
+Italian. Active navigation suppresses generic basemap POIs while retaining available fuel/charging,
+toll, border and traffic-control infrastructure. A directional vehicle replaces the point, CNG
+uses dedicated markers, manual camera mode returns to follow after ten idle seconds, and the trip
+summary is available through a compact toggle instead of permanently covering the map. The final
+Compass day/night styling remains Phase 5. No external navigation SDK was added. Android version is `0.12.0`
+(`versionCode=13`). See `docs/phases/navigation-ui-phase-2-acceptance.md`.
+
 ## Repository layout
 
 ```text

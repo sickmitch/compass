@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,7 +51,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 import org.compass.cng.BuildConfig
+import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.ReroutingStatus
@@ -70,10 +74,23 @@ internal fun ActiveNavigationScreen(
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
     val ui = state.toDrivingUiModel()
+    val cameraConfig = remember { NavigationCameraConfig() }
     var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
+    var cameraGestureRevision by rememberSaveable { mutableStateOf(0L) }
+    var showTripSummary by rememberSaveable { mutableStateOf(false) }
     var showDetails by rememberSaveable { mutableStateOf(false) }
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(cameraMode, cameraGestureRevision) {
+        if (cameraMode == NavigationCameraMode.FREE) {
+            delay(cameraConfig.freeModeAutoRecenterMillis)
+            if (cameraMode == NavigationCameraMode.FREE) {
+                Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=follow reason=idle_timeout")
+                cameraMode = NavigationCameraMode.FOLLOW
+            }
+        }
+    }
 
     if (confirmFuelStopReplacement) {
         FuelStopReplacementDialog(
@@ -114,6 +131,18 @@ internal fun ActiveNavigationScreen(
             state = state,
             mapStyleUrl = BuildConfig.COMPASS_MAP_STYLE_URL,
             cameraMode = cameraMode,
+            cameraConfig = cameraConfig,
+            onCameraModeChange = { mode ->
+                if (mode == NavigationCameraMode.FREE) {
+                    cameraGestureRevision += 1
+                }
+                if (mode != cameraMode) {
+                    Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=${mode.name.lowercase()} reason=gesture")
+                } else {
+                    Log.i(NAVIGATION_UI_LOG_TAG, "camera_interaction=gesture")
+                }
+                cameraMode = mode
+            },
             modifier = Modifier.fillMaxSize(),
         )
         Column(
@@ -130,19 +159,32 @@ internal fun ActiveNavigationScreen(
             Spacer(modifier = Modifier.weight(1f))
             MapModeControls(
                 cameraMode = cameraMode,
-                onOverview = { cameraMode = NavigationCameraMode.OVERVIEW },
-                onRecenter = { cameraMode = NavigationCameraMode.FOLLOW },
+                tripSummaryVisible = showTripSummary,
+                onOverview = {
+                    Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=overview reason=control")
+                    cameraMode = NavigationCameraMode.OVERVIEW
+                },
+                onRecenter = {
+                    Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=follow reason=recenter")
+                    cameraMode = NavigationCameraMode.FOLLOW
+                },
+                onToggleTripSummary = {
+                    showTripSummary = !showTripSummary
+                    Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=$showTripSummary")
+                },
                 modifier = Modifier
                     .align(Alignment.End)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
-            TripBottomBar(
-                ui = ui,
-                onOpenDetails = { showDetails = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-            )
+            if (showTripSummary) {
+                TripBottomBar(
+                    ui = ui,
+                    onOpenDetails = { showDetails = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+            }
         }
     }
 }
@@ -215,17 +257,46 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
 @Composable
 private fun MapModeControls(
     cameraMode: NavigationCameraMode,
+    tripSummaryVisible: Boolean,
     onOverview: () -> Unit,
     onRecenter: () -> Unit,
+    onToggleTripSummary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Surface(
             shape = CircleShape,
             tonalElevation = 6.dp,
+            color = if (tripSummaryVisible) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+            },
+        ) {
+            TextButton(
+                onClick = onToggleTripSummary,
+                modifier = Modifier.testTag("navigation_trip_toggle"),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (tripSummaryVisible) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                ),
+            ) { Text(if (tripSummaryVisible) "Nascondi" else "Viaggio") }
+        }
+        Surface(
+            shape = CircleShape,
+            tonalElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
         ) {
-            TextButton(onClick = onOverview) { Text("Panoramica") }
+            TextButton(
+                onClick = onOverview,
+                modifier = Modifier.testTag("navigation_overview"),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) { Text("Panoramica") }
         }
         if (cameraMode != NavigationCameraMode.FOLLOW) {
             Surface(
@@ -234,7 +305,13 @@ private fun MapModeControls(
                 color = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
-                TextButton(onClick = onRecenter) { Text("Ricentra") }
+                TextButton(
+                    onClick = onRecenter,
+                    modifier = Modifier.testTag("navigation_recenter"),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                ) { Text("Ricentra") }
             }
         }
     }
@@ -271,7 +348,19 @@ private fun TripBottomBar(
             ui.nextCngStop?.let { stop ->
                 HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 7.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "⛽", fontSize = 20.sp)
+                    Surface(
+                        modifier = Modifier.testTag("navigation_cng_badge"),
+                        shape = RoundedCornerShape(7.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ) {
+                        Text(
+                            text = "CNG",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                     Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(

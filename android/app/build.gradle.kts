@@ -13,7 +13,7 @@ val compassApiBaseUrl = providers.gradleProperty("COMPASS_API_BASE_URL")
     .orElse("http://10.0.2.2:8000/")
     .get()
 val compassMapStyleUrl = providers.gradleProperty("COMPASS_MAP_STYLE_URL")
-    .orElse("https://demotiles.maplibre.org/style.json")
+    .orElse("https://tiles.openfreemap.org/styles/liberty")
     .get()
 val compassMapAmbientCacheMb = providers.gradleProperty("COMPASS_MAP_AMBIENT_CACHE_MB")
     .orElse("100")
@@ -35,8 +35,8 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 12
-        versionName = "0.11.0"
+        versionCode = 13
+        versionName = "0.12.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())

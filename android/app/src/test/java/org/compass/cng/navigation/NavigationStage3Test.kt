@@ -149,7 +149,7 @@ class NavigationStage3Test {
 
         assertTrue(urban.zoom > motorway.zoom)
         assertTrue(urban.pitchDegrees < motorway.pitchDegrees)
-        assertEquals(92.0, urban.bearingDegrees, 0.0)
+        assertEquals(90.0, urban.bearingDegrees, 0.5)
     }
 
     @Test
