@@ -25,6 +25,7 @@ data class NavigationEnginePolicy(
 class NavigationEngine(
     private val policy: NavigationEnginePolicy = NavigationEnginePolicy(),
     private val locationFilter: LocationFilter = LocationFilter(),
+    private val headingController: NavigationHeadingController = NavigationHeadingController(),
 ) {
     private val mutableState = MutableStateFlow(NavigationState())
     val state: StateFlow<NavigationState> = mutableState.asStateFlow()
@@ -152,6 +153,7 @@ class NavigationEngine(
             maxOf(0.0, routeMatcher.distanceAtShapeIndex(it.endShapeIndex) - match.distanceAlongGeometryMeters)
         }
         val speed = filtered.speedMetersPerSecond ?: 0.0
+        val navigationBearing = headingController.update(match.segmentBearingDegrees, speed)
         val computedPhase = navigationPhase(
             distanceRemainingMeters = distanceRemaining,
             distanceToManeuverMeters = distanceToManeuver,
@@ -166,10 +168,14 @@ class NavigationEngine(
                 computedPhase
             },
             rawLocation = rawLocation,
-            snappedLocation = match.snappedCoordinate,
-            currentRouteSegmentIndex = match.segmentIndex,
-            currentSpeedMetersPerSecond = speed,
-            vehicleBearingDegrees = filtered.bearingDegrees ?: match.segmentBearingDegrees,
+            navigationPosition = NavigationPosition(
+                coordinate = match.snappedCoordinate,
+                routeSegmentIndex = match.segmentIndex,
+                speedMetersPerSecond = speed,
+                bearingDegrees = navigationBearing,
+                horizontalAccuracyMeters = filtered.accuracyMeters,
+                timestampEpochMillis = filtered.timestampEpochMillis,
+            ),
             currentRoadName = currentManeuver?.streetNames?.firstOrNull(),
             distanceRemainingMeters = distanceRemaining,
             drivingDurationRemainingSeconds = drivingRemaining,
@@ -262,6 +268,7 @@ class NavigationEngine(
 
     private fun resetTracking(route: NavigationRoute) {
         locationFilter.reset()
+        headingController.reset()
         matcher = RouteMatcher(route.geometry)
         consecutiveOffRouteFixes = 0
         lastAcceptedFixAtMillis = null

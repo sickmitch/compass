@@ -620,6 +620,19 @@ private fun NavigationDeveloperScreen(
                             Text("Connettività: ${state.connectivity}")
                             Text("Fuori rotta: ${state.offRouteStatus}")
                             Text("Ricalcolo: ${state.reroutingStatus}")
+                            Text(
+                                "Posizione guida: " + if (state.navigationPosition == null) {
+                                    "NON DISPONIBILE"
+                                } else {
+                                    "AGGANCIATA AL PERCORSO"
+                                },
+                            )
+                            state.navigationPosition?.let { position ->
+                                Text("Precisione fix: ${position.horizontalAccuracyMeters.toInt()} m")
+                                Text("Velocità filtrata: ${position.speedMetersPerSecond.toInt()} m/s")
+                                Text("Direzione stabilizzata: ${position.bearingDegrees.toInt()}°")
+                            }
+                            Text("Fix rifiutati: ${state.rejectedLocationCount}")
                             Text("ID rotta: ${route.routeId}")
                             state.lastSpokenInstruction?.let { Text("Voce: $it") }
                         }

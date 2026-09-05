@@ -1,5 +1,7 @@
 package org.compass.cng.navigation
 
+import kotlin.math.cos
+import kotlin.math.sin
 import org.compass.cng.domain.model.Coordinate
 
 enum class NavigationCameraMode {
@@ -18,27 +20,29 @@ data class NavigationCameraInstruction(
 
 /** Centralized driving-camera policy; MapLibre only executes the returned instruction. */
 data class NavigationCameraConfig(
-    val urbanZoom: Double = 16.4,
-    val motorwayZoom: Double = 14.0,
+    val urbanZoom: Double = 16.8,
+    val motorwayZoom: Double = 14.3,
     val urbanPitchDegrees: Double = 52.0,
     val motorwayPitchDegrees: Double = 58.0,
     val urbanSpeedMetersPerSecond: Double = 6.0,
     val motorwaySpeedMetersPerSecond: Double = 30.0,
     val closeManeuverDistanceMeters: Double = 180.0,
-    val complexManeuverDistanceMeters: Double = 800.0,
-    val closeManeuverZoomBoost: Double = 0.9,
-    val complexManeuverZoomBoost: Double = 0.45,
+    val maneuverAwarenessDistanceMeters: Double = 1_200.0,
+    val closeManeuverZoomBoost: Double = 0.8,
+    val approachingManeuverMinimumZoomBoost: Double = 0.7,
+    val approachingManeuverMaximumZoomBoost: Double = 1.4,
+    val complexManeuverZoomBoost: Double = 0.25,
     val denseManeuverSpacingMeters: Double = 300.0,
     val sparseManeuverSpacingMeters: Double = 1_800.0,
-    val denseManeuverZoomBoost: Double = 0.7,
+    val denseManeuverZoomBoost: Double = 1.1,
     val sparseManeuverZoomReduction: Double = 0.55,
     val minimumFollowZoom: Double = 13.2,
-    val maximumFollowZoom: Double = 17.6,
+    val maximumFollowZoom: Double = 18.2,
     val minimumLookAheadMeters: Double = 38.0,
     val maximumLookAheadMeters: Double = 240.0,
     val lookAheadSeconds: Double = 5.5,
     val headingLookAheadMeters: Double = 28.0,
-    val followTopPaddingFraction: Double = 0.18,
+    val followTopPaddingFraction: Double = 0.22,
     val freeModeAutoRecenterMillis: Long = 10_000,
     val followAnimationMillis: Int = 900,
     val overviewAnimationMillis: Int = 800,
@@ -50,7 +54,9 @@ data class NavigationCameraConfig(
         require(motorwayPitchDegrees in 45.0..60.0)
         require(motorwaySpeedMetersPerSecond > urbanSpeedMetersPerSecond)
         require(closeManeuverDistanceMeters > 0.0)
-        require(complexManeuverDistanceMeters >= closeManeuverDistanceMeters)
+        require(maneuverAwarenessDistanceMeters >= closeManeuverDistanceMeters)
+        require(approachingManeuverMinimumZoomBoost >= 0.0)
+        require(approachingManeuverMaximumZoomBoost >= approachingManeuverMinimumZoomBoost)
         require(denseManeuverSpacingMeters > 0.0)
         require(sparseManeuverSpacingMeters > denseManeuverSpacingMeters)
         require(denseManeuverZoomBoost >= 0.0)
@@ -82,18 +88,25 @@ class NavigationCameraController(
             (speed - config.urbanSpeedMetersPerSecond) /
                 (config.motorwaySpeedMetersPerSecond - config.urbanSpeedMetersPerSecond)
             ).coerceIn(0.0, 1.0)
-        val maneuverZoomBoost = when {
-            maneuverDistance != null && maneuverDistance <= config.closeManeuverDistanceMeters -> {
-                val proximity = 1.0 -
-                    maneuverDistance.coerceAtLeast(0.0) / config.closeManeuverDistanceMeters
-                config.closeManeuverZoomBoost * proximity
+        val maneuverZoomBoost = maneuverDistance
+            ?.takeIf { it.isFinite() && it >= 0.0 && it <= config.maneuverAwarenessDistanceMeters }
+            ?.let { distance ->
+                val proximity = 1.0 - distance / config.maneuverAwarenessDistanceMeters
+                val approachBoost = lerp(
+                    config.approachingManeuverMinimumZoomBoost,
+                    config.approachingManeuverMaximumZoomBoost,
+                    proximity,
+                )
+                val closeBoost = if (distance <= config.closeManeuverDistanceMeters) {
+                    config.closeManeuverZoomBoost *
+                        (1.0 - distance / config.closeManeuverDistanceMeters)
+                } else {
+                    0.0
+                }
+                approachBoost + closeBoost +
+                    if (complexJunction) config.complexManeuverZoomBoost * proximity else 0.0
             }
-            complexJunction && maneuverDistance != null &&
-                maneuverDistance <= config.complexManeuverDistanceMeters -> {
-                config.complexManeuverZoomBoost
-            }
-            else -> 0.0
-        }
+            ?: 0.0
         val maneuverSpacingMeters = state.nextManeuver?.distanceMeters
         val maneuverDensityZoomAdjustment = maneuverSpacingZoomAdjustment(maneuverSpacingMeters)
         val remaining = state.routePortions().remaining
@@ -103,7 +116,6 @@ class NavigationCameraController(
         val lookAhead = maneuverDistance?.let { distance ->
             minOf(desiredLookAhead, maxOf(config.minimumLookAheadMeters / 2.0, distance * 0.55))
         } ?: desiredLookAhead
-        val target = coordinateAlong(remaining.ifEmpty { listOf(position) }, lookAhead)
         val headingTarget = coordinateAlong(
             remaining.ifEmpty { listOf(position) },
             config.headingLookAheadMeters,
@@ -116,6 +128,9 @@ class NavigationCameraController(
                 ?.let(::normalizeBearing)
         }
             ?: 0.0
+        // Keep the vehicle on the viewport centreline. Following a curved route point as the
+        // camera target introduces a lateral offset even when the local road bearing is correct.
+        val target = coordinateAtBearing(position, bearing, lookAhead)
 
         return NavigationCameraInstruction(
             target = target,
@@ -161,6 +176,21 @@ class NavigationCameraController(
             config.denseManeuverZoomBoost,
             -config.sparseManeuverZoomReduction,
             spacingFraction,
+        )
+    }
+
+    private fun coordinateAtBearing(
+        start: Coordinate,
+        bearingDegrees: Double,
+        distanceMeters: Double,
+    ): Coordinate {
+        val bearingRadians = bearingDegrees.toRadians()
+        val latitudeDelta = distanceMeters * cos(bearingRadians) / EARTH_RADIUS_METERS
+        val longitudeDelta = distanceMeters * sin(bearingRadians) /
+            (EARTH_RADIUS_METERS * cos(start.latitude.toRadians()))
+        return Coordinate(
+            latitude = start.latitude + latitudeDelta * 180.0 / Math.PI,
+            longitude = start.longitude + longitudeDelta * 180.0 / Math.PI,
         )
     }
 

@@ -87,10 +87,7 @@ data class NavigationState(
     val phase: NavigationPhase = NavigationPhase.IDLE,
     val route: NavigationRoute? = null,
     val rawLocation: NavigationLocation? = null,
-    val snappedLocation: Coordinate? = null,
-    val currentRouteSegmentIndex: Int? = null,
-    val currentSpeedMetersPerSecond: Double = 0.0,
-    val vehicleBearingDegrees: Double? = null,
+    val navigationPosition: NavigationPosition? = null,
     val currentRoadName: String? = null,
     val distanceRemainingMeters: Double? = null,
     val drivingDurationRemainingSeconds: Double? = null,
@@ -112,7 +109,19 @@ data class NavigationState(
     val routeSource: NavigationRouteSource = NavigationRouteSource.LIVE,
     val routeCachedAtEpochMillis: Long? = null,
     val connectivity: NavigationConnectivity = NavigationConnectivity.ONLINE,
-)
+) {
+    val snappedLocation: Coordinate?
+        get() = navigationPosition?.coordinate
+
+    val currentRouteSegmentIndex: Int?
+        get() = navigationPosition?.routeSegmentIndex
+
+    val currentSpeedMetersPerSecond: Double
+        get() = navigationPosition?.speedMetersPerSecond ?: 0.0
+
+    val vehicleBearingDegrees: Double?
+        get() = navigationPosition?.bearingDegrees
+}
 
 enum class NavigationRouteSource {
     LIVE,
@@ -161,6 +170,17 @@ data class NavigationLocation(
     val accuracyMeters: Double,
     val speedMetersPerSecond: Double?,
     val bearingDegrees: Double?,
+    val timestampEpochMillis: Long,
+    val receivedAtEpochMillis: Long? = null,
+)
+
+/** The single authoritative map-matched vehicle position exposed to navigation consumers. */
+data class NavigationPosition(
+    val coordinate: Coordinate,
+    val routeSegmentIndex: Int,
+    val speedMetersPerSecond: Double,
+    val bearingDegrees: Double,
+    val horizontalAccuracyMeters: Double,
     val timestampEpochMillis: Long,
 )
 

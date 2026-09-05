@@ -12,6 +12,10 @@ data class LocationFilterPolicy(
     val maximumPositionSmoothingAlpha: Double = 0.75,
     val speedSmoothingAlpha: Double = 0.35,
     val bearingSmoothingAlpha: Double = 0.3,
+    val stationarySpeedMetersPerSecond: Double = 1.2,
+    val stationaryDeadbandMeters: Double = 3.0,
+    val minimumBearingSpeedMetersPerSecond: Double = 2.0,
+    val maximumDeliveryDelayMillis: Long = 10_000,
 )
 
 /** Rejects unusable fixes and smooths accepted position, speed and circular bearing. */
@@ -25,7 +29,13 @@ class LocationFilter(
     }
 
     fun filter(location: NavigationLocation): NavigationLocation? {
-        if (!location.accuracyMeters.isFinite() ||
+        val deliveryDelay = location.receivedAtEpochMillis?.minus(location.timestampEpochMillis)
+        if (deliveryDelay != null && deliveryDelay > policy.maximumDeliveryDelayMillis) return null
+        if (!location.coordinate.latitude.isFinite() ||
+            location.coordinate.latitude !in -90.0..90.0 ||
+            !location.coordinate.longitude.isFinite() ||
+            location.coordinate.longitude !in -180.0..180.0 ||
+            !location.accuracyMeters.isFinite() ||
             location.accuracyMeters <= 0.0 ||
             location.accuracyMeters > policy.maximumAccuracyMeters
         ) {
@@ -50,16 +60,27 @@ class LocationFilter(
             policy.minimumPositionSmoothingAlpha,
             policy.maximumPositionSmoothingAlpha,
         )
-        val coordinate = Coordinate(
-            latitude = lerp(last.coordinate.latitude, location.coordinate.latitude, positionAlpha),
-            longitude = lerp(last.coordinate.longitude, location.coordinate.longitude, positionAlpha),
-        )
         val speed = smoothNullable(
             last.speedMetersPerSecond,
             location.speedMetersPerSecond?.takeIf { it.isFinite() && it >= 0.0 },
             policy.speedSmoothingAlpha,
         )
-        val bearing = smoothBearing(last.bearingDegrees, location.bearingDegrees)
+        val stationary = (last.speedMetersPerSecond ?: 0.0) <= policy.stationarySpeedMetersPerSecond &&
+            (speed ?: 0.0) <= policy.stationarySpeedMetersPerSecond &&
+            displacement <= policy.stationaryDeadbandMeters
+        val coordinate = if (stationary) {
+            last.coordinate
+        } else {
+            Coordinate(
+                latitude = lerp(last.coordinate.latitude, location.coordinate.latitude, positionAlpha),
+                longitude = lerp(last.coordinate.longitude, location.coordinate.longitude, positionAlpha),
+            )
+        }
+        val bearing = if ((speed ?: 0.0) < policy.minimumBearingSpeedMetersPerSecond) {
+            last.bearingDegrees
+        } else {
+            smoothBearing(last.bearingDegrees, location.bearingDegrees)
+        }
         return location.copy(
             coordinate = coordinate,
             speedMetersPerSecond = speed,
@@ -69,7 +90,12 @@ class LocationFilter(
 
     private fun NavigationLocation.normalized() = copy(
         speedMetersPerSecond = speedMetersPerSecond?.takeIf { it.isFinite() && it >= 0.0 },
-        bearingDegrees = bearingDegrees?.takeIf { it.isFinite() }?.let(::normalizeBearing),
+        bearingDegrees = bearingDegrees
+            ?.takeIf {
+                it.isFinite() &&
+                    (speedMetersPerSecond ?: 0.0) >= policy.minimumBearingSpeedMetersPerSecond
+            }
+            ?.let(::normalizeBearing),
     )
 
     private fun smoothBearing(previous: Double?, current: Double?): Double? {

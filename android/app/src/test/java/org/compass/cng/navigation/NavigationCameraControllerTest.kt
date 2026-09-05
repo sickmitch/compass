@@ -33,9 +33,7 @@ class NavigationCameraControllerTest {
         val controller = NavigationCameraController()
         val state = NavigationState(
             route = route,
-            snappedLocation = route.origin,
-            currentRouteSegmentIndex = 0,
-            vehicleBearingDegrees = 90.0,
+            navigationPosition = position(route.origin, bearing = 90.0),
         )
 
         val instruction = controller.instruction(state)
@@ -52,13 +50,11 @@ class NavigationCameraControllerTest {
         val controller = NavigationCameraController()
         val base = NavigationState(
             route = route,
-            snappedLocation = route.origin,
-            currentRouteSegmentIndex = 0,
-            vehicleBearingDegrees = 90.0,
+            navigationPosition = position(route.origin, bearing = 90.0),
         )
 
-        val urban = controller.instruction(base.copy(currentSpeedMetersPerSecond = 6.0))
-        val motorway = controller.instruction(base.copy(currentSpeedMetersPerSecond = 30.0))
+        val urban = controller.instruction(base.withSpeed(6.0))
+        val motorway = controller.instruction(base.withSpeed(30.0))
 
         assertTrue(urban.zoom > motorway.zoom)
         assertTrue(urban.pitchDegrees < motorway.pitchDegrees)
@@ -83,10 +79,7 @@ class NavigationCameraControllerTest {
         )
         val base = NavigationState(
             route = route,
-            snappedLocation = route.origin,
-            currentRouteSegmentIndex = 0,
-            currentSpeedMetersPerSecond = 12.0,
-            vehicleBearingDegrees = 450.0,
+            navigationPosition = position(route.origin, speed = 12.0, bearing = 450.0),
         )
 
         val cruising = controller.instruction(base)
@@ -106,13 +99,32 @@ class NavigationCameraControllerTest {
         val instruction = controller.instruction(
             NavigationState(
                 route = route,
-                snappedLocation = route.origin,
-                currentRouteSegmentIndex = 0,
-                vehicleBearingDegrees = 315.0,
+                navigationPosition = position(route.origin, bearing = 315.0),
             ),
         )
 
         assertEquals(90.0, instruction.bearingDegrees, 0.5)
+    }
+
+    @Test
+    fun followTargetStaysOnLocalHeadingCentrelineBeforeAConnectedTurn() {
+        val bentRoute = route.copy(
+            geometry = listOf(
+                Coordinate(45.0, 9.0),
+                Coordinate(45.0, 9.0005),
+                Coordinate(45.001, 9.0005),
+            ),
+        )
+        val instruction = NavigationCameraController().instruction(
+            NavigationState(
+                route = bentRoute,
+                navigationPosition = position(bentRoute.origin, speed = 30.0),
+            ),
+        )
+
+        assertEquals(90.0, instruction.bearingDegrees, 0.5)
+        assertEquals(bentRoute.origin.latitude, instruction.target.latitude, 0.000_001)
+        assertTrue(instruction.target.longitude > bentRoute.origin.longitude)
     }
 
     @Test
@@ -122,9 +134,7 @@ class NavigationCameraControllerTest {
         val sparseManeuver = maneuver(distanceMeters = 2_500.0)
         val base = NavigationState(
             route = route,
-            snappedLocation = route.origin,
-            currentRouteSegmentIndex = 0,
-            currentSpeedMetersPerSecond = 12.0,
+            navigationPosition = position(route.origin, speed = 12.0),
             distanceToNextManeuverMeters = 700.0,
         )
 
@@ -141,10 +151,36 @@ class NavigationCameraControllerTest {
     }
 
     @Test
+    fun nearbyUrbanTurnIsMateriallyCloserThanSparseGuidanceAtTheSameSpeed() {
+        val controller = NavigationCameraController()
+        val turn = maneuver(distanceMeters = 100.0)
+        val base = NavigationState(
+            route = route,
+            navigationPosition = position(route.origin, speed = 22.0),
+            currentManeuver = turn,
+        )
+
+        val nearby = controller.instruction(
+            base.copy(
+                distanceToNextManeuverMeters = 46.0,
+                nextManeuver = maneuver(distanceMeters = 120.0),
+            ),
+        )
+        val sparse = controller.instruction(
+            base.copy(
+                distanceToNextManeuverMeters = 2_000.0,
+                nextManeuver = maneuver(distanceMeters = 2_500.0),
+            ),
+        )
+
+        assertTrue(nearby.zoom - sparse.zoom >= 2.0)
+    }
+
+    @Test
     fun drivingViewportAndManualCameraTimeoutHaveCentralizedSafeDefaults() {
         val config = NavigationCameraConfig()
 
-        assertEquals(0.18, config.followTopPaddingFraction, 0.0)
+        assertEquals(0.22, config.followTopPaddingFraction, 0.0)
         assertEquals(10_000L, config.freeModeAutoRecenterMillis)
     }
 
@@ -158,5 +194,16 @@ class NavigationCameraControllerTest {
         streetNames = listOf("Via Roma"),
         travelMode = "drive",
         travelType = "car",
+    )
+
+    private fun position(
+        coordinate: Coordinate,
+        segment: Int = 0,
+        speed: Double = 0.0,
+        bearing: Double = 90.0,
+    ) = NavigationPosition(coordinate, segment, speed, bearing, 5.0, 1_000)
+
+    private fun NavigationState.withSpeed(speed: Double) = copy(
+        navigationPosition = requireNotNull(navigationPosition).copy(speedMetersPerSecond = speed),
     )
 }

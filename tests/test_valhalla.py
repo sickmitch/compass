@@ -162,6 +162,49 @@ def test_traffic_aware_route_preserves_scheduled_departure_time() -> None:
     assert route.provider == "valhalla"
 
 
+def test_traffic_aware_route_retries_with_graph_speeds_after_no_path() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        payloads.append(payload)
+        if "date_time" in payload:
+            return httpx.Response(400, json={"error_code": 442, "error": "No path"})
+        return httpx.Response(200, json=fixture)
+
+    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(adapter.route(_request()))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.provider == "valhalla"
+    assert len(payloads) == 2
+    assert payloads[0]["date_time"] == {"type": 0}
+    assert "costing_options" in payloads[0]
+    assert "date_time" not in payloads[1]
+    assert "costing_options" not in payloads[1]
+
+
+def test_traffic_aware_route_preserves_no_path_when_graph_speed_retry_also_fails() -> None:
+    request_count = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(400, json={"error_code": 442, "error": "No path"})
+
+    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
+    try:
+        with pytest.raises(NoRouteError):
+            asyncio.run(adapter.route(_request()))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert request_count == 2
+
+
 def test_scheduled_departure_is_converted_to_valhalla_local_time() -> None:
     fixture = json.loads(FIXTURE.read_text())
     departure_at = datetime(2026, 8, 30, 8, 0, tzinfo=ZoneInfo("UTC"))
@@ -262,6 +305,42 @@ def test_waypoint_route_preserves_leg_boundaries() -> None:
     assert route.legs[0].distance_meters == 2500
     assert route.legs[1].distance_meters == 3500
     assert route.legs[1].encoded_polyline == "second-leg-polyline"
+
+
+def test_traffic_aware_waypoint_route_retries_with_graph_speeds_after_no_path() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    first_leg = fixture["trip"]["legs"][0]
+    second_leg = json.loads(json.dumps(first_leg))
+    fixture["trip"]["summary"] = {"length": 5.0, "time": 640}
+    fixture["trip"]["legs"] = [first_leg, second_leg]
+    payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        payloads.append(payload)
+        if "date_time" in payload:
+            return httpx.Response(400, json={"error_code": 442, "error": "No path"})
+        return httpx.Response(200, json=fixture)
+
+    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(
+            adapter.route_with_waypoints(
+                WaypointRouteRequest(
+                    origin=Coordinate(45.4642, 9.19),
+                    destination=Coordinate(44.4949, 11.3426),
+                    waypoints=(Coordinate(45.2, 9.7),),
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert len(route.legs) == 2
+    assert len(payloads) == 2
+    assert "date_time" in payloads[0]
+    assert "date_time" not in payloads[1]
+    assert "costing_options" not in payloads[1]
 
 
 def test_waypoint_route_rejects_wrong_leg_count() -> None:

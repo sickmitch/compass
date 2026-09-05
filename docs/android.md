@@ -56,7 +56,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.12.0` (`versionCode=13`).
+Android version is `0.13.0` (`versionCode=14`).
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
 overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
@@ -70,8 +70,7 @@ continuity and clean notification teardown.
 
 Navigation UI Phase 2 centralizes driving-camera parameters in `NavigationCameraConfig`. Follow
 mode eases toward a speed- and maneuver-density-aware, pitched and heading-aligned camera target
-projected ahead on the
-remaining route. Heading follows a short matched-route tangent so a lagging GPS bearing cannot
+projected ahead on the local route-heading centreline. Heading follows a short matched-route tangent so a lagging GPS bearing cannot
 leave the road diagonal after recentering. Centralized top padding places the directional vehicle
 lower in the viewport. The vehicle stays vertically aligned in follow while retaining route-bearing
 rotation in free/overview mode. Nearby consecutive maneuvers increase zoom; sparse maneuvers widen
@@ -84,6 +83,31 @@ fuel/charging stations, toll booths, border control and available traffic signal
 Compass CNG waypoints are unaffected. This reuses the existing matched position and MapLibre APIs without
 adding a navigation SDK. The device gate is `bash scripts/run-navigation-ui-phase2-live.sh`.
 The operator accepted this gate on 2026-09-04, including the final navigation-only POI filter.
+
+Navigation UI Phase 3 formalizes the location-to-puck pipeline without adding another navigation
+engine. `NavigationLocation` remains the raw fix. `LocationFilter` rejects inaccurate,
+out-of-order, delayed and implausible updates, applies a stationary deadband and ignores unstable
+low-speed GPS bearing. The existing `RouteMatcher` projects accepted fixes onto the downloaded
+route. `NavigationEngine` exposes the result as one `NavigationPosition`, including matched
+coordinate/segment, filtered speed, stabilized route heading, source accuracy and accepted-fix
+timestamp; legacy read accessors derive from that object rather than storing duplicate state.
+
+`MapPuckAnimator` drives MapLibre source updates between accepted positions using the pure
+`NavigationPuckMotion` planner. Normal updates interpolate coordinate and shortest-path angular
+rotation for most of the fix interval. Initial placement and large discontinuities snap, while
+stationary sub-three-metre changes hold the displayed pose. Camera state and route matching remain
+separate: releasing the camera does not stop puck interpolation. Pipeline values are visible only
+inside the existing developer screen. The device gate is
+`bash scripts/run-navigation-ui-phase3-live.sh`.
+
+The first Phase 3 device run exposed excessive altitude and lateral puck displacement during urban
+turn sequences. The camera target now follows the local heading centreline instead of a distant
+curved-route point, top padding is increased, and maneuver-aware zoom has a stronger continuous
+approach range before the close-turn boost. These remain centralized camera policy values.
+
+The same gate later exposed a server-side Valhalla time-dependent convergence failure before the
+Android route preview could load. The routing adapter now performs one graph-speed retry only for a
+traffic-aware error 442; the updated live runner probes Milan–Bologna before installing the APK.
 
 ## Navigation Stage 1 device gate
 

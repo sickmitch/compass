@@ -512,7 +512,7 @@ Navigation UI Phase 2 formalizes that camera boundary. `NavigationCameraConfig` 
 pitch, continuous speed- and maneuver-density-dependent zoom, forward look-ahead and transition
 timing policy;
 `NavigationCameraController` converts the current `NavigationState` into a MapLibre-independent
-camera instruction whose target lies ahead on the remaining route and whose bearing follows a
+camera instruction whose target lies ahead on the local route-heading centreline and whose bearing follows a
 short forward route tangent instead of a potentially lagging location heading. `NavigationMap`
 only renders that instruction with an eased transition. A MapLibre gesture changes UI-owned camera mode to
 `FREE`, suppressing later automatic camera updates until `Ricentra` or the inactivity timeout;
@@ -542,6 +542,42 @@ POIs are suppressed. Traffic signals remain absent with the current OpenMapTiles
 being inferred or fabricated. Compass-owned CNG waypoint sources are not part of this filtering.
 The combined Phase 2 camera, interaction, cartographic-context and lifecycle gate was accepted on
 an Android device on 2026-09-04.
+
+Navigation UI Phase 3 makes the existing location boundary explicit:
+
+```text
+Android LocationManager
+        -> NavigationLocation (raw fix)
+        -> LocationFilter (validation, deadband, smoothing)
+        -> RouteMatcher (projection and progress)
+        -> NavigationPosition (single authoritative matched pose)
+        -> NavigationPuckMotion (pure transition plan)
+        -> MapPuckAnimator (MapLibre frame updates)
+```
+
+Raw GPS remains available only for diagnostics and off-route/reroute origin selection. The map,
+camera and route portions consume the matched `NavigationPosition`; compatibility accessors derive
+coordinate, segment, speed and bearing from that object rather than duplicating them in state.
+Route-segment bearing is stabilized with circular shortest-path interpolation and frozen below the
+low-speed threshold, so noisy raw course cannot rotate the vehicle at rest. Normal puck movement
+interpolates over a bounded fraction of the fix interval; stationary deadband changes are held and
+large discontinuities snap rather than animating across the map. Android frame scheduling remains
+in the MapLibre presentation adapter, while all thresholds and transition math are platform-free
+and unit tested.
+
+Phase 3 device evidence revealed that using a farther point on curved remaining geometry as the
+camera target could move the vehicle sideways even with the correct local bearing. The target is
+therefore projected from the matched position along that local bearing. This preserves the
+heading-up invariant and keeps the vehicle on the horizontal centreline; stronger bounded
+maneuver-proximity zoom and slightly greater top padding improve dense urban junction readability.
+
+The repeated Phase 3 gate also exposed a Valhalla failure mode independent of Android: a
+time-dependent request may terminate with error 442 after reaching its convergence limit even when
+the graph-speed route is valid. For route and waypoint-route calls, the adapter makes one bounded,
+logged retry with `date_time` and traffic `speed_types` removed only after that exact no-path
+response. It never retries malformed input, provider outages or other error codes, and preserves a
+second no-path result. This implements the required no-traffic availability fallback without
+silently replacing ordinary traffic-aware successes.
 
 Confirmed deviations and five-minute active-navigation refreshes call Compass—not Valhalla
 directly—so Valhalla traffic costing and the remaining selected CNG itinerary stay authoritative.

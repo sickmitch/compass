@@ -37,7 +37,7 @@ class NavigationRouteRecalculatorTest {
             phase = NavigationPhase.NAVIGATING,
             route = original,
             rawLocation = NavigationLocation(raw, 5.0, 10.0, 90.0, 1_000),
-            snappedLocation = snapped,
+            navigationPosition = position(snapped),
         )
 
         recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
@@ -82,7 +82,7 @@ class NavigationRouteRecalculatorTest {
         val state = NavigationState(
             phase = NavigationPhase.NAVIGATING,
             route = route,
-            snappedLocation = origin,
+            navigationPosition = position(origin),
             routeProgressFraction = 0.1,
             nextFuelStop = NavigationFuelStopProgress(stops.first(), 7_000.0),
         )
@@ -127,7 +127,7 @@ class NavigationRouteRecalculatorTest {
         val state = NavigationState(
             phase = NavigationPhase.NAVIGATING,
             route = route,
-            snappedLocation = origin,
+            navigationPosition = position(origin),
             routeProgressFraction = 0.1,
             nextFuelStop = NavigationFuelStopProgress(stop, 9_000.0),
         )
@@ -181,7 +181,7 @@ class NavigationRouteRecalculatorTest {
         val state = NavigationState(
             phase = NavigationPhase.NAVIGATING,
             route = route,
-            snappedLocation = origin,
+            navigationPosition = position(origin),
             nextFuelStop = NavigationFuelStopProgress(stop, 9_000.0),
         )
 
@@ -201,6 +201,15 @@ class NavigationRouteRecalculatorTest {
         location = location,
         expectedArrivalAt = null,
         dwellTimeSeconds = 1_200,
+    )
+
+    private fun position(coordinate: Coordinate) = NavigationPosition(
+        coordinate = coordinate,
+        routeSegmentIndex = 0,
+        speedMetersPerSecond = 10.0,
+        bearingDegrees = 90.0,
+        horizontalAccuracyMeters = 5.0,
+        timestampEpochMillis = 1_000,
     )
 
     private fun navigationLeg(

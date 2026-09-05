@@ -137,6 +137,7 @@ class NavigationForegroundService : Service(), LocationListener {
                 speedMetersPerSecond = speed,
                 bearingDegrees = bearing,
                 timestampEpochMillis = location.time,
+                receivedAtEpochMillis = System.currentTimeMillis(),
             ),
         )
         processNavigationState(System.currentTimeMillis())

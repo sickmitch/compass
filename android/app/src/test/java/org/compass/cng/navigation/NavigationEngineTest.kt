@@ -44,6 +44,23 @@ class NavigationEngineTest {
     }
 
     @Test
+    fun engineExposesOneMatchedNavigationPositionInsteadOfRawGpsAsVehicle() {
+        val engine = testEngine()
+        engine.preview(route())
+        engine.start()
+        val raw = fix(45.00005, 9.0015, 1_000, bearing = 270.0)
+
+        engine.updateLocation(raw, now = Instant.ofEpochMilli(1_000))
+
+        val state = engine.state.value
+        val position = requireNotNull(state.navigationPosition)
+        assertEquals(raw, state.rawLocation)
+        assertEquals(45.0, position.coordinate.latitude, 0.000_001)
+        assertEquals(90.0, position.bearingDegrees, 0.5)
+        assertEquals(position.coordinate, state.snappedLocation)
+    }
+
+    @Test
     fun forwardReplayUpdatesProgressManeuverAndArrivalLocally() {
         val engine = testEngine()
         engine.preview(route())

@@ -20,8 +20,9 @@ Navigation UI Phase 5 still owns Compass-specific day/night cartographic design.
 - Zoom changes continuously between urban and motorway policy values. An approaching maneuver adds
   bounded detail, while the distance between consecutive maneuvers moves the camera closer in dense
   junction sequences and farther away on sparse route sections.
-- The camera target is projected forward along the remaining matched route. It is limited near an
-  imminent maneuver, so the vehicle appears below center while the upcoming turn stays visible.
+- The camera target is projected forward from the matched position on the local route-heading
+  centreline. Look-ahead is limited near an imminent maneuver, so the vehicle appears below center
+  without drifting sideways when the route bends beyond the immediate road segment.
 - MapLibre executes camera changes with eased transitions rather than instantaneous resets.
 - A pan, rotation or zoom gesture enters `FREE` mode and stops automatic camera updates until the
   driver presses `Ricentra` or the ten-second inactivity timeout expires.

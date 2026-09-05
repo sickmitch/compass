@@ -343,6 +343,19 @@ summary is available through a compact toggle instead of permanently covering th
 Compass day/night styling remains Phase 5. No external navigation SDK was added. Android version is `0.12.0`
 (`versionCode=13`). See `docs/phases/navigation-ui-phase-2-acceptance.md`.
 
+Navigation UI Phase 3 was accepted on-device on 2026-09-05. Raw Android fixes now pass through
+explicit validation/smoothing and the existing route matcher into one authoritative
+`NavigationPosition`. Low-speed position and heading noise are held, delayed/inaccurate/implausible
+fixes are rejected, and route-matched heading is stabilized independently from raw GPS bearing.
+MapLibre animates coordinate and shortest-path rotation between accepted matched positions while
+snapping only initial or large discontinuous transitions. A Valhalla traffic-aware no-path now
+receives one logged graph-speed retry, preserving navigation availability when time-dependent
+search reaches its convergence bound. The accepted gate confirmed the exact route preflight,
+continuous matched movement, density-aware urban zoom, free-camera puck motion, developer pipeline
+diagnostics, follow recovery and clean teardown. Android version is `0.13.0` (`versionCode=14`).
+The repeatable gate remains `bash scripts/run-navigation-ui-phase3-live.sh`; see
+`docs/phases/navigation-ui-phase-3-acceptance.md`.
+
 ## Repository layout
 
 ```text

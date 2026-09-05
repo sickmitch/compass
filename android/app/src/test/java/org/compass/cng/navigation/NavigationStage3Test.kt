@@ -20,7 +20,7 @@ class NavigationStage3Test {
             phase = NavigationPhase.NAVIGATING,
             route = route,
             currentManeuver = route.maneuvers.first(),
-            currentSpeedMetersPerSecond = 10.0,
+            navigationPosition = position(route.origin, speed = 10.0),
         )
 
         assertEquals(
@@ -75,7 +75,7 @@ class NavigationStage3Test {
         val onRoute = NavigationState(
             phase = NavigationPhase.NAVIGATING,
             route = route,
-            snappedLocation = route.origin,
+            navigationPosition = position(route.origin),
         )
         controller.navigationStarted(1_000)
 
@@ -134,16 +134,14 @@ class NavigationStage3Test {
                 route = route,
                 currentManeuver = route.maneuvers.first(),
                 distanceToNextManeuverMeters = 90.0,
-                currentSpeedMetersPerSecond = 8.0,
-                vehicleBearingDegrees = 92.0,
+                navigationPosition = position(route.origin, speed = 8.0, bearing = 92.0),
             ),
         )
         val motorway = controller.instruction(
             NavigationState(
                 route = route,
                 distanceToNextManeuverMeters = 5_000.0,
-                currentSpeedMetersPerSecond = 32.0,
-                vehicleBearingDegrees = 90.0,
+                navigationPosition = position(route.origin, speed = 32.0, bearing = 90.0),
             ),
         )
 
@@ -158,8 +156,7 @@ class NavigationStage3Test {
         val snapped = Coordinate(45.0, 9.0015)
         val portions = NavigationState(
             route = route,
-            snappedLocation = snapped,
-            currentRouteSegmentIndex = 1,
+            navigationPosition = position(snapped, segment = 1),
         ).routePortions()
 
         assertEquals(listOf(route.geometry[0], route.geometry[1], snapped), portions.travelled)
@@ -221,4 +218,11 @@ class NavigationStage3Test {
             ),
         ).toNavigationRoute()
     }
+
+    private fun position(
+        coordinate: Coordinate,
+        segment: Int = 0,
+        speed: Double = 0.0,
+        bearing: Double = 90.0,
+    ) = NavigationPosition(coordinate, segment, speed, bearing, 5.0, 1_000)
 }

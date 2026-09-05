@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from datetime import datetime
 from math import isfinite
@@ -26,6 +27,7 @@ from compass.routing.domain import (
 VALHALLA_NO_ROUTE_ERROR_CODES = {442}
 VALHALLA_MATRIX_LOCATION_ERROR_CODES = {171}
 DEFAULT_DEPARTURE_TIMEZONE = ZoneInfo("Europe/Rome")
+LOGGER = logging.getLogger("compass.routing.valhalla")
 
 
 class ValhallaRoutingAdapter:
@@ -72,25 +74,46 @@ class ValhallaRoutingAdapter:
             departure_timezone=self._departure_timezone,
         )
         response = await self._request("POST", "/route", json=payload)
+        if self._traffic_aware and _is_no_route_response(response):
+            LOGGER.warning(
+                "time-dependent route found no path; retrying with Valhalla graph speeds",
+                extra={"routing_fallback": "valhalla_graph_speeds"},
+            )
+            response = await self._request(
+                "POST",
+                "/route",
+                json=_without_time_dependent_costing(payload),
+            )
         _raise_route_http_error(response)
 
         return _parse_route(_json_mapping(response))
 
     async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute:
         locations = (request.origin, *request.waypoints, request.destination)
+        payload = _route_payload(
+            locations,
+            costing=request.costing,
+            language=request.language,
+            departure_at=request.departure_at,
+            traffic_aware=self._traffic_aware,
+            traffic_speed_types=self._traffic_speed_types,
+            departure_timezone=self._departure_timezone,
+        )
         response = await self._request(
             "POST",
             "/route",
-            json=_route_payload(
-                locations,
-                costing=request.costing,
-                language=request.language,
-                departure_at=request.departure_at,
-                traffic_aware=self._traffic_aware,
-                traffic_speed_types=self._traffic_speed_types,
-                departure_timezone=self._departure_timezone,
-            ),
+            json=payload,
         )
+        if self._traffic_aware and _is_no_route_response(response):
+            LOGGER.warning(
+                "time-dependent waypoint route found no path; retrying with Valhalla graph speeds",
+                extra={"routing_fallback": "valhalla_graph_speeds"},
+            )
+            response = await self._request(
+                "POST",
+                "/route",
+                json=_without_time_dependent_costing(payload),
+            )
         _raise_route_http_error(response)
         return _parse_waypoint_route(_json_mapping(response), expected_leg_count=len(locations) - 1)
 
@@ -274,6 +297,24 @@ def _raise_route_http_error(response: httpx.Response) -> None:
         )
     if response.status_code >= 300:
         raise RoutingProviderError(f"Valhalla returned unexpected HTTP {response.status_code}")
+
+
+def _is_no_route_response(response: httpx.Response) -> bool:
+    if response.status_code < 400:
+        return False
+    try:
+        return _optional_int(_json_mapping(response).get("error_code")) in (
+            VALHALLA_NO_ROUTE_ERROR_CODES
+        )
+    except RoutingProviderError:
+        return False
+
+
+def _without_time_dependent_costing(payload: Mapping[str, Any]) -> dict[str, Any]:
+    fallback = dict(payload)
+    fallback.pop("date_time", None)
+    fallback.pop("costing_options", None)
+    return fallback
 
 
 def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:

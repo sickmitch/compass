@@ -74,12 +74,13 @@ fun NavigationMap(
     val route = requireNotNull(state.route)
     val mapView = rememberMapViewWithLifecycle()
     val cameraController = remember(cameraConfig) { NavigationCameraController(cameraConfig) }
+    val puckAnimator = remember(route.routeId) { MapPuckAnimator() }
     val density = LocalDensity.current.density
     val currentCameraMode by rememberUpdatedState(cameraMode)
     val currentOnCameraModeChange by rememberUpdatedState(onCameraModeChange)
     AndroidView(factory = { mapView }, modifier = modifier)
 
-    DisposableEffect(mapView) {
+    DisposableEffect(mapView, puckAnimator) {
         var registeredMap: MapLibreMap? = null
         val interactionListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
             if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
@@ -92,6 +93,7 @@ fun NavigationMap(
         }
         onDispose {
             registeredMap?.removeOnCameraMoveStartedListener(interactionListener)
+            puckAnimator.cancel()
         }
     }
 
@@ -139,7 +141,8 @@ fun NavigationMap(
                     style.addLayerBelow(travelledLayer, firstMapLabelLayerId)
                 }
                 val initialPuck = state.snappedLocation ?: route.origin
-                val initialBearing = cameraController.instruction(state).bearingDegrees
+                val initialBearing = state.navigationPosition?.bearingDegrees
+                    ?: cameraController.instruction(state).bearingDegrees
                 style.addImage(
                     NAVIGATION_VEHICLE_IMAGE,
                     requireNotNull(mapView.context.getDrawable(R.drawable.ic_navigation_vehicle)),
@@ -150,6 +153,7 @@ fun NavigationMap(
                         navigationPuckFeature(initialPuck, initialBearing),
                     ),
                 )
+                state.navigationPosition?.let(puckAnimator::reset)
                 val vehicleLayer = SymbolLayer(PUCK_LAYER, PUCK_SOURCE).withProperties(
                         iconImage(NAVIGATION_VEHICLE_IMAGE),
                         iconSize(0.55f),
@@ -223,10 +227,7 @@ fun NavigationMap(
         mapView,
         cameraMode,
         route.routeId,
-        state.snappedLocation,
-        state.currentRouteSegmentIndex,
-        state.vehicleBearingDegrees,
-        state.currentSpeedMetersPerSecond,
+        state.navigationPosition,
         state.currentManeuver,
         state.nextManeuver,
         state.distanceToNextManeuverMeters,
@@ -240,11 +241,23 @@ fun NavigationMap(
             style.getSourceAs<GeoJsonSource>(REMAINING_SOURCE)?.setGeoJson(
                 lineFeature(portions.remaining.map(::point)),
             )
-            state.snappedLocation?.let { snapped ->
-                val puckBearing = cameraController.instruction(state).bearingDegrees
-                style.getSourceAs<GeoJsonSource>(PUCK_SOURCE)?.setGeoJson(
-                    navigationPuckFeature(snapped, puckBearing),
-                )
+            state.navigationPosition?.let { position ->
+                puckAnimator.moveTo(
+                    position = position,
+                    onTransition = { transition ->
+                        Log.i(
+                            NAVIGATION_MAP_LOG_TAG,
+                            "puck_motion mode=${transition.mode.name.lowercase()} " +
+                                "duration_ms=${transition.durationMillis} " +
+                                "distance_m=${transition.distanceMeters.toInt()} " +
+                                "source=matched",
+                        )
+                    },
+                ) { pose ->
+                    map.style?.getSourceAs<GeoJsonSource>(PUCK_SOURCE)?.setGeoJson(
+                        navigationPuckFeature(pose.coordinate, pose.bearingDegrees),
+                    )
+                }
             }
 
             updateCamera(
@@ -312,7 +325,8 @@ private fun updateCamera(
                 NAVIGATION_MAP_LOG_TAG,
                 "camera_instruction mode=follow bearing=${camera.bearingDegrees.toInt()} " +
                     "pitch=${camera.pitchDegrees.toInt()} zoom=${camera.zoom} " +
-                    "next_maneuver_spacing=${state.nextManeuver?.distanceMeters}",
+                    "next_maneuver_spacing=${state.nextManeuver?.distanceMeters} " +
+                    "target_alignment=centerline",
             )
             map.easeCamera(
                 CameraUpdateFactory.newCameraPosition(
