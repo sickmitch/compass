@@ -217,6 +217,7 @@ async def ranked_candidates(
         maximum_detour_minutes=network.maximum_detour_seconds / 60,
         base_route=_base_route_response(
             spatial.base_route,
+            settings=settings,
             departure_at=network.departure_at,
         ),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),

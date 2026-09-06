@@ -9,6 +9,8 @@ import kotlinx.serialization.json.Json
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
+import org.compass.cng.domain.model.ManeuverSign
+import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.navigation.CachedNavigationRoute
 import org.compass.cng.navigation.NavigationFuelPlan
@@ -125,11 +127,26 @@ private data class StoredManeuver(
     val bearingAfter: Int?,
     val travelMode: String?,
     val travelType: String?,
+    val sign: StoredManeuverSign? = null,
+    val roundaboutExitCount: Int? = null,
 ) {
     fun toDomain() = Maneuver(
-        type, instruction, distanceMeters, durationSeconds, beginShapeIndex, endShapeIndex,
-        streetNames, verbalTransitionAlertInstruction, verbalPreTransitionInstruction,
-        verbalPostTransitionInstruction, bearingBefore, bearingAfter, travelMode, travelType,
+        type = type,
+        instruction = instruction,
+        distanceMeters = distanceMeters,
+        durationSeconds = durationSeconds,
+        beginShapeIndex = beginShapeIndex,
+        endShapeIndex = endShapeIndex,
+        streetNames = streetNames,
+        verbalTransitionAlertInstruction = verbalTransitionAlertInstruction,
+        verbalPreTransitionInstruction = verbalPreTransitionInstruction,
+        verbalPostTransitionInstruction = verbalPostTransitionInstruction,
+        bearingBefore = bearingBefore,
+        bearingAfter = bearingAfter,
+        travelMode = travelMode,
+        travelType = travelType,
+        sign = sign?.toDomain(),
+        roundaboutExitCount = roundaboutExitCount,
     )
 
     companion object {
@@ -138,7 +155,47 @@ private data class StoredManeuver(
             value.beginShapeIndex, value.endShapeIndex, value.streetNames,
             value.verbalTransitionAlertInstruction, value.verbalPreTransitionInstruction,
             value.verbalPostTransitionInstruction, value.bearingBefore, value.bearingAfter,
-            value.travelMode, value.travelType,
+            value.travelMode, value.travelType, value.sign?.let(StoredManeuverSign::fromDomain),
+            value.roundaboutExitCount,
+        )
+    }
+}
+
+@Serializable
+private data class StoredManeuverSignElement(
+    val text: String,
+    val consecutiveCount: Int? = null,
+) {
+    fun toDomain() = ManeuverSignElement(text, consecutiveCount)
+
+    companion object {
+        fun fromDomain(value: ManeuverSignElement) = StoredManeuverSignElement(
+            value.text,
+            value.consecutiveCount,
+        )
+    }
+}
+
+@Serializable
+private data class StoredManeuverSign(
+    val exitNumberElements: List<StoredManeuverSignElement> = emptyList(),
+    val exitBranchElements: List<StoredManeuverSignElement> = emptyList(),
+    val exitTowardElements: List<StoredManeuverSignElement> = emptyList(),
+    val exitNameElements: List<StoredManeuverSignElement> = emptyList(),
+) {
+    fun toDomain() = ManeuverSign(
+        exitNumberElements.map(StoredManeuverSignElement::toDomain),
+        exitBranchElements.map(StoredManeuverSignElement::toDomain),
+        exitTowardElements.map(StoredManeuverSignElement::toDomain),
+        exitNameElements.map(StoredManeuverSignElement::toDomain),
+    )
+
+    companion object {
+        fun fromDomain(value: ManeuverSign) = StoredManeuverSign(
+            value.exitNumberElements.map(StoredManeuverSignElement::fromDomain),
+            value.exitBranchElements.map(StoredManeuverSignElement::fromDomain),
+            value.exitTowardElements.map(StoredManeuverSignElement::fromDomain),
+            value.exitNameElements.map(StoredManeuverSignElement::fromDomain),
         )
     }
 }
@@ -157,12 +214,16 @@ private data class StoredNavigationTiming(
     val tripArrivalAt: String?,
     val trafficDelaySeconds: Double?,
     val trafficDelayState: String,
+    val trafficState: String = "not_configured",
+    val trafficAware: Boolean = false,
+    val trafficObservedAt: String? = null,
 ) {
     fun toDomain() = NavigationTiming(
         routeId, drivingDurationSeconds, remainingDrivingDurationSeconds, refuelingStopCount,
         dwellSecondsPerRefuelingStop, totalRefuelingDwellSeconds, totalTripDurationSeconds,
         departureAt?.let(OffsetDateTime::parse), drivingArrivalAt?.let(OffsetDateTime::parse),
         tripArrivalAt?.let(OffsetDateTime::parse), trafficDelaySeconds, trafficDelayState,
+        trafficState, trafficAware, trafficObservedAt?.let(OffsetDateTime::parse),
     )
 
     companion object {
@@ -172,6 +233,7 @@ private data class StoredNavigationTiming(
             value.totalRefuelingDwellSeconds, value.totalTripDurationSeconds,
             value.departureAt?.toString(), value.drivingArrivalAt?.toString(),
             value.tripArrivalAt?.toString(), value.trafficDelaySeconds, value.trafficDelayState,
+            value.trafficState, value.trafficAware, value.trafficObservedAt?.toString(),
         )
     }
 }

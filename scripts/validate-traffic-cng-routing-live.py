@@ -70,6 +70,7 @@ def validate(
 
     _positive_number(base.get("distance_meters"), "base.distance_meters")
     _positive_number(base.get("duration_seconds"), "base.duration_seconds")
+    _traffic_navigation(base.get("navigation"), "base")
     _require(ranked.get("departure_at") == departure_at, "ranked departure changed")
     _traffic_cost_basis(ranked.get("cost_basis"), "ranked")
     candidates = ranked.get("candidates")
@@ -123,8 +124,8 @@ def validate(
         "Valhalla matrix evidence missing",
     )
     _require(
-        "algorithm::time_dependent_forward_a*" in valhalla_logs,
-        "Valhalla did not use time-dependent route search",
+        "algorithm::bidirectional_a*" in valhalla_logs,
+        "Valhalla did not use prioritized bidirectional traffic routing",
     )
 
     print(
@@ -158,6 +159,22 @@ def _traffic_cost_basis(value: object, name: str) -> None:
     _require(
         value.get("duration_model") == "valhalla_time_dependent_traffic",
         f"{name} duration model is not time-dependent traffic",
+    )
+
+
+def _traffic_navigation(value: object, name: str) -> None:
+    _require(isinstance(value, dict), f"{name} navigation timing is missing")
+    assert isinstance(value, dict)
+    _require(value.get("traffic_aware") is True, f"{name} route is not traffic-aware")
+    _require(value.get("traffic_state") in {"fresh", "mock"}, f"{name} traffic is not fresh")
+    _require(
+        value.get("traffic_delay_state") == "estimated",
+        f"{name} traffic baseline is unavailable",
+    )
+    delay = value.get("traffic_delay_seconds")
+    _require(
+        isinstance(delay, int | float) and not isinstance(delay, bool) and delay >= 0,
+        f"{name} traffic delay is invalid",
     )
 
 

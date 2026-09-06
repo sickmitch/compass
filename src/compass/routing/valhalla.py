@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from math import isfinite
 from typing import Any
@@ -11,6 +12,8 @@ from compass.routing.domain import (
     BaseRoute,
     Coordinate,
     Maneuver,
+    ManeuverSign,
+    ManeuverSignElement,
     MatrixCost,
     MatrixLocationError,
     MatrixRequest,
@@ -84,9 +87,22 @@ class ValhallaRoutingAdapter:
                 "/route",
                 json=_without_time_dependent_costing(payload),
             )
+            _raise_route_http_error(response)
+            return replace(_parse_route(_json_mapping(response)), traffic_fallback_used=True)
         _raise_route_http_error(response)
-
-        return _parse_route(_json_mapping(response))
+        route = _parse_route(_json_mapping(response))
+        if not self._traffic_aware:
+            return route
+        baseline = await self._route_baseline(payload, expected_leg_count=1)
+        return replace(
+            route,
+            traffic_aware=True,
+            traffic_delay_seconds=(
+                max(0.0, route.duration_seconds - baseline.duration_seconds)
+                if isinstance(baseline, BaseRoute)
+                else None
+            ),
+        )
 
     async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute:
         locations = (request.origin, *request.waypoints, request.destination)
@@ -114,8 +130,31 @@ class ValhallaRoutingAdapter:
                 "/route",
                 json=_without_time_dependent_costing(payload),
             )
+            _raise_route_http_error(response)
+            return replace(
+                _parse_waypoint_route(
+                    _json_mapping(response), expected_leg_count=len(locations) - 1
+                ),
+                traffic_fallback_used=True,
+            )
         _raise_route_http_error(response)
-        return _parse_waypoint_route(_json_mapping(response), expected_leg_count=len(locations) - 1)
+        route = _parse_waypoint_route(
+            _json_mapping(response), expected_leg_count=len(locations) - 1
+        )
+        if not self._traffic_aware:
+            return route
+        baseline = await self._route_baseline(
+            payload, expected_leg_count=len(locations) - 1
+        )
+        return replace(
+            route,
+            traffic_aware=True,
+            traffic_delay_seconds=(
+                max(0.0, route.duration_seconds - baseline.duration_seconds)
+                if isinstance(baseline, WaypointRoute)
+                else None
+            ),
+        )
 
     async def matrix(self, request: MatrixRequest) -> MatrixResult:
         payload = {
@@ -178,6 +217,29 @@ class ValhallaRoutingAdapter:
         except (RoutingUnavailableError, RoutingProviderError):
             return False
         return True
+
+    async def _route_baseline(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        expected_leg_count: int,
+    ) -> BaseRoute | WaypointRoute | None:
+        """Calculate a graph-speed baseline without invalidating a valid live route."""
+        try:
+            response = await self._request(
+                "POST", "/route", json=_without_time_dependent_costing(payload)
+            )
+            _raise_route_http_error(response)
+            value = _json_mapping(response)
+            if expected_leg_count == 1:
+                return _parse_route(value)
+            return _parse_waypoint_route(value, expected_leg_count=expected_leg_count)
+        except (RoutingUnavailableError, RoutingProviderError, NoRouteError):
+            LOGGER.warning(
+                "traffic route succeeded but graph-speed delay baseline was unavailable",
+                extra={"routing_fallback": "traffic_delay_unavailable"},
+            )
+            return None
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
@@ -249,6 +311,11 @@ def _route_payload(
         traffic_speed_types=traffic_speed_types,
         departure_timezone=departure_timezone,
     )
+    if traffic_aware:
+        # Valhalla's bidirectional mode consumes current traffic close to the
+        # departure and fades it along the route. It avoids the convergence
+        # limits of single-direction time-dependent A* on long road routes.
+        payload["prioritize_bidirectional"] = True
     return payload
 
 
@@ -275,7 +342,12 @@ def _date_time_payload(
     departure_timezone: ZoneInfo,
 ) -> dict[str, Any]:
     if departure_at is None:
-        return {"type": 0}
+        # Valhalla 3.8.3 can return an immediate 442 for long current-time
+        # routes forced through bidirectional A*. An explicit depart-at value
+        # for the current local minute has the same traffic semantics and is
+        # the mode for which prioritize_bidirectional provides time-aware
+        # forward costing with a recosted reverse search.
+        departure_at = datetime.now(departure_timezone)
     if departure_at.tzinfo is None or departure_at.utcoffset() is None:
         raise ValueError("departure_at must include a UTC offset")
     local_departure = departure_at.astimezone(departure_timezone)
@@ -314,6 +386,7 @@ def _without_time_dependent_costing(payload: Mapping[str, Any]) -> dict[str, Any
     fallback = dict(payload)
     fallback.pop("date_time", None)
     fallback.pop("costing_options", None)
+    fallback.pop("prioritize_bidirectional", None)
     return fallback
 
 
@@ -486,11 +559,80 @@ def _parse_maneuver(value: Mapping[str, Any], index: int, *, leg_index: int = 0)
             bearing_after=_optional_int(value.get("bearing_after"), f"{field}.bearing_after"),
             travel_mode=_optional_string(value.get("travel_mode"), f"{field}.travel_mode"),
             travel_type=_optional_string(value.get("travel_type"), f"{field}.travel_type"),
+            sign=_parse_maneuver_sign(value.get("sign"), f"{field}.sign"),
+            roundabout_exit_count=_optional_non_negative_int(
+                value.get("roundabout_exit_count"),
+                f"{field}.roundabout_exit_count",
+            ),
         )
     except KeyError as error:
         raise RoutingProviderError(
             f"Valhalla response is missing {field}.{error.args[0]}"
         ) from error
+
+
+def _parse_maneuver_sign(value: Any, field: str) -> ManeuverSign | None:
+    if value is None:
+        return None
+    sign = _mapping(value, field)
+    parsed = ManeuverSign(
+        exit_number_elements=_parse_sign_elements(
+            sign.get("exit_number_elements", []),
+            f"{field}.exit_number_elements",
+        ),
+        exit_branch_elements=_parse_sign_elements(
+            sign.get("exit_branch_elements", []),
+            f"{field}.exit_branch_elements",
+        ),
+        exit_toward_elements=_parse_sign_elements(
+            sign.get("exit_toward_elements", []),
+            f"{field}.exit_toward_elements",
+        ),
+        exit_name_elements=_parse_sign_elements(
+            sign.get("exit_name_elements", []),
+            f"{field}.exit_name_elements",
+        ),
+    )
+    if not any(
+        (
+            parsed.exit_number_elements,
+            parsed.exit_branch_elements,
+            parsed.exit_toward_elements,
+            parsed.exit_name_elements,
+        )
+    ):
+        return None
+    return parsed
+
+
+def _parse_sign_elements(value: Any, field: str) -> tuple[ManeuverSignElement, ...]:
+    elements = _list(value, field)
+    parsed: list[ManeuverSignElement] = []
+    for index, element_value in enumerate(elements):
+        element_field = f"{field}[{index}]"
+        element = _mapping(element_value, element_field)
+        text = _string(element.get("text"), f"{element_field}.text").strip()
+        if not text:
+            raise RoutingProviderError(f"{element_field}.text must not be blank")
+        parsed.append(
+            ManeuverSignElement(
+                text=text,
+                consecutive_count=_optional_non_negative_int(
+                    element.get("consecutive_count"),
+                    f"{element_field}.consecutive_count",
+                ),
+            )
+        )
+    return tuple(parsed)
+
+
+def _optional_non_negative_int(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    parsed = _integer(value, field)
+    if parsed < 0:
+        raise RoutingProviderError(f"{field} must not be negative")
+    return parsed
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:

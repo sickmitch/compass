@@ -122,6 +122,29 @@ def validate(
         _require(route.get("provider") == "valhalla", f"{name} route provider mismatch")
         _positive_number(route.get("distance_meters"), f"{name} route distance")
         _positive_number(route.get("duration_seconds"), f"{name} route duration")
+        navigation = route.get("navigation")
+        _require(isinstance(navigation, dict), f"{name} navigation timing is missing")
+        assert isinstance(navigation, dict)
+        _require(
+            navigation.get("traffic_state") == "fresh",
+            f"{name} route traffic state is not fresh",
+        )
+        _require(
+            navigation.get("traffic_aware") is True,
+            f"{name} route fell back to graph speeds",
+        )
+        _require(
+            navigation.get("traffic_delay_state") == "estimated",
+            f"{name} route has no traffic delay baseline",
+        )
+        _non_negative_number(
+            navigation.get("traffic_delay_seconds"),
+            f"{name} route traffic delay",
+        )
+        _require(
+            isinstance(navigation.get("traffic_observed_at"), str),
+            f"{name} route has no traffic observation time",
+        )
 
     _require(
         updater_logs.count("route-scoped traffic overlay update committed") == 1,
@@ -134,8 +157,8 @@ def validate(
     _require("TOMTOM_API_KEY" not in updater_logs, "credential name leaked")
     _require("key=" not in updater_logs, "provider credential leaked")
     _require(
-        valhalla_logs.count("algorithm::time_dependent_forward_a*") >= 3,
-        "expected initial, refreshed and repeated time-dependent routes",
+        valhalla_logs.count("algorithm::bidirectional_a*") >= 3,
+        "expected prioritized bidirectional traffic routes and baselines",
     )
 
     print(
@@ -160,6 +183,12 @@ def validate(
     )
     print("On-demand TomTom traffic activation accepted.")
 
+
+def _non_negative_number(value: object, field: str) -> None:
+    _require(
+        isinstance(value, int | float) and not isinstance(value, bool) and value >= 0,
+        f"{field} must be non-negative",
+    )
 
 def _positive_number(value: object, field: str) -> None:
     _require(

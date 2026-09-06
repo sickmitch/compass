@@ -86,8 +86,10 @@ time-dependent auto requests with:
 ```json
 {
   "date_time": {
-    "type": 0
+    "type": 1,
+    "value": "2026-09-05T14:30"
   },
+  "prioritize_bidirectional": true,
   "costing_options": {
     "auto": {
       "speed_types": ["current", "predicted", "constrained", "freeflow"]
@@ -96,11 +98,25 @@ time-dependent auto requests with:
 }
 ```
 
-For routes with an explicit scheduled departure, the adapter uses Valhalla departure-time semantics
-with `date_time.type=1`. The public Compass timestamp remains an offset-aware instant; the adapter
-converts it to the configured routing timezone and removes the offset because Valhalla requires a
-local `YYYY-MM-DDTHH:MM` value. When traffic is disabled or the overlay is not enabled, Compass
-keeps the previous request shape and reports graph-speed durations as non-traffic-aware.
+An omitted public departure is serialized as the current minute in the configured routing timezone.
+This is semantically “depart now”; `prioritize_bidirectional` keeps the search time-aware and
+bounded. For an
+explicit scheduled departure, the public Compass timestamp remains an offset-aware instant and the
+adapter converts it to the same local format required by Valhalla.
+
+Time-dependent reachability is part of the route contract. The original Bologna city-centre
+fixture (`44.4949,11.3426`) returns 442 for a depart-at request on both the deployed tiles and an
+independent Valhalla service because it terminates inside a temporally restricted driving area;
+the invariant graph route alone is not proof of time-dependent reachability. Live gates and the
+Android startup preview therefore use Bologna Centrale (`44.5057,11.3424`). Arbitrary user
+destinations retain the explicit, non-traffic-aware graph-speed availability fallback.
+
+A successful traffic route is compared with a second graph-speed Valhalla route for the same
+ordered locations and costing. The non-negative duration difference is exposed as an estimate, not
+applied as a post-routing penalty. Traffic-aware status requires a current provider-health snapshot,
+a successful traffic route and this numeric baseline. Error 442 still receives one graph-speed
+availability fallback, but that response is explicitly non-traffic-aware. When traffic is disabled
+or the overlay is not enabled, Compass keeps the original graph-speed request shape.
 
 ## Tile and mapping invariant
 

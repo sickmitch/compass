@@ -196,7 +196,7 @@ echo
 echo "MANUAL DEVICE ACCEPTANCE — follow these scenarios in this order"
 echo
 echo "Scenario A — ordinary predictive plan"
-echo "  From the route preview tap 'Valuta autonomia CNG'."
+echo "  From the route preview tap 'Crea viaggio'."
 echo "  Enter exactly: residual range 120 km, reserve 30 km, full range 300 km,"
 echo "  maximum detour 10 minutes. Then tap the evaluation button."
 echo "  Expected: a screen titled 'Piano rifornimenti CNG'. It must show one or more"

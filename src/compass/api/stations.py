@@ -18,6 +18,7 @@ from compass.api.routes import (
     NavigationTimingResponse,
     RouteGeometry,
     _navigation_timing_response,
+    _navigation_traffic,
 )
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
@@ -304,6 +305,7 @@ async def route_with_cng_stop(
         fuel_stop_ids=(station.mimit_station_id,),
         departure_at=departure_at,
         dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
+        **_navigation_traffic(route, settings),
     )
     coordinates = (origin, stop, destination)
     kinds = ("origin_to_cng_station", "cng_station_to_destination")
@@ -502,6 +504,7 @@ async def route_with_cng_itinerary(
         fuel_stop_ids=station_ids,
         departure_at=departure_at,
         dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
+        **_navigation_traffic(route, settings),
     )
     return RouteWithCngItineraryResponse(
         selected_stops=[

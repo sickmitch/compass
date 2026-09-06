@@ -128,7 +128,7 @@ curl --fail-with-body --silent --show-error \
 "${api_base_url}/api/v1/routes" >"$base_path" <<JSON
 {
 "origin":{"latitude":45.4642,"longitude":9.1900},
-"destination":{"latitude":44.4949,"longitude":11.3426},
+"destination":{"latitude":44.5057,"longitude":11.3424},
 "departure_at":"${departure_at}"
 }
 JSON
@@ -140,7 +140,7 @@ curl --fail-with-body --silent --show-error \
 "${api_base_url}/api/v1/cng/ranked-candidates" >"$ranked_path" <<JSON
 {
 "origin":{"latitude":45.4642,"longitude":9.1900},
-"destination":{"latitude":44.4949,"longitude":11.3426},
+"destination":{"latitude":44.5057,"longitude":11.3424},
 "effective_cng_range_km":300,
 "maximum_detour_minutes":240,
 "departure_at":"${departure_at}"
@@ -163,7 +163,7 @@ curl --fail-with-body --silent --show-error \
 "${api_base_url}/api/v1/routes/with-cng-stop" >"$selected_path" <<JSON
 {
 "origin":{"latitude":45.4642,"longitude":9.1900},
-"destination":{"latitude":44.4949,"longitude":11.3426},
+"destination":{"latitude":44.5057,"longitude":11.3424},
 "mimit_station_id":"${station_id}",
 "departure_at":"${departure_at}"
 }
@@ -176,7 +176,7 @@ curl --fail-with-body --silent --show-error \
 "${api_base_url}/api/v1/cng/predictive-candidates" >"$predictive_path" <<JSON
 {
 "origin":{"latitude":45.4642,"longitude":9.1900},
-"destination":{"latitude":44.4949,"longitude":11.3426},
+"destination":{"latitude":44.5057,"longitude":11.3424},
 "effective_cng_range_km":100,
 "estimated_remaining_cng_range_km":65,
 "reserve_cng_range_km":30,

@@ -48,7 +48,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
@@ -129,7 +128,6 @@ internal fun ActiveNavigationScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         NavigationMap(
             state = state,
-            mapStyleUrl = BuildConfig.COMPASS_MAP_STYLE_URL,
             cameraMode = cameraMode,
             cameraConfig = cameraConfig,
             onCameraModeChange = { mode ->
@@ -201,20 +199,10 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(62.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = ui.maneuverSymbol,
-                            fontSize = 34.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
+                PrimaryManeuverIcon(
+                    visual = ui.maneuverVisual,
+                    roundaboutExitCount = ui.roundaboutExitCount,
+                )
                 Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -240,12 +228,112 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
                     }
                 }
             }
+            ui.junctionSign?.let { sign ->
+                JunctionSignPanel(
+                    sign = sign,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
             ui.followingInstruction?.let { following ->
                 HorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ui.followingManeuverVisual?.let { visual ->
+                        ManeuverIcon(
+                            visual = visual,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(7.dp))
+                    }
+                    Text(
+                        text = "Poi · $following",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrimaryManeuverIcon(
+    visual: ManeuverVisual,
+    roundaboutExitCount: Int?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.size(62.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            ManeuverIcon(
+                visual = visual,
+                modifier = Modifier.size(46.dp),
+            )
+            roundaboutExitCount?.let { count ->
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(3.dp)
+                        .size(22.dp)
+                        .testTag("navigation_roundabout_exit_count"),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = count.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JunctionSignPanel(
+    sign: NavigationJunctionSignUiModel,
+    modifier: Modifier = Modifier,
+) {
+    val heading = listOfNotNull(
+        sign.exitNumber?.let { "Uscita $it" },
+        sign.branches,
+    ).joinToString(" · ")
+    val destination = listOfNotNull(
+        sign.exitName,
+        sign.toward?.let { "verso $it" },
+    ).joinToString(" · ")
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("navigation_junction_sign"),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            if (heading.isNotBlank()) {
                 Text(
-                    text = "Poi · $following",
+                    text = heading,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (destination.isNotBlank()) {
+                Text(
+                    text = destination,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -565,8 +653,22 @@ private fun NavigationDeveloperScreen(
     onClose: () -> Unit,
 ) {
     val route = requireNotNull(state.route)
+    var showManeuverGallery by rememberSaveable { mutableStateOf(false) }
+    var showJunctionSignGallery by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=developer_tools visible=true")
+    }
+    if (showManeuverGallery) {
+        NavigationManeuverGallery(
+            onClose = { showManeuverGallery = false },
+        )
+        return
+    }
+    if (showJunctionSignGallery) {
+        NavigationJunctionSignGallery(
+            onClose = { showJunctionSignGallery = false },
+        )
+        return
     }
     Dialog(
         onDismissRequest = onClose,
@@ -640,6 +742,26 @@ private fun NavigationDeveloperScreen(
                 }
                 item {
                     OutlinedButton(
+                        onClick = { showManeuverGallery = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("navigation_maneuver_gallery_entry"),
+                    ) {
+                        Text("Verifica iconografia manovre")
+                    }
+                }
+                item {
+                    OutlinedButton(
+                        onClick = { showJunctionSignGallery = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("navigation_junction_sign_gallery_entry"),
+                    ) {
+                        Text("Verifica segnaletica e uscite")
+                    }
+                }
+                item {
+                    OutlinedButton(
                         onClick = onRequestRouteUpdate,
                         enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
                         modifier = Modifier.fillMaxWidth(),
@@ -654,6 +776,225 @@ private fun NavigationDeveloperScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Simula deviazione (debug)")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavigationManeuverGallery(onClose: () -> Unit) {
+    LaunchedEffect(Unit) {
+        Log.i(NAVIGATION_UI_LOG_TAG, "surface=maneuver_gallery visible=true types=37")
+    }
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("navigation_maneuver_gallery"),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(horizontal = 20.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = 16.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(
+                                "Iconografia manovre",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "Tipi Valhalla 0–36 · solo debug",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = onClose) { Text("Chiudi") }
+                    }
+                }
+                itemsIndexed(
+                    items = valhallaManeuverVisualCatalog,
+                    key = { _, visual -> visual.type ?: -1 },
+                ) { _, visual ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    ManeuverIcon(
+                                        visual = visual,
+                                        modifier = Modifier.size(36.dp),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    "Tipo ${visual.type}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    visual.accessibilityLabel,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class JunctionSignSample(
+    val title: String,
+    val instruction: String,
+    val visual: ManeuverVisual,
+    val roundaboutExitCount: Int? = null,
+    val sign: NavigationJunctionSignUiModel? = null,
+)
+
+private val junctionSignSamples = listOf(
+    JunctionSignSample(
+        title = "Uscita autostradale",
+        instruction = "Prendi l'uscita verso Bologna Casalecchio.",
+        visual = maneuverVisual(20, null),
+        sign = NavigationJunctionSignUiModel(
+            exitNumber = "1",
+            branches = "A14",
+            toward = "Bologna / Ancona",
+            exitName = "Bologna Casalecchio",
+        ),
+    ),
+    JunctionSignSample(
+        title = "Rotatoria",
+        instruction = "Prendi la 2ª uscita.",
+        visual = maneuverVisual(26, null),
+        roundaboutExitCount = 2,
+    ),
+    JunctionSignSample(
+        title = "Diramazione a destra",
+        instruction = "Mantieni la destra verso Firenze.",
+        visual = maneuverVisual(23, null),
+        sign = NavigationJunctionSignUiModel(
+            exitNumber = null,
+            branches = "A1 / E 35",
+            toward = "Firenze",
+            exitName = null,
+        ),
+    ),
+    JunctionSignSample(
+        title = "Diramazione a sinistra",
+        instruction = "Mantieni la sinistra verso Milano.",
+        visual = maneuverVisual(24, null),
+        sign = NavigationJunctionSignUiModel(
+            exitNumber = null,
+            branches = "A1 / E 35",
+            toward = "Milano",
+            exitName = null,
+        ),
+    ),
+)
+
+@Composable
+private fun NavigationJunctionSignGallery(onClose: () -> Unit) {
+    LaunchedEffect(Unit) {
+        Log.i(NAVIGATION_UI_LOG_TAG, "surface=junction_sign_gallery visible=true samples=4")
+    }
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("navigation_junction_sign_gallery"),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(horizontal = 20.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = 16.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(
+                                "Segnaletica e uscite",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "Esempi di resa · solo debug",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = onClose) { Text("Chiudi") }
+                    }
+                }
+                itemsIndexed(junctionSignSamples) { _, sample ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                PrimaryManeuverIcon(
+                                    visual = sample.visual,
+                                    roundaboutExitCount = sample.roundaboutExitCount,
+                                )
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        sample.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        sample.instruction,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                            sample.sign?.let { JunctionSignPanel(it) }
+                        }
                     }
                 }
             }

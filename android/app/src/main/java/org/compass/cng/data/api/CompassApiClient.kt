@@ -65,7 +65,10 @@ class CompassApiClient(
                 eventLogger(
                     "route decoded: distance_meters=${route.distanceMeters.toLong()} " +
                         "duration_seconds=${route.durationSeconds.toLong()} " +
-                        "maneuvers=${route.maneuvers.size}",
+                        "maneuvers=${route.maneuvers.size} " +
+                        "traffic_state=${route.navigation.trafficState} " +
+                        "traffic_aware=${route.navigation.trafficAware} " +
+                        "traffic_delay_seconds=${route.navigation.trafficDelaySeconds?.toLong()}",
                 )
             }
         } catch (error: IllegalArgumentException) {
@@ -429,6 +432,26 @@ private data class ManeuverDto(
     @SerialName("bearing_after") val bearingAfter: Int?,
     @SerialName("travel_mode") val travelMode: String?,
     @SerialName("travel_type") val travelType: String?,
+    val sign: ManeuverSignDto? = null,
+    @SerialName("roundabout_exit_count") val roundaboutExitCount: Int? = null,
+)
+
+@Serializable
+private data class ManeuverSignElementDto(
+    val text: String,
+    @SerialName("consecutive_count") val consecutiveCount: Int? = null,
+)
+
+@Serializable
+private data class ManeuverSignDto(
+    @SerialName("exit_number_elements")
+    val exitNumberElements: List<ManeuverSignElementDto>,
+    @SerialName("exit_branch_elements")
+    val exitBranchElements: List<ManeuverSignElementDto>,
+    @SerialName("exit_toward_elements")
+    val exitTowardElements: List<ManeuverSignElementDto>,
+    @SerialName("exit_name_elements")
+    val exitNameElements: List<ManeuverSignElementDto>,
 )
 
 @Serializable
@@ -457,6 +480,9 @@ private data class NavigationTimingDto(
     @SerialName("trip_arrival_at") val tripArrivalAt: String?,
     @SerialName("traffic_delay_seconds") val trafficDelaySeconds: Double? = null,
     @SerialName("traffic_delay_state") val trafficDelayState: String = "unavailable",
+    @SerialName("traffic_state") val trafficState: String = "not_configured",
+    @SerialName("traffic_aware") val trafficAware: Boolean = false,
+    @SerialName("traffic_observed_at") val trafficObservedAt: String? = null,
 )
 
 @Serializable
@@ -881,22 +907,47 @@ private fun RouteResponseDto.toApiRoute(): ApiRoute {
     )
 }
 
-private fun ManeuverDto.toApiManeuver(): ApiManeuver = ApiManeuver(
-    type = type,
-    instruction = instruction,
-    distanceMeters = distanceMeters,
-    durationSeconds = durationSeconds,
-    beginShapeIndex = beginShapeIndex,
-    endShapeIndex = endShapeIndex,
-    streetNames = streetNames,
-    verbalTransitionAlertInstruction = verbalTransitionAlertInstruction,
-    verbalPreTransitionInstruction = verbalPreTransitionInstruction,
-    verbalPostTransitionInstruction = verbalPostTransitionInstruction,
-    bearingBefore = bearingBefore,
-    bearingAfter = bearingAfter,
-    travelMode = travelMode,
-    travelType = travelType,
+private fun ManeuverDto.toApiManeuver(): ApiManeuver {
+    require(roundaboutExitCount == null || roundaboutExitCount >= 0) {
+        "roundabout exit count must not be negative"
+    }
+    return ApiManeuver(
+        type = type,
+        instruction = instruction,
+        distanceMeters = distanceMeters,
+        durationSeconds = durationSeconds,
+        beginShapeIndex = beginShapeIndex,
+        endShapeIndex = endShapeIndex,
+        streetNames = streetNames,
+        verbalTransitionAlertInstruction = verbalTransitionAlertInstruction,
+        verbalPreTransitionInstruction = verbalPreTransitionInstruction,
+        verbalPostTransitionInstruction = verbalPostTransitionInstruction,
+        bearingBefore = bearingBefore,
+        bearingAfter = bearingAfter,
+        travelMode = travelMode,
+        travelType = travelType,
+        sign = sign?.toApiManeuverSign(),
+        roundaboutExitCount = roundaboutExitCount,
+    )
+}
+
+private fun ManeuverSignDto.toApiManeuverSign() = ApiManeuverSign(
+    exitNumberElements = exitNumberElements.map(ManeuverSignElementDto::toApiElement),
+    exitBranchElements = exitBranchElements.map(ManeuverSignElementDto::toApiElement),
+    exitTowardElements = exitTowardElements.map(ManeuverSignElementDto::toApiElement),
+    exitNameElements = exitNameElements.map(ManeuverSignElementDto::toApiElement),
 )
+
+private fun ManeuverSignElementDto.toApiElement(): ApiManeuverSignElement {
+    require(text.isNotBlank()) { "maneuver sign text must not be blank" }
+    require(consecutiveCount == null || consecutiveCount >= 0) {
+        "maneuver sign consecutive count must not be negative"
+    }
+    return ApiManeuverSignElement(
+        text = text.trim(),
+        consecutiveCount = consecutiveCount,
+    )
+}
 
 private fun RankedCandidatesResponseDto.toApiRankedCandidates(): ApiRankedCandidates {
     require(stage == "ranking") { "unsupported candidate response stage" }
@@ -1251,6 +1302,21 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
     require(trafficDelayState in setOf("unavailable", "estimated")) {
         "unsupported navigation traffic delay state"
     }
+    require(
+        trafficState in setOf(
+            "not_configured", "configured", "mock", "fresh", "stale", "unavailable",
+        ),
+    ) { "unsupported navigation traffic state" }
+    require(
+        !trafficAware || (
+            trafficDelayState == "estimated" &&
+                trafficDelaySeconds != null &&
+                trafficState in setOf("fresh", "mock") &&
+                trafficObservedAt != null
+        ),
+    ) {
+        "traffic-aware navigation timing requires current, observed delay evidence"
+    }
     return ApiNavigationTiming(
         routeId = routeId,
         drivingDurationSeconds = drivingDurationSeconds,
@@ -1264,6 +1330,9 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
         tripArrivalAt = tripArrivalAt,
         trafficDelaySeconds = trafficDelaySeconds,
         trafficDelayState = trafficDelayState,
+        trafficState = trafficState,
+        trafficAware = trafficAware,
+        trafficObservedAt = trafficObservedAt,
     )
 }
 

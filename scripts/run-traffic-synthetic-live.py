@@ -31,7 +31,7 @@ def main() -> int:
     try:
         origin = _coordinate_from_env("TRAFFIC_SYNTHETIC_ORIGIN", "45.4642,9.1900")
         destination = _coordinate_from_env(
-            "TRAFFIC_SYNTHETIC_DESTINATION", "44.4949,11.3426"
+            "TRAFFIC_SYNTHETIC_DESTINATION", "44.5057,11.3424"
         )
         edge_count = int(os.environ.get("TRAFFIC_SYNTHETIC_EDGE_COUNT", "12"))
         speed_kph = float(os.environ.get("TRAFFIC_SYNTHETIC_SPEED_KPH", "5"))

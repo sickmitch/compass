@@ -52,7 +52,16 @@ def _payloads():
     return {
         "departure_at": departure_at,
         "openapi": {"components": {"schemas": schemas}},
-        "base": {"distance_meters": 210_000, "duration_seconds": 7_000},
+        "base": {
+            "distance_meters": 210_000,
+            "duration_seconds": 7_000,
+            "navigation": {
+                "traffic_state": "fresh",
+                "traffic_aware": True,
+                "traffic_delay_state": "estimated",
+                "traffic_delay_seconds": 120,
+            },
+        },
         "ranked": {
             "departure_at": departure_at,
             "cost_basis": cost_basis,
@@ -81,7 +90,7 @@ def _payloads():
         },
         "logs": (
             "POST /route HTTP/1.1\n"
-            "algorithm::time_dependent_forward_a*\n"
+            "algorithm::bidirectional_a*\n"
             "POST /sources_to_targets HTTP/1.1\n"
         ),
     }
@@ -139,6 +148,8 @@ def test_cng_traffic_runner_is_isolated_and_read_only() -> None:
     assert "traffic_tar_sha_after" in runner
     assert "compass-traffic apply-once" not in runner
     assert "compass-valhalla-traffic-tool" not in runner
+    assert runner.count('"latitude":44.5057,"longitude":11.3424') == 4
+    assert '"latitude":44.4949,"longitude":11.3426' not in runner
 
 
 def test_api_service_does_not_receive_tomtom_feed_credentials() -> None:

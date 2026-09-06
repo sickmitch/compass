@@ -254,7 +254,10 @@ class NavigationForegroundService : Service(), LocationListener {
                 Log.i(
                     LOG_TAG,
                     "route update committed: $reason route=${route.routeId} " +
-                        "stops=${route.fuelStopIdsForLog()}",
+                        "stops=${route.fuelStopIdsForLog()} " +
+                        "traffic_state=${route.timing.trafficState} " +
+                        "traffic_aware=${route.timing.trafficAware} " +
+                        "traffic_delay_seconds=${route.timing.trafficDelaySeconds?.toLong()}",
                 )
                 resumeReplayAfterRouteUpdateIfNeeded()
                 processNavigationState(completedAt)

@@ -5,6 +5,8 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.Maneuver
+import org.compass.cng.domain.model.ManeuverSign
+import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationConnectivity
@@ -25,17 +27,49 @@ class NavigationDrivingUiModelTest {
 
         val ui = state.toDrivingUiModel()
 
-        assertEquals("↱", ui.maneuverSymbol)
+        assertEquals(ManeuverVisualFamily.TURN, ui.maneuverVisual.family)
+        assertEquals(ManeuverDirection.RIGHT, ui.maneuverVisual.direction)
         assertEquals("320 m", ui.distanceToManeuver)
         assertEquals("Svolta a destra su Via Roma.", ui.primaryInstruction)
         assertEquals("Via Roma", ui.targetRoad)
         assertEquals("Poi mantieni la sinistra.", ui.followingInstruction)
+        assertEquals(ManeuverVisualFamily.KEEP, ui.followingManeuverVisual?.family)
+        assertEquals(ManeuverDirection.LEFT, ui.followingManeuverVisual?.direction)
         assertEquals("81,5 km", ui.remainingDistance)
         assertEquals("1 h 40 min", ui.remainingDuration)
         assertEquals("S. ZENONE OVEST", ui.nextCngStop?.name)
         assertEquals("22,5 km", ui.nextCngStop?.distance)
         assertEquals("20:45", ui.nextCngStop?.arrivalTime)
         assertEquals(0.25f, ui.progress)
+    }
+
+    @Test
+    fun exposesStructuredJunctionSignsAndRoundaboutExitWithoutParsingInstruction() {
+        val state = sampleState().let { sample ->
+            val signed = requireNotNull(sample.currentManeuver).copy(
+                instruction = "Testo localizzato senza dati da analizzare.",
+                type = 26,
+                sign = ManeuverSign(
+                    exitNumberElements = listOf(ManeuverSignElement("2")),
+                    exitBranchElements = listOf(
+                        ManeuverSignElement("A1"),
+                        ManeuverSignElement("E 35"),
+                    ),
+                    exitTowardElements = listOf(ManeuverSignElement("Bologna")),
+                    exitNameElements = listOf(ManeuverSignElement("Casalecchio")),
+                ),
+                roundaboutExitCount = 2,
+            )
+            sample.copy(currentManeuver = signed)
+        }
+
+        val ui = state.toDrivingUiModel()
+
+        assertEquals(2, ui.roundaboutExitCount)
+        assertEquals("2", ui.junctionSign?.exitNumber)
+        assertEquals("A1 / E 35", ui.junctionSign?.branches)
+        assertEquals("Bologna", ui.junctionSign?.toward)
+        assertEquals("Casalecchio", ui.junctionSign?.exitName)
     }
 
     @Test
@@ -59,14 +93,167 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
-    fun mapsValhallaManeuverFamiliesToStablePhaseOneSymbols() {
-        assertEquals("↑", maneuverSymbol(8, null))
-        assertEquals("↗", maneuverSymbol(9, null))
-        assertEquals("↱", maneuverSymbol(10, null))
-        assertEquals("↰", maneuverSymbol(15, null))
-        assertEquals("↖", maneuverSymbol(16, null))
-        assertEquals("⟳", maneuverSymbol(26, null))
-        assertEquals("◆", maneuverSymbol(4, null))
+    fun exposesFreshTrafficDelayWithoutCallingGraphSpeedsLiveTraffic() {
+        val observedAt = OffsetDateTime.of(2026, 9, 5, 7, 52, 0, 0, ZoneOffset.UTC)
+        val state = sampleState().let { sample ->
+            sample.copy(
+                route = sample.route?.copy(
+                    timing = requireNotNull(sample.route).timing.copy(
+                        trafficDelaySeconds = 480.0,
+                        trafficDelayState = "estimated",
+                        trafficState = "fresh",
+                        trafficAware = true,
+                        trafficObservedAt = observedAt,
+                    ),
+                ),
+            )
+        }
+
+        val message = state.toDrivingUiModel().statusMessages.single {
+            "Traffico live incluso" in it.text
+        }
+
+        assertEquals(NavigationStatusLevel.POSITIVE, message.level)
+        assertTrue("ritardo 8 min" in message.text)
+        assertTrue("aggiornato" in message.text)
+    }
+
+    @Test
+    fun reportsGraphSpeedFallbackEvenWhenTrafficFeedIsFresh() {
+        val state = sampleState().let { sample ->
+            sample.copy(
+                route = sample.route?.copy(
+                    timing = requireNotNull(sample.route).timing.copy(trafficState = "fresh"),
+                ),
+            )
+        }
+
+        assertTrue(
+            state.toDrivingUiModel().statusMessages.any {
+                it.text == "Traffico aggiornato, ma questa rotta usa velocità standard."
+            },
+        )
+    }
+
+    @Test
+    fun mapsEveryPublishedValhallaTypeToAnExplicitPhaseSixVisual() {
+        assertEquals((0..36).toList(), valhallaManeuverVisualCatalog.map { it.type })
+        assertTrue(
+            valhallaManeuverVisualCatalog.none {
+                it.family == ManeuverVisualFamily.UNKNOWN || it.accessibilityLabel.isBlank()
+            },
+        )
+    }
+
+    @Test
+    fun keepsTurnAnglesSidesAndRoadJunctionFamiliesDistinct() {
+        val expected = mapOf(
+            9 to (ManeuverVisualFamily.TURN to ManeuverDirection.SLIGHT_RIGHT),
+            10 to (ManeuverVisualFamily.TURN to ManeuverDirection.RIGHT),
+            11 to (ManeuverVisualFamily.TURN to ManeuverDirection.SHARP_RIGHT),
+            12 to (ManeuverVisualFamily.U_TURN to ManeuverDirection.U_TURN_RIGHT),
+            13 to (ManeuverVisualFamily.U_TURN to ManeuverDirection.U_TURN_LEFT),
+            14 to (ManeuverVisualFamily.TURN to ManeuverDirection.SHARP_LEFT),
+            15 to (ManeuverVisualFamily.TURN to ManeuverDirection.LEFT),
+            16 to (ManeuverVisualFamily.TURN to ManeuverDirection.SLIGHT_LEFT),
+            17 to (ManeuverVisualFamily.RAMP to ManeuverDirection.STRAIGHT),
+            18 to (ManeuverVisualFamily.RAMP to ManeuverDirection.RIGHT),
+            19 to (ManeuverVisualFamily.RAMP to ManeuverDirection.LEFT),
+            20 to (ManeuverVisualFamily.EXIT to ManeuverDirection.RIGHT),
+            21 to (ManeuverVisualFamily.EXIT to ManeuverDirection.LEFT),
+            22 to (ManeuverVisualFamily.KEEP to ManeuverDirection.STRAIGHT),
+            23 to (ManeuverVisualFamily.KEEP to ManeuverDirection.RIGHT),
+            24 to (ManeuverVisualFamily.KEEP to ManeuverDirection.LEFT),
+            25 to (ManeuverVisualFamily.MERGE to ManeuverDirection.STRAIGHT),
+            26 to (ManeuverVisualFamily.ROUNDABOUT_ENTER to ManeuverDirection.NONE),
+            27 to (ManeuverVisualFamily.ROUNDABOUT_EXIT to ManeuverDirection.NONE),
+        )
+
+        expected.forEach { (type, expectedVisual) ->
+            val visual = maneuverVisual(type, null)
+            assertEquals("family for type $type", expectedVisual.first, visual.family)
+            assertEquals("direction for type $type", expectedVisual.second, visual.direction)
+        }
+    }
+
+    @Test
+    fun distinguishesDestinationFerryTransitAndConnectionFamilies() {
+        assertEquals(ManeuverVisualFamily.DESTINATION, maneuverVisual(4, null).family)
+        assertEquals(ManeuverVisualFamily.FERRY_ENTER, maneuverVisual(28, null).family)
+        assertEquals(ManeuverVisualFamily.FERRY_EXIT, maneuverVisual(29, null).family)
+        assertEquals(ManeuverVisualFamily.TRANSIT, maneuverVisual(30, null).family)
+        assertEquals(ManeuverVisualFamily.TRANSIT_TRANSFER, maneuverVisual(31, null).family)
+        assertEquals(ManeuverVisualFamily.TRANSIT_REMAIN, maneuverVisual(32, null).family)
+        assertEquals(
+            ManeuverVisualFamily.TRANSIT_CONNECTION_START,
+            maneuverVisual(33, null).family,
+        )
+        assertEquals(
+            ManeuverVisualFamily.TRANSIT_CONNECTION_TRANSFER,
+            maneuverVisual(34, null).family,
+        )
+        assertEquals(
+            ManeuverVisualFamily.TRANSIT_CONNECTION_DESTINATION,
+            maneuverVisual(35, null).family,
+        )
+        assertEquals(
+            ManeuverVisualFamily.POST_TRANSIT_CONNECTION_DESTINATION,
+            maneuverVisual(36, null).family,
+        )
+    }
+
+    @Test
+    fun usesInstructionOnlyAsFallbackForUnknownFutureTypes() {
+        val futureRight = maneuverVisual(99, "Svolta a destra sulla strada locale.")
+        val absent = maneuverVisual(null, null)
+
+        assertEquals(ManeuverVisualFamily.TURN, futureRight.family)
+        assertEquals(ManeuverDirection.RIGHT, futureRight.direction)
+        assertEquals(ManeuverVisualFamily.UNKNOWN, absent.family)
+    }
+
+    @Test
+    fun branchingManeuversKeepTheSelectedLaneOnItsRequestedSide() {
+        val right = branchingManeuverGeometry(ManeuverDirection.RIGHT, selectedReach = 0.31f)
+        val left = branchingManeuverGeometry(ManeuverDirection.LEFT, selectedReach = 0.31f)
+
+        assertTrue(right.trunkX > 0.50f)
+        assertTrue(right.selectedTipX > right.junctionX)
+        assertTrue(right.alternativeTipX < right.junctionX)
+        assertTrue(left.trunkX < 0.50f)
+        assertTrue(left.selectedTipX < left.junctionX)
+        assertTrue(left.alternativeTipX > left.junctionX)
+        assertEquals(1.0f, right.trunkX + left.trunkX, 0.0001f)
+        assertEquals(1.0f, right.selectedTipX + left.selectedTipX, 0.0001f)
+        assertEquals(1.0f, right.alternativeTipX + left.alternativeTipX, 0.0001f)
+        assertTrue(right.selectedTerminalLength > 0.20f)
+        assertTrue(left.selectedTerminalLength > 0.20f)
+
+        val rightExit = branchingManeuverGeometry(
+            ManeuverDirection.RIGHT,
+            selectedReach = 0.34f,
+            alternativeStraight = true,
+        )
+        assertEquals(0.50f, rightExit.alternativeTipX, 0.0001f)
+        assertTrue(rightExit.selectedPreviousX > rightExit.junctionX)
+        assertTrue(rightExit.selectedTerminalLength > 0.20f)
+    }
+
+    @Test
+    fun slightTurnsShareACentredTrunkAndMeetTheirArrowheadOnAMirroredTangent() {
+        val right = slightTurnGeometry(ManeuverDirection.SLIGHT_RIGHT)
+        val left = slightTurnGeometry(ManeuverDirection.SLIGHT_LEFT)
+
+        assertEquals(0.50f, right.startX, 0.0001f)
+        assertEquals(right.startX, left.startX, 0.0001f)
+        assertTrue(right.curveExitX > right.startX)
+        assertTrue(right.tipX > right.curveExitX)
+        assertTrue(left.curveExitX < left.startX)
+        assertTrue(left.tipX < left.curveExitX)
+        assertEquals(1.0f, right.curveExitX + left.curveExitX, 0.0001f)
+        assertEquals(1.0f, right.tipX + left.tipX, 0.0001f)
+        assertTrue(right.terminalLength > 0.20f)
+        assertEquals(right.terminalLength, left.terminalLength, 0.0001f)
     }
 
     private fun sampleState(): NavigationState {

@@ -24,7 +24,14 @@
         "bearing_before": null,
         "bearing_after": 181,
         "travel_mode": "drive",
-        "travel_type": "car"
+        "travel_type": "car",
+        "sign": {
+          "exit_number_elements": [{"text": "1", "consecutive_count": 2}],
+          "exit_branch_elements": [{"text": "A1", "consecutive_count": null}],
+          "exit_toward_elements": [{"text": "Bologna", "consecutive_count": null}],
+          "exit_name_elements": []
+        },
+        "roundabout_exit_count": 2
       }
     ],
     "provider": "valhalla"

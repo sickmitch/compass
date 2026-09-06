@@ -43,6 +43,20 @@ class WaypointRouteRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class ManeuverSignElement:
+    text: str
+    consecutive_count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ManeuverSign:
+    exit_number_elements: tuple[ManeuverSignElement, ...] = ()
+    exit_branch_elements: tuple[ManeuverSignElement, ...] = ()
+    exit_toward_elements: tuple[ManeuverSignElement, ...] = ()
+    exit_name_elements: tuple[ManeuverSignElement, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Maneuver:
     type: int
     instruction: str
@@ -58,6 +72,8 @@ class Maneuver:
     bearing_after: int | None = None
     travel_mode: str | None = None
     travel_type: str | None = None
+    sign: ManeuverSign | None = None
+    roundabout_exit_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +83,9 @@ class BaseRoute:
     encoded_polyline: str
     maneuvers: tuple[Maneuver, ...]
     provider: str
+    traffic_aware: bool = False
+    traffic_delay_seconds: float | None = None
+    traffic_fallback_used: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +102,9 @@ class WaypointRoute:
     duration_seconds: float
     legs: tuple[RouteLeg, ...]
     provider: str
+    traffic_aware: bool = False
+    traffic_delay_seconds: float | None = None
+    traffic_fallback_used: bool = False
 
 
 @dataclass(frozen=True, slots=True)

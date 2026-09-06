@@ -39,6 +39,9 @@ data class ApiNavigationTiming(
     val tripArrivalAt: String?,
     val trafficDelaySeconds: Double? = null,
     val trafficDelayState: String = "unavailable",
+    val trafficState: String = "not_configured",
+    val trafficAware: Boolean = false,
+    val trafficObservedAt: String? = null,
 )
 
 data class ApiManeuver(
@@ -56,6 +59,20 @@ data class ApiManeuver(
     val bearingAfter: Int?,
     val travelMode: String?,
     val travelType: String?,
+    val sign: ApiManeuverSign? = null,
+    val roundaboutExitCount: Int? = null,
+)
+
+data class ApiManeuverSignElement(
+    val text: String,
+    val consecutiveCount: Int?,
+)
+
+data class ApiManeuverSign(
+    val exitNumberElements: List<ApiManeuverSignElement>,
+    val exitBranchElements: List<ApiManeuverSignElement>,
+    val exitTowardElements: List<ApiManeuverSignElement>,
+    val exitNameElements: List<ApiManeuverSignElement>,
 )
 
 data class ApiRankedCandidates(

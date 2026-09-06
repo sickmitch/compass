@@ -318,6 +318,7 @@ async def predictive_candidates(
         excluded_mimit_station_ids=request.excluded_mimit_station_ids,
         base_route=_base_route_response(
             spatial.base_route,
+            settings=settings,
             departure_at=network.departure_at,
         ),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),

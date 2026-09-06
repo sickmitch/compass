@@ -29,12 +29,13 @@ from compass.routing.domain import (
     RoutingProvider,
     RoutingProviderError,
     RoutingUnavailableError,
+    WaypointRoute,
 )
 from compass.traffic.dependencies import get_traffic_route_refresher
 from compass.traffic.domain import TrafficHealthState
 from compass.traffic.route_refresh import TrafficRouteRefresher
 from compass.traffic.routing import refresh_base_route_traffic
-from compass.traffic.service import network_cost_basis_from_settings
+from compass.traffic.service import network_cost_basis_from_settings, traffic_health_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["routing"])
 
@@ -105,6 +106,18 @@ class RouteGeometry(StrictModel):
     encoded_polyline: str = Field(min_length=1)
 
 
+class ManeuverSignElementResponse(StrictModel):
+    text: str = Field(min_length=1)
+    consecutive_count: int | None = Field(default=None, ge=0)
+
+
+class ManeuverSignResponse(StrictModel):
+    exit_number_elements: list[ManeuverSignElementResponse]
+    exit_branch_elements: list[ManeuverSignElementResponse]
+    exit_toward_elements: list[ManeuverSignElementResponse]
+    exit_name_elements: list[ManeuverSignElementResponse]
+
+
 class ManeuverResponse(StrictModel):
     type: int = Field(ge=0)
     instruction: str = Field(min_length=1)
@@ -120,6 +133,8 @@ class ManeuverResponse(StrictModel):
     bearing_after: int | None
     travel_mode: str | None
     travel_type: str | None
+    sign: ManeuverSignResponse | None
+    roundabout_exit_count: int | None = Field(ge=0)
 
 
 class NavigationTimingResponse(StrictModel):
@@ -135,6 +150,9 @@ class NavigationTimingResponse(StrictModel):
     trip_arrival_at: datetime | None
     traffic_delay_seconds: float | None = Field(default=None, ge=0)
     traffic_delay_state: Literal["unavailable", "estimated"] = "unavailable"
+    traffic_state: TrafficHealthState = "not_configured"
+    traffic_aware: bool = False
+    traffic_observed_at: datetime | None = None
 
 
 class BaseRouteResponse(StrictModel):
@@ -309,7 +327,7 @@ async def base_route(
         ),
     )
 
-    return _base_route_response(route, departure_at=request.departure_at)
+    return _base_route_response(route, settings=settings, departure_at=request.departure_at)
 
 
 @router.post(
@@ -371,7 +389,7 @@ async def corridor_candidates(
         return error_response(503, "database_unavailable", "The station database is unavailable.")
 
     return CorridorCandidatesResponse(
-        base_route=_base_route_response(result.base_route),
+        base_route=_base_route_response(result.base_route, settings=settings),
         corridor=CorridorPolicyResponse.model_validate(asdict(result.corridor)),
         metrics=SpatialPruningMetricsResponse.model_validate(asdict(result.metrics)),
         candidates=[
@@ -452,7 +470,7 @@ async def detour_candidates(
     return DetourCandidatesResponse(
         departure_at=result.departure_at,
         maximum_detour_minutes=result.maximum_detour_seconds / 60,
-        base_route=_base_route_response(spatial.base_route),
+        base_route=_base_route_response(spatial.base_route, settings=settings),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),
         spatial_pruning=SpatialPruningMetricsResponse.model_validate(
             asdict(spatial.metrics)
@@ -468,12 +486,15 @@ async def detour_candidates(
 def _base_route_response(
     route: BaseRoute,
     *,
+    settings: Settings,
     departure_at: datetime | None = None,
 ) -> BaseRouteResponse:
+    traffic = _navigation_traffic(route, settings)
     navigation = build_navigation_timing(
         encoded_polylines=(route.encoded_polyline,),
         driving_duration_seconds=route.duration_seconds,
         departure_at=departure_at,
+        **traffic,
     )
     return BaseRouteResponse(
         distance_meters=route.distance_meters,
@@ -489,6 +510,29 @@ def _base_route_response(
 
 def _navigation_timing_response(timing: NavigationTiming) -> NavigationTimingResponse:
     return NavigationTimingResponse.model_validate(asdict(timing))
+
+
+def _navigation_traffic(
+    route: BaseRoute | WaypointRoute,
+    settings: Settings,
+) -> dict[str, object]:
+    health = traffic_health_from_settings(settings)
+    delay = getattr(route, "traffic_delay_seconds", None)
+    route_is_traffic_aware = bool(getattr(route, "traffic_aware", False))
+    fallback_used = bool(getattr(route, "traffic_fallback_used", False))
+    current_data = health.provider_status in {"fresh", "mock"}
+    traffic_aware = (
+        current_data
+        and route_is_traffic_aware
+        and not fallback_used
+        and delay is not None
+    )
+    return {
+        "traffic_delay_seconds": delay if traffic_aware else None,
+        "traffic_state": health.provider_status,
+        "traffic_aware": traffic_aware,
+        "traffic_observed_at": health.last_success_at if traffic_aware else None,
+    }
 
 
 def _detour_candidate_response(

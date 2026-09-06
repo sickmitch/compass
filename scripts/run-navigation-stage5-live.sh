@@ -110,7 +110,7 @@ echo "  1. From the route preview open 'Configura profili mezzi'. Create and sel
 echo "     'Test dual fuel' with CNG full 40 km, CNG reserve 30 km, gasoline full"
 echo "     300 km and gasoline reserve 30 km. Take screenshot A of the selected profile."
 echo "  2. Force-close Compass from recents and reopen it. Confirm 'Test dual fuel' remains"
-echo "     selected and its CNG values are prefilled in 'Valuta autonomia CNG'."
+echo "     selected and its CNG values are prefilled in 'Crea viaggio'."
 echo "  3. Enter CNG remaining 35 km, gasoline remaining 300 km and maximum detour 10"
 echo "     minutes. Tap 'Valuta e suggerisci una stazione'."
 echo "  4. Confirm 'Fallback benzina disponibile', required gasoline and reserve margin."

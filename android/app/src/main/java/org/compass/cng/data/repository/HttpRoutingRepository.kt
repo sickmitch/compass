@@ -24,6 +24,8 @@ import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
+import org.compass.cng.domain.model.ManeuverSign
+import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.OpeningState
@@ -501,6 +503,23 @@ private fun ApiManeuver.toManeuver(): Maneuver = Maneuver(
     bearingAfter = bearingAfter,
     travelMode = travelMode,
     travelType = travelType,
+    sign = sign?.let { value ->
+        ManeuverSign(
+            exitNumberElements = value.exitNumberElements.map {
+                ManeuverSignElement(it.text, it.consecutiveCount)
+            },
+            exitBranchElements = value.exitBranchElements.map {
+                ManeuverSignElement(it.text, it.consecutiveCount)
+            },
+            exitTowardElements = value.exitTowardElements.map {
+                ManeuverSignElement(it.text, it.consecutiveCount)
+            },
+            exitNameElements = value.exitNameElements.map {
+                ManeuverSignElement(it.text, it.consecutiveCount)
+            },
+        )
+    },
+    roundaboutExitCount = roundaboutExitCount,
 )
 
 private fun ApiNavigationTiming.toNavigationTiming(): NavigationTiming = NavigationTiming(
@@ -516,6 +535,9 @@ private fun ApiNavigationTiming.toNavigationTiming(): NavigationTiming = Navigat
     tripArrivalAt = tripArrivalAt?.let(OffsetDateTime::parse),
     trafficDelaySeconds = trafficDelaySeconds,
     trafficDelayState = trafficDelayState,
+    trafficState = trafficState,
+    trafficAware = trafficAware,
+    trafficObservedAt = trafficObservedAt?.let(OffsetDateTime::parse),
 )
 
 private fun ApiNavigationTiming.toLegNavigationTiming(

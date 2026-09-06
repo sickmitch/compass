@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
@@ -14,7 +15,7 @@ from compass.candidates.domain import (
     SpatialCandidate,
     SpatialPruningMetrics,
 )
-from compass.config import get_api_settings, get_settings
+from compass.config import Settings, get_api_settings, get_settings
 from compass.db import get_session
 from compass.detours.domain import (
     NetworkCostBasis,
@@ -28,6 +29,8 @@ from compass.routing.domain import (
     BaseRoute,
     Coordinate,
     Maneuver,
+    ManeuverSign,
+    ManeuverSignElement,
     MatrixCost,
     RouteRequest,
     RoutingUnavailableError,
@@ -96,6 +99,12 @@ class FakeRoutingProvider:
                     street_names=("Via Roma",),
                     travel_mode="drive",
                     travel_type="car",
+                    sign=ManeuverSign(
+                        exit_number_elements=(ManeuverSignElement("1", 2),),
+                        exit_branch_elements=(ManeuverSignElement("A1"),),
+                        exit_toward_elements=(ManeuverSignElement("Bologna"),),
+                    ),
+                    roundabout_exit_count=2,
                 ),
             ),
             provider="valhalla",
@@ -270,7 +279,11 @@ def test_base_route_contract_is_provider_independent() -> None:
     async def override_provider() -> FakeRoutingProvider:
         return provider
 
+    async def override_settings() -> Settings:
+        return Settings(_env_file=None)
+
     app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
     try:
         response = _post(
             "/api/v1/routes",
@@ -303,6 +316,19 @@ def test_base_route_contract_is_provider_independent() -> None:
                 "bearing_after": None,
                 "travel_mode": "drive",
                 "travel_type": "car",
+                "sign": {
+                    "exit_number_elements": [
+                        {"text": "1", "consecutive_count": 2}
+                    ],
+                    "exit_branch_elements": [
+                        {"text": "A1", "consecutive_count": None}
+                    ],
+                    "exit_toward_elements": [
+                        {"text": "Bologna", "consecutive_count": None}
+                    ],
+                    "exit_name_elements": [],
+                },
+                "roundabout_exit_count": 2,
             }
         ],
         "provider": "valhalla",
@@ -317,9 +343,12 @@ def test_base_route_contract_is_provider_independent() -> None:
             "departure_at": None,
             "driving_arrival_at": None,
             "trip_arrival_at": None,
-            "traffic_delay_seconds": None,
-            "traffic_delay_state": "unavailable",
-        },
+                "traffic_delay_seconds": None,
+                "traffic_delay_state": "unavailable",
+                "traffic_state": "not_configured",
+                "traffic_aware": False,
+                "traffic_observed_at": None,
+            },
     }
     assert provider.request == RouteRequest(
         origin=Coordinate(latitude=45.4642, longitude=9.19),
@@ -378,7 +407,69 @@ def test_base_route_refreshes_traffic_then_recomputes_with_valhalla() -> None:
     assert response.status_code == 200
     assert provider.route_calls == 2
     assert refresher.calls == 1
-    assert response.json()["duration_seconds"] == 322.0
+
+
+def test_base_route_exposes_fresh_traffic_delay_and_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_at = datetime(2026, 9, 5, 6, 30, tzinfo=UTC)
+
+    class TrafficProvider(FakeRoutingProvider):
+        async def route(self, request: RouteRequest) -> BaseRoute:
+            route = await super().route(request)
+            return replace(
+                route,
+                duration_seconds=440,
+                traffic_aware=True,
+                traffic_delay_seconds=120,
+            )
+
+    provider = TrafficProvider()
+    settings = Settings(
+        _env_file=None,
+        traffic_enabled=True,
+        traffic_provider="tomtom",
+        traffic_valhalla_overlay_enabled=True,
+        traffic_valhalla_tileset_version="valhalla-3.8.3:test",
+    )
+
+    async def override_provider() -> TrafficProvider:
+        return provider
+
+    async def override_settings() -> Settings:
+        return settings
+
+    monkeypatch.setattr(
+        "compass.api.routes.traffic_health_from_settings",
+        lambda _settings: TrafficHealth(
+            enabled=True,
+            provider="tomtom",
+            provider_status="fresh",
+            traffic_aware_routing=True,
+            last_success_at=observed_at,
+        ),
+    )
+    app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        response = _post(
+            "/api/v1/routes",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 45.4781, "longitude": 9.2271},
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    timing = response.json()["navigation"]
+    assert timing["traffic_delay_seconds"] == 120
+    assert timing["traffic_delay_state"] == "estimated"
+    assert timing["traffic_state"] == "fresh"
+    assert timing["traffic_aware"] is True
+    assert timing["traffic_observed_at"] == "2026-09-05T06:30:00Z"
+    assert response.json()["duration_seconds"] == 440.0
 
 
 def test_base_route_propagates_scheduled_departure() -> None:

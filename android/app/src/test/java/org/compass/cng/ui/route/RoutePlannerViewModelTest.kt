@@ -57,6 +57,16 @@ class RoutePlannerViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
+    fun defaultPreviewEndsAtDriveReachableBolognaCentrale() {
+        val state = RoutePlannerUiState()
+
+        assertEquals(Coordinate(44.5057, 11.3424), state.activeDestination)
+        assertEquals("44.5057", state.destinationLatitudeInput)
+        assertEquals("11.3424", state.destinationLongitudeInput)
+        assertEquals("Bologna Centrale", state.destinationDisplayName)
+    }
+
+    @Test
     fun exposesLoadedBaseRouteAndOpensCngConfiguration() = runTest {
         val route = sampleRoute()
         val viewModel = RoutePlannerViewModel(FakeRoutingRepository(baseResult = Result.success(route)))

@@ -12,8 +12,14 @@ fun String.asBuildConfigString(): String =
 val compassApiBaseUrl = providers.gradleProperty("COMPASS_API_BASE_URL")
     .orElse("http://10.0.2.2:8000/")
     .get()
-val compassMapStyleUrl = providers.gradleProperty("COMPASS_MAP_STYLE_URL")
-    .orElse("https://tiles.openfreemap.org/styles/liberty")
+val legacyCompassMapStyleUrl = providers.gradleProperty("COMPASS_MAP_STYLE_URL")
+val compassMapDayStyleUrl = providers.gradleProperty("COMPASS_MAP_DAY_STYLE_URL")
+    .orElse(legacyCompassMapStyleUrl)
+    .orElse("asset://compass-day.json")
+    .get()
+val compassMapNightStyleUrl = providers.gradleProperty("COMPASS_MAP_NIGHT_STYLE_URL")
+    .orElse(legacyCompassMapStyleUrl)
+    .orElse("asset://compass-night.json")
     .get()
 val compassMapAmbientCacheMb = providers.gradleProperty("COMPASS_MAP_AMBIENT_CACHE_MB")
     .orElse("100")
@@ -35,12 +41,21 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 14
-        versionName = "0.13.0"
+        versionCode = 18
+        versionName = "0.17.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())
-        buildConfigField("String", "COMPASS_MAP_STYLE_URL", compassMapStyleUrl.asBuildConfigString())
+        buildConfigField(
+            "String",
+            "COMPASS_MAP_DAY_STYLE_URL",
+            compassMapDayStyleUrl.asBuildConfigString(),
+        )
+        buildConfigField(
+            "String",
+            "COMPASS_MAP_NIGHT_STYLE_URL",
+            compassMapNightStyleUrl.asBuildConfigString(),
+        )
         buildConfigField(
             "long",
             "COMPASS_MAP_AMBIENT_CACHE_BYTES",

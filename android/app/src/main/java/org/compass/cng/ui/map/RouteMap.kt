@@ -1,7 +1,7 @@
 package org.compass.cng.ui.map
 
-import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -22,6 +22,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.Property.LINE_CAP_ROUND
 import org.maplibre.android.style.layers.Property.LINE_JOIN_ROUND
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
@@ -41,51 +42,62 @@ import org.maplibre.geojson.Point
 @Composable
 fun RouteMap(
     route: RoutePreview,
-    mapStyleUrl: String,
     modifier: Modifier = Modifier,
     candidateStations: List<RankedCngStation> = emptyList(),
     cngStops: List<Coordinate> = emptyList(),
 ) {
     val mapView = rememberMapViewWithLifecycle()
+    val appearance = compassMapAppearance()
 
     AndroidView(
         factory = { mapView },
         modifier = modifier,
     )
 
-    LaunchedEffect(mapView, route, mapStyleUrl, candidateStations, cngStops) {
+    LaunchedEffect(mapView, route, appearance, candidateStations, cngStops) {
         mapView.getMapAsync { map ->
-            map.setStyle(Style.Builder().fromUri(mapStyleUrl)) { style ->
+            map.setStyle(Style.Builder().fromUri(appearance.styleUrl)) { style ->
+                Log.i(
+                    COMPASS_MAP_LOG_TAG,
+                    "map_style_loaded surface=preview theme=${appearance.theme.name.lowercase()} " +
+                        "source=${mapStyleSource(appearance.styleUrl)}",
+                )
                 val routePoints = route.geometry.map {
                     Point.fromLngLat(it.longitude, it.latitude)
                 }
                 if (routePoints.size >= 2) {
+                    val firstMapLabelLayerId = style.layers.firstOrNull { it is SymbolLayer }?.id
                     style.addSource(
                         GeoJsonSource(
                             ROUTE_SOURCE_ID,
                             Feature.fromGeometry(LineString.fromLngLats(routePoints)),
                         ),
                     )
-                    style.addLayer(
-                        LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
-                            lineColor(Color.rgb(20, 108, 58)),
+                    val routeLayer = LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
+                            lineColor(appearance.palette.route),
                             lineWidth(6f),
                             lineCap(LINE_CAP_ROUND),
                             lineJoin(LINE_JOIN_ROUND),
-                        ),
-                    )
+                        )
+                    if (firstMapLabelLayerId == null) {
+                        style.addLayer(routeLayer)
+                    } else {
+                        style.addLayerBelow(routeLayer, firstMapLabelLayerId)
+                    }
                 }
                 addEndpointLayer(
                     style = style,
                     idPrefix = "origin",
                     coordinate = route.origin,
-                    color = Color.rgb(20, 108, 58),
+                    color = appearance.palette.origin,
+                    strokeColor = appearance.palette.markerStroke,
                 )
                 addEndpointLayer(
                     style = style,
                     idPrefix = "destination",
                     coordinate = route.destination,
-                    color = Color.rgb(183, 48, 36),
+                    color = appearance.palette.destination,
+                    strokeColor = appearance.palette.markerStroke,
                 )
                 if (candidateStations.isNotEmpty()) {
                     val candidateFeatures = candidateStations.map { station ->
@@ -107,8 +119,8 @@ fun RouteMap(
                     style.addLayer(
                         CircleLayer(CNG_CANDIDATES_LAYER_ID, CNG_CANDIDATES_SOURCE_ID).withProperties(
                             circleRadius(5.5f),
-                            circleColor(Color.rgb(0, 132, 122)),
-                            circleStrokeColor(Color.WHITE),
+                            circleColor(appearance.palette.cng),
+                            circleStrokeColor(appearance.palette.markerStroke),
                             circleStrokeWidth(1.5f),
                         ),
                     )
@@ -118,7 +130,8 @@ fun RouteMap(
                         style = style,
                         idPrefix = "cng-stop-$index",
                         coordinate = stop,
-                        color = Color.rgb(0, 132, 122),
+                        color = appearance.palette.cng,
+                        strokeColor = appearance.palette.markerStroke,
                     )
                 }
 
@@ -147,6 +160,7 @@ private fun addEndpointLayer(
     idPrefix: String,
     coordinate: Coordinate,
     color: Int,
+    strokeColor: Int,
 ) {
     val sourceId = "$idPrefix-source"
     style.addSource(
@@ -159,7 +173,7 @@ private fun addEndpointLayer(
         CircleLayer("$idPrefix-layer", sourceId).withProperties(
             circleRadius(7f),
             circleColor(color),
-            circleStrokeColor(Color.WHITE),
+            circleStrokeColor(strokeColor),
             circleStrokeWidth(2f),
         ),
     )
@@ -198,3 +212,4 @@ private const val ROUTE_SOURCE_ID = "route-source"
 private const val ROUTE_LAYER_ID = "route-layer"
 private const val CNG_CANDIDATES_SOURCE_ID = "cng-candidates-source"
 private const val CNG_CANDIDATES_LAYER_ID = "cng-candidates-layer"
+private const val COMPASS_MAP_LOG_TAG = "CompassNavigationUi"

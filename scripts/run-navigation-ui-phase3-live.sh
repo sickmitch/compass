@@ -129,7 +129,7 @@ grep -q '^Status: ok$' "$launch_output"
 echo
 echo "DEVICE ACTION A — INTERPOLATED MATCHED VEHICLE"
 echo
-echo "  1. From the default preview open 'Valuta autonomia CNG'. Enter residual 65 km,"
+echo "  1. From the default preview open 'Crea viaggio'. Enter residual 65 km,"
 echo "     reserve 30 km, full range 100 km and maximum detour 30 minutes."
 echo "  2. Calculate the complete plan and route, start navigation and demo replay."
 echo "  3. Watch at least five replay updates. The arrow must travel continuously between fixes,"

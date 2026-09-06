@@ -102,6 +102,11 @@ class HttpRoutingRepositoryTest {
         assertEquals(23_106.0, station.distanceFromPreviousWaypointMeters, 0.0)
         assertEquals(1, station.ranking.rank)
         assertTrue(result.baseRoute.geometry.size >= 2)
+        assertEquals(
+            "A1",
+            result.baseRoute.maneuvers.single().sign?.exitBranchElements?.single()?.text,
+        )
+        assertEquals(2, result.baseRoute.maneuvers.single().roundaboutExitCount)
     }
 
     @Test

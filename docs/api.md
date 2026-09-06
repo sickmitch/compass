@@ -78,6 +78,12 @@ Representative response shape:
 Real successful legs contain one or more maneuvers. The abbreviated empty arrays above keep the
 example readable; OpenAPI defines every maneuver field.
 
+Maneuvers preserve provider-backed junction guidance instead of requiring clients to parse
+localized instructions. Nullable `sign` contains `exit_number_elements`, `exit_branch_elements`,
+`exit_toward_elements` and `exit_name_elements`; every element has `text` plus nullable
+`consecutive_count`. Nullable `roundabout_exit_count` carries Valhalla's structured exit ordinal.
+Absent data remains null. These fields are identical on base routes and every CNG route leg.
+
 Every route response also contains `navigation`. `duration_seconds` remains driving time for
 backwards compatibility and for Valhalla cost comparisons. `navigation.total_trip_duration_seconds`
 adds `CNG_REFUEL_DWELL_SECONDS` for every CNG stop (1,200 seconds by default), while
@@ -86,6 +92,14 @@ IDs are derived from the returned geometry and ordered fuel-stop IDs; they chang
 fuel plan changes. Selected stops expose `expected_arrival_at` and `dwell_time_seconds`.
 `traffic_delay_state=unavailable` pairs with a null delay when no defensible separate live-delay
 estimate exists; the client must not turn that into zero delay.
+
+When a current provider snapshot and native Valhalla overlay are both usable, `navigation` also
+contains `traffic_state=fresh`, `traffic_aware=true`, `traffic_observed_at` and
+`traffic_delay_state=estimated`. The numeric `traffic_delay_seconds` is the non-negative difference
+between the successful Valhalla traffic duration and a separate Valhalla graph-speed route for the
+same ordered locations and costing. The driving duration already includes traffic; clients must not
+add the delay to it again. A fresh provider combined with an error-442 graph-speed fallback remains
+`traffic_state=fresh` but reports `traffic_aware=false`, a null delay and no observation timestamp.
 
 ## Route through a predictive CNG itinerary
 

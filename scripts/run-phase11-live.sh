@@ -164,7 +164,7 @@ echo "  shows the CNG waypoint, and labels the second maneuver section generical
 echo "  destination, not 'Bologna'."
 echo
 echo "Scenario D — edited route drives predictive CNG search"
-echo "  Return to preview, keep Rome -> Florence, tap 'Valuta autonomia CNG'."
+echo "  Return to preview, keep Rome -> Florence, tap 'Crea viaggio'."
 echo "  Use residual 120, reserve 30, full range 300, deviation 10, then evaluate."
 echo "  Expected: Compass returns either a complete refuelling plan or an explicit"
 echo "  no-suggestion state for Rome -> Florence. It must not display Milan/Bologna data."

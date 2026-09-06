@@ -126,7 +126,7 @@ echo
 echo "DEVICE ACTION A — SAFE PREDICTIVE STOP REPLACEMENT"
 echo
 echo "On the Android device:"
-echo "  1. From the Milan-to-Bologna preview tap 'Valuta autonomia CNG'."
+echo "  1. From the Milan-to-Bologna preview tap 'Crea viaggio'."
 echo "  2. Enter residual 65 km, reserve 30 km, full effective range 100 km and"
 echo "     maximum detour 30 minutes; tap 'Valuta e suggerisci una stazione'."
 echo "  3. The live snapshot must return a complete plan. Tap 'Calcola percorso con ... soste',"

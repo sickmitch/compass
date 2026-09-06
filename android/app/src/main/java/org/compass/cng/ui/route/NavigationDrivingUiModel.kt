@@ -12,19 +12,30 @@ import org.compass.cng.navigation.OffRouteStatus
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.navigation.RouteUpdateFailure
 import org.compass.cng.navigation.RouteUpdateReason
+import org.compass.cng.domain.model.NavigationTiming
 
 internal data class NavigationDrivingUiModel(
-    val maneuverSymbol: String,
+    val maneuverVisual: ManeuverVisual,
+    val roundaboutExitCount: Int?,
     val distanceToManeuver: String,
     val primaryInstruction: String,
     val targetRoad: String?,
+    val junctionSign: NavigationJunctionSignUiModel?,
     val followingInstruction: String?,
+    val followingManeuverVisual: ManeuverVisual?,
     val remainingDistance: String,
     val remainingDuration: String,
     val arrivalTime: String,
     val progress: Float,
     val nextCngStop: NavigationCngUiModel?,
     val statusMessages: List<NavigationStatusUiModel>,
+)
+
+internal data class NavigationJunctionSignUiModel(
+    val exitNumber: String?,
+    val branches: String?,
+    val toward: String?,
+    val exitName: String?,
 )
 
 internal data class NavigationCngUiModel(
@@ -47,12 +58,28 @@ internal enum class NavigationStatusLevel {
 internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
     val activeRoute = requireNotNull(route)
     return NavigationDrivingUiModel(
-        maneuverSymbol = maneuverSymbol(currentManeuver?.type, currentManeuver?.instruction),
+        maneuverVisual = maneuverVisual(currentManeuver?.type, currentManeuver?.instruction),
+        roundaboutExitCount = currentManeuver?.roundaboutExitCount?.takeIf { it > 0 },
         distanceToManeuver = distanceToNextManeuverMeters?.let(::formatDistance) ?: "—",
         primaryInstruction = currentManeuver?.instruction ?: "Prosegui sul percorso",
         targetRoad = currentRoadName
             ?: currentManeuver?.streetNames?.firstOrNull(),
+        junctionSign = currentManeuver?.sign?.let { sign ->
+            NavigationJunctionSignUiModel(
+                exitNumber = sign.exitNumberElements.joinSignText(),
+                branches = sign.exitBranchElements.joinSignText(),
+                toward = sign.exitTowardElements.joinSignText(),
+                exitName = sign.exitNameElements.joinSignText(),
+            ).takeUnless { model ->
+                listOf(model.exitNumber, model.branches, model.toward, model.exitName).all {
+                    it.isNullOrBlank()
+                }
+            }
+        },
         followingInstruction = nextManeuver?.instruction,
+        followingManeuverVisual = nextManeuver?.let {
+            maneuverVisual(it.type, it.instruction)
+        },
         remainingDistance = distanceRemainingMeters?.let(::formatDistance) ?: "—",
         remainingDuration = totalDurationRemainingSeconds?.let(::formatDuration) ?: "—",
         arrivalTime = estimatedArrivalAt?.let {
@@ -76,14 +103,7 @@ internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
                     ),
                 )
             }
-            if (activeRoute.timing.trafficDelayState != "estimated") {
-                add(
-                    NavigationStatusUiModel(
-                        "Traffico live non disponibile: tempi di guida senza ritardo live.",
-                        NavigationStatusLevel.NORMAL,
-                    ),
-                )
-            }
+            add(trafficStatusUiModel(activeRoute.timing))
             if (connectivity == NavigationConnectivity.REROUTING_UNAVAILABLE) {
                 add(
                     NavigationStatusUiModel(
@@ -152,26 +172,43 @@ internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
     )
 }
 
+private fun List<org.compass.cng.domain.model.ManeuverSignElement>.joinSignText(): String? =
+    asSequence()
+        .map { it.text.trim() }
+        .filter(String::isNotEmpty)
+        .distinct()
+        .take(3)
+        .toList()
+        .takeIf(List<String>::isNotEmpty)
+        ?.joinToString(" / ")
+
 internal fun NavigationFuelStop.displayName(): String = name ?: "MIMIT $mimitStationId"
 
-internal fun maneuverSymbol(type: Int?, instruction: String?): String = when (type) {
-    4, 5, 6 -> "◆"
-    9, 18, 20, 23 -> "↗"
-    10, 11 -> "↱"
-    12 -> "↪"
-    13 -> "↩"
-    14, 15 -> "↰"
-    16, 19, 21, 24 -> "↖"
-    25 -> "⇗"
-    26, 27 -> "⟳"
-    else -> when {
-        instruction?.contains("destra", ignoreCase = true) == true -> "↱"
-        instruction?.contains("sinistra", ignoreCase = true) == true -> "↰"
-        instruction?.contains("rotatoria", ignoreCase = true) == true -> "⟳"
-        instruction?.contains("destinazione", ignoreCase = true) == true -> "◆"
-        else -> "↑"
+internal fun trafficTimingText(timing: NavigationTiming): String = when {
+    timing.trafficAware -> buildString {
+        append("Traffico live incluso")
+        timing.trafficDelaySeconds?.let { append(" · ritardo ${formatDuration(it)}") }
+        timing.trafficObservedAt?.let {
+            append(" · aggiornato ${NAVIGATION_CLOCK_FORMATTER.format(it)}")
+        }
     }
+    timing.trafficState in setOf("fresh", "mock") ->
+        "Traffico aggiornato, ma questa rotta usa velocità standard."
+    timing.trafficState == "configured" ->
+        "Traffico configurato: attendo il primo aggiornamento."
+    timing.trafficState == "stale" ->
+        "Dati traffico scaduti: tempi di guida con velocità standard."
+    else -> "Traffico live non disponibile: tempi di guida con velocità standard."
 }
+
+private fun trafficStatusUiModel(timing: NavigationTiming) = NavigationStatusUiModel(
+    text = trafficTimingText(timing),
+    level = if (timing.trafficAware) {
+        NavigationStatusLevel.POSITIVE
+    } else {
+        NavigationStatusLevel.NORMAL
+    },
+)
 
 private fun gpsStatusText(status: GpsStatus): String = when (status) {
     GpsStatus.UNAVAILABLE -> "GPS non disponibile"

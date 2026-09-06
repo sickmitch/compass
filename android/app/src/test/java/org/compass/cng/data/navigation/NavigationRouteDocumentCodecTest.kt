@@ -1,10 +1,16 @@
 package org.compass.cng.data.navigation
 
 import java.time.OffsetDateTime
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.Maneuver
+import org.compass.cng.domain.model.ManeuverSign
+import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
@@ -36,6 +42,25 @@ class NavigationRouteDocumentCodecTest {
         assertNull(codec.decode("""{"schemaVersion":99,"cachedAtEpochMillis":1,"navigationWasActive":true,"route":{}}"""))
     }
 
+    @Test
+    fun cacheWrittenBeforeStructuredGuidanceRemainsReadable() {
+        val cached = CachedNavigationRoute(
+            routeWithStop().toNavigationRoute(),
+            1_725_000_000_000,
+            navigationWasActive = true,
+        )
+        val legacyDocument = Json.parseToJsonElement(codec.encode(cached))
+            .withoutStructuredGuidance()
+            .toString()
+
+        val restored = requireNotNull(codec.decode(legacyDocument))
+
+        assertEquals(cached.route.routeId, restored.route.routeId)
+        assertEquals(2, restored.route.maneuvers.size)
+        assertEquals(true, restored.route.maneuvers.all { it.sign == null })
+        assertEquals(true, restored.route.maneuvers.all { it.roundaboutExitCount == null })
+    }
+
     private fun routeWithStop(): RouteWithCngStop {
         val origin = Coordinate(45.0, 9.0)
         val stop = Coordinate(44.5, 10.0)
@@ -59,6 +84,11 @@ class NavigationRouteDocumentCodecTest {
                 OffsetDateTime.parse("2026-09-03T08:00:00+02:00"),
                 OffsetDateTime.parse("2026-09-03T09:30:00+02:00"),
                 OffsetDateTime.parse("2026-09-03T09:50:00+02:00"),
+                trafficDelaySeconds = 180.0,
+                trafficDelayState = "estimated",
+                trafficState = "fresh",
+                trafficAware = true,
+                trafficObservedAt = OffsetDateTime.parse("2026-09-03T07:59:30+02:00"),
             ),
         )
     }
@@ -70,8 +100,31 @@ class NavigationRouteDocumentCodecTest {
         durationSeconds = 2_700.0,
         geometry = listOf(origin, destination),
         maneuvers = listOf(
-            Maneuver(1, instruction, 60_000.0, 2_700.0, 0, 1, emptyList(), travelMode = "drive", travelType = "car"),
+            Maneuver(
+                1, instruction, 60_000.0, 2_700.0, 0, 1, emptyList(),
+                travelMode = "drive",
+                travelType = "car",
+                sign = ManeuverSign(
+                    exitNumberElements = listOf(ManeuverSignElement("1", 2)),
+                    exitBranchElements = listOf(ManeuverSignElement("A1")),
+                ),
+                roundaboutExitCount = 2,
+            ),
         ),
         provider = "valhalla",
     )
+}
+
+private fun JsonElement.withoutStructuredGuidance(): JsonElement = when (this) {
+    is JsonObject -> JsonObject(
+        entries.mapNotNull { (key, value) ->
+            if (key == "sign" || key == "roundaboutExitCount") {
+                null
+            } else {
+                key to value.withoutStructuredGuidance()
+            }
+        }.toMap(),
+    )
+    is JsonArray -> JsonArray(map(JsonElement::withoutStructuredGuidance))
+    else -> this
 }

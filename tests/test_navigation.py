@@ -66,3 +66,44 @@ def test_fuel_stop_arrivals_include_only_prior_dwell() -> None:
 def test_navigation_timing_rejects_missing_geometry() -> None:
     with pytest.raises(ValueError, match="encoded route shape"):
         build_navigation_timing(encoded_polylines=(), driving_duration_seconds=10)
+
+
+def test_navigation_timing_exposes_defensible_live_traffic_delta() -> None:
+    observed_at = datetime.fromisoformat("2026-09-05T08:00:00+02:00")
+
+    timing = build_navigation_timing(
+        encoded_polylines=("shape",),
+        driving_duration_seconds=1_100,
+        traffic_delay_seconds=200,
+        traffic_state="fresh",
+        traffic_aware=True,
+        traffic_observed_at=observed_at,
+    )
+
+    assert timing.traffic_delay_state == "estimated"
+    assert timing.traffic_delay_seconds == 200
+    assert timing.traffic_state == "fresh"
+    assert timing.traffic_aware is True
+    assert timing.traffic_observed_at == observed_at
+
+
+def test_navigation_timing_rejects_traffic_claim_without_baseline() -> None:
+    with pytest.raises(ValueError, match="delay baseline"):
+        build_navigation_timing(
+            encoded_polylines=("shape",),
+            driving_duration_seconds=1_100,
+            traffic_state="fresh",
+            traffic_aware=True,
+        )
+
+
+def test_navigation_timing_rejects_traffic_claim_without_current_observation() -> None:
+    with pytest.raises(ValueError, match="current provider data"):
+        build_navigation_timing(
+            encoded_polylines=("shape",),
+            driving_duration_seconds=1_100,
+            traffic_delay_seconds=200,
+            traffic_state="stale",
+            traffic_aware=True,
+            traffic_observed_at=datetime.fromisoformat("2026-09-05T08:00:00+02:00"),
+        )

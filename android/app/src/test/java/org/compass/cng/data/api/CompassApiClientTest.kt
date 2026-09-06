@@ -59,7 +59,12 @@ class CompassApiClientTest {
         assertEquals("Parti verso sud.", route.maneuvers.single().instruction)
         assertEquals("route_1234567890abcdef1234567890abcdef", route.navigation.routeId)
         assertEquals(6_773.406, route.navigation.totalTripDurationSeconds, 0.0)
+        assertEquals(420.0, route.navigation.trafficDelaySeconds)
+        assertEquals("fresh", route.navigation.trafficState)
+        assertTrue(route.navigation.trafficAware)
         assertEquals(181, route.maneuvers.single().bearingAfter)
+        assertEquals("1", route.maneuvers.single().sign?.exitNumberElements?.single()?.text)
+        assertEquals(2, route.maneuvers.single().roundaboutExitCount)
 
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
@@ -136,7 +141,8 @@ class CompassApiClientTest {
                     "call_timeout_ms=0 read_timeout_ms=10000",
                 "request completed: method=POST endpoint=/api/v1/routes status=200 " +
                     "duration_ms=125",
-                "route decoded: distance_meters=210925 duration_seconds=6773 maneuvers=1",
+                "route decoded: distance_meters=210925 duration_seconds=6773 maneuvers=1 " +
+                    "traffic_state=fresh traffic_aware=true traffic_delay_seconds=420",
             ),
             events,
         )
@@ -595,7 +601,14 @@ class CompassApiClientTest {
                   "bearing_before": null,
                   "bearing_after": 181,
                   "travel_mode": "drive",
-                  "travel_type": "car"
+                  "travel_type": "car",
+                  "sign": {
+                    "exit_number_elements": [{"text":"1","consecutive_count":2}],
+                    "exit_branch_elements": [{"text":"A1","consecutive_count":null}],
+                    "exit_toward_elements": [{"text":"Bologna","consecutive_count":null}],
+                    "exit_name_elements": []
+                  },
+                  "roundabout_exit_count": 2
                 }
               ],
               "provider": "valhalla",
@@ -609,7 +622,12 @@ class CompassApiClientTest {
                 "total_trip_duration_seconds": 6773.406,
                 "departure_at": "2026-09-02T08:00:00+02:00",
                 "driving_arrival_at": "2026-09-02T09:52:53.406+02:00",
-                "trip_arrival_at": "2026-09-02T09:52:53.406+02:00"
+                "trip_arrival_at": "2026-09-02T09:52:53.406+02:00",
+                "traffic_delay_seconds": 420.0,
+                "traffic_delay_state": "estimated",
+                "traffic_state": "fresh",
+                "traffic_aware": true,
+                "traffic_observed_at": "2026-09-02T07:59:30+02:00"
               }
             }
         """.trimIndent()

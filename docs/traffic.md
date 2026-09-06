@@ -152,13 +152,28 @@ The public API never receives TomTom credentials and never calls TomTom directly
 `POST /api/v1/routes` request follows this sequence:
 
 ```text
-initial time-dependent Valhalla route
+initial traffic-aware Valhalla route (current local depart-at + prioritized bidirectional search)
   -> private traffic-updater route-refresh request
   -> sample at most TRAFFIC_ROUTE_MAX_PROBES points from that route
   -> TomTom base Flow Segment requests
   -> normalize, direction-verify, match and atomically update traffic.tar
   -> repeat the same Valhalla route only when the overlay changed
+  -> calculate a separate graph-speed route as the traffic-delay baseline
 ```
+
+Valhalla must receive date/time information to consume live speeds. Compass represents an omitted
+departure as the current local minute with `date_time.type=1` and sets
+`prioritize_bidirectional=true`, while retaining `current` in the configured speed-source
+hierarchy. The graph-speed baseline removes date/time, explicit traffic speed sources and the
+bidirectional preference. It is used only to expose
+`max(0, traffic_duration - graph_speed_duration)`; Valhalla's traffic route remains authoritative.
+
+The production and Android traffic gates terminate at Bologna Centrale
+(`44.5057,11.3424`). The former city-centre fixture (`44.4949,11.3426`) is inside a temporally
+restricted driving area: both the deployed engine and an independent Valhalla instance return 442
+for a depart-at request there while accepting the time-invariant route. That is a legitimate
+time-dependent no-route result, not evidence that `traffic.tar` failed. Compass keeps its explicit
+graph-speed fallback for availability, but that fallback cannot pass a traffic-aware gate.
 
 The updater records successful refreshes by a stable hash of origin, waypoints, destination and
 costing. The same itinerary is skipped until
@@ -175,11 +190,10 @@ The updater contains a lightweight expiry sweep. It performs no TomTom HTTP requ
 resets expired Compass-managed `TrafficSpeed` records to Valhalla `UNKNOWN`. This prevents an old
 speed from surviving indefinitely when the app is closed.
 
-The Android client currently triggers the initial refresh naturally by requesting A -> B. Compass
-does not yet expose a real “navigation active” lifecycle or current-position tracking. The
-five-minute backend contract is ready for that lifecycle, but the app must not poll merely because
-the route-preview screen is visible. A later navigation increment will send
-`active_navigation` refreshes only between explicit start/stop navigation events.
+The Android client triggers the initial refresh naturally by requesting A -> B. During an explicit
+navigation session it requests a replacement only after confirmed deviation, at the five-minute
+active-navigation boundary or through a debug-only manual action. Ordinary location updates remain
+local and never poll Compass merely because the map is visible.
 
 To run deterministic provider ingestion without commercial credentials:
 
@@ -440,14 +454,20 @@ The script safely migrates an existing periodic updater. It:
 2. verifies the native helper and non-empty `traffic.tar` without printing secrets;
 3. stops the legacy poller and resets its managed edges to `UNKNOWN`;
 4. starts the private on-demand updater and recreates the API;
-5. requests Milan -> Bologna once, causing bounded route-derived TomTom probes;
+5. requests Milan -> Bologna Centrale once, causing bounded route-derived TomTom probes;
 6. repeats the identical route immediately and proves it is skipped by the five-minute ledger;
 7. verifies fresh health, non-empty tileset-bound state and time-dependent Valhalla routing;
-8. leaves API and updater running only after all checks pass.
+8. verifies that both returned routes contain fresh, numeric, non-fallback traffic timing;
+9. leaves API and updater running only after all checks pass.
 
 The activation script treats Valhalla `/status` as the authoritative runtime identity and exports
 that value to the recreated services. A stale value left in `.env` is reported and overridden for
 the activation; it is never allowed to make mappings target a different graph.
+
+The export applies to that activation process. Persist the exact printed identity in the server's
+uncommitted `.env` before a later standalone `docker compose up`; do not retain the literal
+`RUNNING_TILESET_LAST_MODIFIED` placeholder. The `.env` file is intentionally ignored by Git but is
+still read automatically by Docker Compose.
 
 If the persisted managed-edge state belongs to an older tileset, the script never applies those
 stale GraphIds to the active graph. It stops Valhalla, builds a fresh native `traffic.tar` from the
@@ -545,7 +565,7 @@ Optional environment variables:
 
 ```env
 TRAFFIC_SYNTHETIC_ORIGIN=45.4642,9.1900
-TRAFFIC_SYNTHETIC_DESTINATION=44.4949,11.3426
+TRAFFIC_SYNTHETIC_DESTINATION=44.5057,11.3424
 TRAFFIC_SYNTHETIC_EDGE_COUNT=12
 TRAFFIC_SYNTHETIC_SPEED_KPH=5
 TRAFFIC_SYNTHETIC_MIN_DELTA_SECONDS=60
@@ -557,7 +577,7 @@ TRAFFIC_SYNTHETIC_STATIC_TOLERANCE_SECONDS=30
 When both `TRAFFIC_ENABLED=true` and `TRAFFIC_VALHALLA_OVERLAY_ENABLED=true`, the Valhalla adapter
 sends time-dependent route and matrix requests with:
 
-- `date_time.type=0` for current departure when no explicit departure is present;
+- the current local minute as `date_time.type=1` when no explicit departure is present;
 - `date_time.type=1` for an explicit scheduled departure;
 - auto `speed_types`: `current`, `predicted`, `constrained`, `freeflow`.
 

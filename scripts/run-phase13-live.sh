@@ -166,7 +166,7 @@ set_connected
 echo
 echo "DEVICE ACTION B — DOWNLOADED ROUTE, STALE DATA AND OUTAGE"
 echo
-echo "  1. Return to the default route. Open 'Valuta autonomia CNG': residual 65 km, reserve"
+echo "  1. Return to the default route. Open 'Crea viaggio': residual 65 km, reserve"
 echo "     30 km, effective full range 100 km, maximum detour 30 minutes. Calculate the plan."
 echo "  2. Verify station cards explicitly show unknown/missing opening enrichment and stale price"
 echo "     timestamps where returned by the test data. Take screenshot B."

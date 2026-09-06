@@ -17,6 +17,9 @@ data class NavigationTiming(
     val tripArrivalAt: OffsetDateTime?,
     val trafficDelaySeconds: Double? = null,
     val trafficDelayState: String = "unavailable",
+    val trafficState: String = "not_configured",
+    val trafficAware: Boolean = false,
+    val trafficObservedAt: OffsetDateTime? = null,
 ) {
     init {
         require(routeId.isNotBlank()) { "route identity must not be blank" }
@@ -35,6 +38,21 @@ data class NavigationTiming(
         }
         require(trafficDelayState in setOf("unavailable", "estimated")) {
             "unsupported traffic delay state"
+        }
+        require(
+            trafficState in setOf(
+                "not_configured", "configured", "mock", "fresh", "stale", "unavailable",
+            ),
+        ) { "unsupported traffic state" }
+        require(
+            !trafficAware || (
+                trafficDelayState == "estimated" &&
+                    trafficDelaySeconds != null &&
+                    trafficState in setOf("fresh", "mock") &&
+                    trafficObservedAt != null
+            ),
+        ) {
+            "traffic-aware timing requires current, observed delay evidence"
         }
     }
 
@@ -84,4 +102,18 @@ data class Maneuver(
     val bearingAfter: Int? = null,
     val travelMode: String?,
     val travelType: String?,
+    val sign: ManeuverSign? = null,
+    val roundaboutExitCount: Int? = null,
+)
+
+data class ManeuverSignElement(
+    val text: String,
+    val consecutiveCount: Int? = null,
+)
+
+data class ManeuverSign(
+    val exitNumberElements: List<ManeuverSignElement> = emptyList(),
+    val exitBranchElements: List<ManeuverSignElement> = emptyList(),
+    val exitTowardElements: List<ManeuverSignElement> = emptyList(),
+    val exitNameElements: List<ManeuverSignElement> = emptyList(),
 )

@@ -68,13 +68,20 @@ def _payloads():
         "provider": "valhalla",
         "distance_meters": 210_925,
         "duration_seconds": 6_800,
+        "navigation": {
+            "traffic_state": "fresh",
+            "traffic_aware": True,
+            "traffic_delay_state": "estimated",
+            "traffic_delay_seconds": 120,
+            "traffic_observed_at": datetime.now(UTC).isoformat(),
+        },
     }
     ledger = {"tileset_identity": identity, "successes": {"a" * 64: expires_at}}
     updater_logs = (
         '{"message":"route-scoped traffic overlay update committed"}\n'
         '{"message":"route-scoped traffic refresh skipped by minimum interval"}'
     )
-    valhalla_logs = "\n".join(["algorithm::time_dependent_forward_a*"] * 3)
+    valhalla_logs = "\n".join(["algorithm::bidirectional_a*"] * 3)
     return identity, config, state, ledger, health, route, updater_logs, valhalla_logs
 
 
@@ -125,7 +132,9 @@ def test_production_runner_has_preflight_rollback_and_leaves_services_running() 
     assert "compass-traffic plan-once" not in runner
     assert "TRAFFIC_REFRESH_MODE=on_demand" in runner
     assert 'export TRAFFIC_VALHALLA_TILESET_VERSION="$running_tileset_identity"' in runner
+    assert "docker compose config --environment" in runner
     assert "Configured tileset identity is stale" in runner
+    assert "Persist this runtime identity" in runner
     assert "trap rollback_failed_activation EXIT INT TERM" in runner
     assert "compass-traffic clear-managed" in runner
     assert "compass-traffic clear-route-refreshes" in runner
@@ -134,6 +143,8 @@ def test_production_runner_has_preflight_rollback_and_leaves_services_running() 
     assert "reinitialize-state-after-traffic-rebuild" in runner
     assert "--previous-tileset" in runner
     assert runner.count('"${api_base_url}/api/v1/routes"') == 2
+    assert runner.count('"latitude":44.5057,"longitude":11.3424') == 2
+    assert '"latitude":44.4949,"longitude":11.3426' not in runner
     assert "--force-recreate" in runner
     assert "/api/v1/traffic/health" in runner
     assert "algorithm::time_dependent_forward_a*" not in runner

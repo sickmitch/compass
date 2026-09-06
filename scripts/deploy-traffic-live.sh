@@ -67,7 +67,10 @@ print(f"valhalla-{status['version']}:{int(status['tileset_last_modified'])}")
 PY
 )"
 echo "running_tileset_identity=$running_tileset_identity"
-configured_tileset_identity="${TRAFFIC_VALHALLA_TILESET_VERSION:-}"
+configured_tileset_identity="$(
+    docker compose config --environment \
+    | python3 -c 'import sys; prefix="TRAFFIC_VALHALLA_TILESET_VERSION="; print(next((line.removeprefix(prefix) for line in sys.stdin.read().splitlines() if line.startswith(prefix)), ""))'
+)"
 if [[ -n "$configured_tileset_identity" && "$configured_tileset_identity" != "$running_tileset_identity" ]]; then
     echo "Configured tileset identity is stale: $configured_tileset_identity"
     echo "Binding this activation to the running Valhalla identity."
@@ -161,14 +164,14 @@ python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003
 >/dev/null
 curl --fail --silent --show-error "${api_base_url}/health/live" >/dev/null
 
-echo "[6/10] Requesting Milan to Bologna to trigger one route-scoped refresh"
+echo "[6/10] Requesting Milan to Bologna Centrale to trigger one route-scoped refresh"
 curl --fail-with-body --silent --show-error \
 --header 'Content-Type: application/json' \
 --data-binary @- \
 "${api_base_url}/api/v1/routes" >"$first_route_path" <<'JSON'
 {
 "origin":{"latitude":45.4642,"longitude":9.1900},
-"destination":{"latitude":44.4949,"longitude":11.3426}
+"destination":{"latitude":44.5057,"longitude":11.3424}
 }
 JSON
 
@@ -179,7 +182,7 @@ curl --fail-with-body --silent --show-error \
 "${api_base_url}/api/v1/routes" >"$second_route_path" <<'JSON'
 {
 "origin":{"latitude":45.4642,"longitude":9.1900},
-"destination":{"latitude":44.4949,"longitude":11.3426}
+"destination":{"latitude":44.5057,"longitude":11.3424}
 }
 JSON
 
@@ -214,3 +217,5 @@ echo
 echo "ON-DEMAND TRAFFIC ACTIVATION COMPLETED"
 echo "TomTom was called for the first route and skipped for the immediate repeat."
 echo "No periodic provider polling remains; the local expiry sweep stays active."
+echo "Persist this runtime identity in the server's uncommitted .env before a later recreate:"
+echo "  TRAFFIC_VALHALLA_TILESET_VERSION=$running_tileset_identity"

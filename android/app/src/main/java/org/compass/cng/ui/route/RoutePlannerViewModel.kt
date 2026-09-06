@@ -69,7 +69,7 @@ data class RoutePlannerUiState(
     val destinationLatitudeInput: String = DEFAULT_DESTINATION_LATITUDE,
     val destinationLongitudeInput: String = DEFAULT_DESTINATION_LONGITUDE,
     val originDisplayName: String = "Milano",
-    val destinationDisplayName: String = "Bologna",
+    val destinationDisplayName: String = "Bologna Centrale",
     val placeSearchQuery: String = "",
     val placeSearchResults: List<PlaceSearchResult> = emptyList(),
     val placeSearchSource: PlaceSearchSource = PlaceSearchSource.LIVE,
@@ -101,11 +101,14 @@ data class RoutePlannerUiState(
 
     companion object {
         val DEFAULT_ORIGIN = Coordinate(latitude = 45.4642, longitude = 9.1900)
-        val DEFAULT_DESTINATION = Coordinate(latitude = 44.4949, longitude = 11.3426)
+        // The former city-centre endpoint is inside a time-restricted driving area.
+        // Keep the deterministic preview in Bologna, but terminate it at a
+        // road-reachable destination so depart-now routing can use live traffic.
+        val DEFAULT_DESTINATION = Coordinate(latitude = 44.5057, longitude = 11.3424)
         const val DEFAULT_ORIGIN_LATITUDE = "45.4642"
         const val DEFAULT_ORIGIN_LONGITUDE = "9.1900"
-        const val DEFAULT_DESTINATION_LATITUDE = "44.4949"
-        const val DEFAULT_DESTINATION_LONGITUDE = "11.3426"
+        const val DEFAULT_DESTINATION_LATITUDE = "44.5057"
+        const val DEFAULT_DESTINATION_LONGITUDE = "11.3424"
         const val DEFAULT_EFFECTIVE_RANGE_KM = "300"
         const val DEFAULT_RESERVE_RANGE_KM = "30"
         const val DEFAULT_MAXIMUM_DETOUR_MINUTES = "10"

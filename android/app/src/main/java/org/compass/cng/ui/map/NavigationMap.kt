@@ -1,6 +1,5 @@
 package org.compass.cng.ui.map
 
-import android.graphics.Color
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -65,13 +64,13 @@ import org.maplibre.geojson.Point
 @Composable
 fun NavigationMap(
     state: NavigationState,
-    mapStyleUrl: String,
     cameraMode: NavigationCameraMode,
     cameraConfig: NavigationCameraConfig = NavigationCameraConfig(),
     onCameraModeChange: (NavigationCameraMode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val route = requireNotNull(state.route)
+    val appearance = compassMapAppearance()
     val mapView = rememberMapViewWithLifecycle()
     val cameraController = remember(cameraConfig) { NavigationCameraController(cameraConfig) }
     val puckAnimator = remember(route.routeId) { MapPuckAnimator() }
@@ -97,15 +96,16 @@ fun NavigationMap(
         }
     }
 
-    LaunchedEffect(mapView, mapStyleUrl, route.routeId) {
+    LaunchedEffect(mapView, appearance, route.routeId) {
         mapView.getMapAsync { map ->
-            map.setStyle(mapStyleUrl) { style ->
+            map.setStyle(appearance.styleUrl) { style ->
                 val localizedLayerCount = localizeMapLabelsInItalian(style)
                 val filteredPoiLayerCount = filterMapPoisForNavigation(style)
                 Log.i(
                     NAVIGATION_MAP_LOG_TAG,
-                    "map_style_loaded url=$mapStyleUrl locale=it layers=$localizedLayerCount " +
-                        "poi_layers=$filteredPoiLayerCount",
+                    "map_style_loaded surface=navigation theme=${appearance.theme.name.lowercase()} " +
+                        "source=${mapStyleSource(appearance.styleUrl)} locale=it " +
+                        "layers=$localizedLayerCount poi_layers=$filteredPoiLayerCount",
                 )
                 val portions = state.routePortions()
                 val remainingPoints = portions.remaining.map(::point)
@@ -113,7 +113,7 @@ fun NavigationMap(
                 val firstMapLabelLayerId = style.layers.firstOrNull { it is SymbolLayer }?.id
                 style.addSource(GeoJsonSource(REMAINING_SOURCE, lineFeature(remainingPoints)))
                 val remainingLayer = LineLayer(REMAINING_LAYER, REMAINING_SOURCE).withProperties(
-                        lineColor(Color.rgb(20, 108, 58)),
+                        lineColor(appearance.palette.route),
                         lineWidth(7f),
                         lineCap(LINE_CAP_ROUND),
                         lineJoin(LINE_JOIN_ROUND),
@@ -130,7 +130,7 @@ fun NavigationMap(
                     ),
                 )
                 val travelledLayer = LineLayer(TRAVELLED_LAYER, TRAVELLED_SOURCE).withProperties(
-                        lineColor(Color.rgb(104, 111, 108)),
+                        lineColor(appearance.palette.travelledRoute),
                         lineWidth(7f),
                         lineCap(LINE_CAP_ROUND),
                         lineJoin(LINE_JOIN_ROUND),
@@ -178,8 +178,8 @@ fun NavigationMap(
                 style.addLayer(
                     CircleLayer(FUEL_STOPS_LAYER, FUEL_STOPS_SOURCE).withProperties(
                         circleRadius(11f),
-                        circleColor(Color.rgb(12, 91, 62)),
-                        circleStrokeColor(Color.WHITE),
+                        circleColor(appearance.palette.cng),
+                        circleStrokeColor(appearance.palette.markerStroke),
                         circleStrokeWidth(2f),
                     ),
                 )
@@ -188,7 +188,7 @@ fun NavigationMap(
                         textField("CNG"),
                         textFont(arrayOf("Noto Sans Regular")),
                         textSize(8f),
-                        textColor(Color.WHITE),
+                        textColor(appearance.palette.markerText),
                         textAllowOverlap(true),
                         textIgnorePlacement(true),
                     ),

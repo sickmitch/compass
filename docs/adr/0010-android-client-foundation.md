@@ -32,7 +32,8 @@ The initial screen requests the accepted Milan-to-Bologna fixture route, draws t
 geometry and endpoints, and displays distance, duration, provider and maneuvers. Routing and
 maneuver content continue to come from `POST /api/v1/routes`.
 
-`COMPASS_API_BASE_URL` and `COMPASS_MAP_STYLE_URL` are Gradle properties compiled into the app; the
+`COMPASS_API_BASE_URL`, `COMPASS_MAP_DAY_STYLE_URL` and `COMPASS_MAP_NIGHT_STYLE_URL` are Gradle
+properties compiled into the app; the legacy `COMPASS_MAP_STYLE_URL` can still set both styles. The
 API URL must end in `/`. Debug cleartext is allowed only for Android emulator host alias
 `10.0.2.2` and loopback `127.0.0.1`, supporting emulator development and `adb reverse`. Other
 deployments must use HTTPS. Release builds do not add a cleartext exception.

@@ -24,6 +24,13 @@
             "verbal_pre_transition_instruction": "Svolta a sinistra su Via Milano.",
             "verbal_post_transition_instruction": "Continua su Via Milano.",
             "street_names": ["Via Milano"],
+            "sign": {
+              "exit_number_elements": [{"text": "2", "consecutive_count": 1}],
+              "exit_branch_elements": [{"text": "A1"}, {"text": "E 35"}],
+              "exit_toward_elements": [{"text": "Bologna"}],
+              "exit_name_elements": [{"text": "Casalecchio"}]
+            },
+            "roundabout_exit_count": 2,
             "bearing_before": 12,
             "bearing_after": 278,
             "time": 79.5,

@@ -1025,3 +1025,26 @@ device caches and temporarily removes `adb reverse`. General device networking i
 then checks search fallback, route continuity, foreground lifecycle, process-death recovery, ambient
 cache initialization, recovery through a fresh route response and final cache/service teardown.
 Return all screenshots and bounded artifacts requested by the runner.
+
+## Navigation UI Phase 5 map-style deployment
+
+No additional server container or secret is required for the default Compass cartography. The day
+and night style documents ship inside the APK and retrieve the same keyless OpenFreeMap vector tiles
+and fonts used by the accepted development baseline.
+
+For a self-hosted map deployment, provide complete HTTPS style documents at Android build time:
+
+```bash
+cd android
+./gradlew --no-daemon \
+  -PCOMPASS_MAP_DAY_STYLE_URL=https://maps.example.test/styles/compass-day.json \
+  -PCOMPASS_MAP_NIGHT_STYLE_URL=https://maps.example.test/styles/compass-night.json \
+  assembleDebug
+cd ..
+```
+
+The style documents themselves must reference the intended self-hosted TileJSON, glyph and optional
+sprite URLs. Do not place access tokens in Git. The legacy `COMPASS_MAP_STYLE_URL` still sets both
+modes for deployments intentionally using one style. The canonical bundled-style device gate and
+its bounded diagnostics are documented in
+[`navigation-ui-phase-5-acceptance.md`](phases/navigation-ui-phase-5-acceptance.md).

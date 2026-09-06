@@ -508,6 +508,13 @@ backgrounding and screen-off operation without losing the downloaded route. Stag
 TextToSpeech in that service, deduplicates early/prepare/immediate announcements and applies a
 smoothed, speed-aware MapLibre camera with explicit follow and overview modes.
 
+The maneuver boundary also preserves Valhalla's structured sign groups and roundabout exit count.
+Those optional values pass unchanged in meaning through FastAPI, Android DTO/domain models and the
+private route cache. Compose may format them for a bounded sign panel or numeric icon badge, but it
+does not parse localized instruction prose or make a routing decision. Lane guidance and speed
+limits require a future source-backed contract because they are not fields of the standard
+turn-by-turn maneuver response used here.
+
 Navigation UI Phase 2 formalizes that camera boundary. `NavigationCameraConfig` owns the driving
 pitch, continuous speed- and maneuver-density-dependent zoom, forward look-ahead and transition
 timing policy;
@@ -527,10 +534,12 @@ Consecutive-maneuver spacing contributes a bounded continuous zoom adjustment: d
 sequences move closer and sparse stretches widen the view. The primary trip summary is opt-in
 through a compact map control rather than permanently covering the lower map.
 
-The Android development build uses the keyless OpenFreeMap Liberty style as its road-capable
-MapLibre baseline. `COMPASS_MAP_STYLE_URL` remains injectable for self-hosted/deployment styles.
-This selection fixes the absence of local streets in the former low-zoom demo tiles; it does not
-pre-empt the dedicated Compass day/night cartographic work in Navigation UI Phase 5.
+Navigation UI Phase 5 replaces the Android Liberty development baseline with keyless, bundled
+Compass day/night MapLibre v8 style documents over OpenFreeMap/OpenMapTiles. Their shared low-noise
+layer structure uses flat buildings, explicit road hierarchy and Italian-first labels. Compose
+selects the style from system dark mode, while `COMPASS_MAP_DAY_STYLE_URL` and
+`COMPASS_MAP_NIGHT_STYLE_URL` remain independently injectable for self-hosted deployments. The
+legacy `COMPASS_MAP_STYLE_URL` maps to both modes when the specific properties are absent.
 After a style loads, Compass rewrites only name-bearing symbol layers to prefer Italian names with
 neutral/local fallbacks, leaving route shields untouched. This is deliberately a rendering policy,
 not a mutation of OpenStreetMap or backend data.
@@ -542,6 +551,20 @@ POIs are suppressed. Traffic signals remain absent with the current OpenMapTiles
 being inferred or fabricated. Compass-owned CNG waypoint sources are not part of this filtering.
 The combined Phase 2 camera, interaction, cartographic-context and lifecycle gate was accepted on
 an Android device on 2026-09-04.
+
+Route previews and active guidance resolve a theme-specific `CompassMapAppearance`, which couples
+only the style URI and map-owned overlay palette. A theme change can therefore replace MapLibre
+style/layers while the navigation engine, route progress, camera policy and foreground service
+remain unchanged. Diagnostic events classify style sources without logging URLs or credentials.
+
+Navigation UI Phase 6 adds a presentation-only boundary between Valhalla maneuver identifiers and
+Compose. `ManeuverVisual` maps every published type 0–36 to an explicit family, direction and
+Italian semantic label; `ManeuverIcon` renders those values as theme-colored vector route shapes.
+Both current and following instructions derive their own visual from the authoritative maneuver
+sequence. Unknown future identifiers degrade to a bounded instruction hint or an explicit unknown
+glyph. Routing, progression and speech never depend on the icon model. A debug-only catalog exposes
+all mappings for visual acceptance without adding synthetic routes or provider types to the normal
+driving UI.
 
 Navigation UI Phase 3 makes the existing location boundary explicit:
 
@@ -578,6 +601,31 @@ logged retry with `date_time` and traffic `speed_types` removed only after that 
 response. It never retries malformed input, provider outages or other error codes, and preserves a
 second no-path result. This implements the required no-traffic availability fallback without
 silently replacing ordinary traffic-aware successes.
+
+Navigation UI Phase 4 closes the remaining traffic-timing ambiguity. An omitted public departure
+still means “now”, but Compass sends it to Valhalla as the current local minute with
+`date_time.type=1` and `prioritize_bidirectional=true`. This retains live-speed costing while using
+Valhalla's time-aware bidirectional path. An explicit caller departure remains an offset-aware
+instant converted to the configured routing timezone. The deterministic Android destination is
+Bologna Centrale rather than the former city-centre coordinate, because the latter is not
+automobile-reachable under the current temporal restrictions and correctly returns a time-dependent
+no-route response.
+
+For every successful traffic-aware route, the adapter performs one additional route calculation
+with `date_time`, traffic speed selection and bidirectional prioritization removed. The returned
+traffic delay is `max(0, traffic_duration - graph_speed_duration)` for the same ordered locations
+and costing. This comparison does not alter Valhalla's chosen live route and is not an independent
+penalty. If the traffic route falls back, the graph-speed comparison fails, or runtime traffic
+health is not current, the API reports no numeric delay and `traffic_aware=false`.
+
+```text
+current route request
+  -> Valhalla depart-at/current-speed bidirectional route
+  -> optional route-scoped TomTom refresh and native traffic.tar update
+  -> repeat traffic route when the overlay changed
+  -> separate graph-speed baseline
+  -> navigation timing + traffic freshness -> Android preview/navigation/cache
+```
 
 Confirmed deviations and five-minute active-navigation refreshes call Compass—not Valhalla
 directly—so Valhalla traffic costing and the remaining selected CNG itinerary stay authoritative.

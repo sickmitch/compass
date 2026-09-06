@@ -56,7 +56,13 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.13.0` (`versionCode=14`).
+Android version is `0.17.0` (`versionCode=18`).
+
+Navigation UI Phase 7 preserves Valhalla junction-sign groups and roundabout exit counts across the
+strict API, Android models and version-1 private route cache. Active guidance adds a compact sign
+panel only when provider data exists, and places a numeric exit badge on roundabout icons. The UI
+does not parse localized maneuver prose to manufacture missing guidance. Debug builds provide a
+separate, clearly labelled rendering gallery under `Strumenti sviluppatore`.
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
 overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
@@ -105,9 +111,39 @@ turn sequences. The camera target now follows the local heading centreline inste
 curved-route point, top padding is increased, and maneuver-aware zoom has a stronger continuous
 approach range before the close-turn boost. These remain centralized camera policy values.
 
-The same gate later exposed a server-side Valhalla time-dependent convergence failure before the
-Android route preview could load. The routing adapter now performs one graph-speed retry only for a
-traffic-aware error 442; the updated live runner probes Milan–Bologna before installing the APK.
+The same gate later exposed a server-side Valhalla time-dependent no-route before the Android route
+preview could load. The routing adapter performs one graph-speed retry only for a traffic-aware
+error 442. Independent Valhalla reproduction showed that the old Bologna city-centre fixture is
+temporally restricted; the startup preview and traffic gate now terminate at drive-reachable
+Bologna Centrale.
+
+Navigation UI Phase 4 makes the existing live-traffic route lifecycle visible and testable. The
+backend exposes provider state, whether the returned duration actually used traffic, the provider
+observation timestamp and a delay calculated against a second Valhalla graph-speed route. Android
+shows `Traffico live incluso` only when all of that evidence is present. A fresh feed combined with
+a route fallback is shown separately as standard-speed routing, never as zero traffic delay.
+
+The same metadata is decoded and retained in the versioned route cache, preview, selected CNG route,
+multi-stop itinerary and active navigation updates. Debug route-commit logs contain only bounded
+state/delay metadata and no provider payload or credential. The Phase 4 gate is
+`bash scripts/run-navigation-ui-phase4-live.sh`; it refuses to install Android until the server
+reports fresh TomTom data, managed overlay edges and a non-fallback traffic route.
+
+Navigation UI Phase 5 replaces the Liberty development baseline with two Style Specification v8
+documents included in the APK. Both use flat buildings and a restrained OpenMapTiles hierarchy;
+the night palette is designed independently rather than dimming a day render. Compose selects the
+map style from system dark mode, so Activity recreation changes cartography without changing the
+navigation session or foreground service. Map-owned routes, endpoints and CNG markers use matching
+day/night contrast palettes. Logs report the selected theme and a bounded source class without the
+configured style URL. The operator accepted the
+`bash scripts/run-navigation-ui-phase5-live.sh` device gate on 2026-09-05.
+
+Navigation UI Phase 6 replaces the temporary character-based maneuver symbols with a typed,
+density-independent Compose vector system for all published Valhalla maneuver IDs 0–36. It keeps
+current and following icons separate, exposes Italian semantic descriptions and includes a
+debug-only full catalog for device inspection of rare ferry/transit families. The normal surface
+never displays provider IDs. Validate with `bash scripts/run-navigation-ui-phase6-live.sh`; see
+`docs/phases/navigation-ui-phase-6-acceptance.md`.
 
 ## Navigation Stage 1 device gate
 
@@ -283,18 +319,23 @@ assembleDebug
 cd ..
 ```
 
-The development build defaults to the road-capable OpenFreeMap Liberty style
-(`https://tiles.openfreemap.org/styles/liberty`). It uses OpenStreetMap/OpenMapTiles data and is
-self-hostable. This is a functional baseline; the Compass-specific day/night navigation style is
-reserved for Navigation UI Phase 5. The style remains replaceable at build time:
+The app defaults to the bundled `asset://compass-day.json` and `asset://compass-night.json` styles.
+They reference keyless OpenFreeMap/OpenMapTiles data and fonts. A deployment can replace either
+complete style independently:
 
 ```bash
 cd android
 ./gradlew --no-daemon \
--PCOMPASS_MAP_STYLE_URL=https://maps.example.test/style.json \
+-PCOMPASS_MAP_DAY_STYLE_URL=https://maps.example.test/day.json \
+-PCOMPASS_MAP_NIGHT_STYLE_URL=https://maps.example.test/night.json \
 assembleDebug
 cd ..
 ```
+
+For backwards compatibility, `COMPASS_MAP_STYLE_URL` still overrides both modes when neither
+mode-specific property is present. Use it only when one external style deliberately serves both
+themes. An operator self-hosting OpenFreeMap must ensure the custom style's tile, font and sprite
+URLs also point at the intended host; Compass treats the supplied document as authoritative.
 
 MapLibre caches resources visited during normal use. Its size defaults to 100 MiB and can be changed
 at build time (16–1,024 MiB):

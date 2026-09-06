@@ -266,7 +266,7 @@ evidence plus the reusable device checklist.
 
 ## Phase 10 predictive CNG reachability
 
-Phase 10 adds a separate `Valuta autonomia CNG` flow. The driver supplies remaining range, reserve,
+Phase 10 adds the predictive `Crea viaggio` flow. The driver supplies remaining range, reserve,
 effective full range and maximum detour; no tank value is invented or presented as telemetry. The
 backend returns one of `not_needed`, `suggested`, `no_reachable_station`, `no_eligible_station` or
 `no_complete_itinerary`. A suggestion is a complete ordered
@@ -340,7 +340,7 @@ Italian. Active navigation suppresses generic basemap POIs while retaining avail
 toll, border and traffic-control infrastructure. A directional vehicle replaces the point, CNG
 uses dedicated markers, manual camera mode returns to follow after ten idle seconds, and the trip
 summary is available through a compact toggle instead of permanently covering the map. The final
-Compass day/night styling remains Phase 5. No external navigation SDK was added. Android version is `0.12.0`
+Compass day/night styling was reserved here and is delivered by Phase 5. No external navigation SDK was added. Android version is `0.12.0`
 (`versionCode=13`). See `docs/phases/navigation-ui-phase-2-acceptance.md`.
 
 Navigation UI Phase 3 was accepted on-device on 2026-09-05. Raw Android fixes now pass through
@@ -355,6 +355,46 @@ continuous matched movement, density-aware urban zoom, free-camera puck motion, 
 diagnostics, follow recovery and clean teardown. Android version is `0.13.0` (`versionCode=14`).
 The repeatable gate remains `bash scripts/run-navigation-ui-phase3-live.sh`; see
 `docs/phases/navigation-ui-phase-3-acceptance.md`.
+
+Navigation UI Phase 4 was accepted by the operator on 2026-09-05. Current
+routes now use an explicit local `depart_at` instant with Valhalla's prioritized bidirectional
+search, so the native `traffic.tar` overlay remains active without the long-route convergence
+failure seen during Phase 3. Each successful traffic route is compared with a separate graph-speed
+baseline; the API and Android client expose the resulting non-negative delay, provider freshness
+and observation time without inventing a value after fallback. The accepted server gate used fresh
+TomTom data and a tileset-bound native overlay; returned device evidence showed live traffic in the
+base preview and CNG navigation before and after refresh. Preview, CNG itinerary and active route
+refresh all share this contract. The gate rejects disabled, stale or fallback traffic. See
+`docs/phases/navigation-ui-phase-4-acceptance.md`.
+
+Navigation UI Phase 5 was accepted on-device on 2026-09-05. Compass now ships small,
+purpose-built MapLibre day and night styles with flat buildings, a restrained road hierarchy,
+Italian-first labels and no generic POI layer. The map follows the system theme while preserving
+independent HTTPS/self-hosted deployment overrides; the former single-style property remains a
+backwards-compatible override for both modes. Route, travelled line, endpoints, vehicle and CNG
+markers use theme-specific contrast palettes, and diagnostic logs never include a configured style
+URL. The accepted gate retained four CNG stops and continuous puck motion across live
+day/night/day changes, then removed the service and active notification cleanly. Android version is
+`0.15.0` (`versionCode=16`). Run
+`bash scripts/run-navigation-ui-phase5-live.sh`; see
+`docs/phases/navigation-ui-phase-5-acceptance.md`.
+
+Navigation UI Phase 6, accepted on-device on 2026-09-06, replaces the provisional font-arrow
+maneuver symbols with density-independent
+Compose vectors for every published Valhalla type 0–36. Current and following maneuvers have
+independent icons; turn angle/side, junction branches, merge, roundabout, ferry and transit states
+are explicit, theme-aware and accessibility-labelled. A debug-only catalog makes rare families
+inspectable without synthetic production routes. Android version is `0.16.0` (`versionCode=17`).
+Run `bash scripts/run-navigation-ui-phase6-live.sh`; see
+`docs/phases/navigation-ui-phase-6-acceptance.md`.
+
+Navigation UI Phase 7 carries Valhalla's structured exit numbers, road branches, toward/name sign
+elements and roundabout exit count through the strict API, Android client and offline route cache.
+The active overlay shows a compact provider-backed sign and roundabout exit badge only when those
+fields exist; it never parses localized instructions to invent missing guidance. A debug-only
+gallery covers rare signage layouts. Android version is `0.17.0` (`versionCode=18`). Run
+`bash scripts/run-navigation-ui-phase7-live.sh`; see
+`docs/phases/navigation-ui-phase-7-acceptance.md`.
 
 ## Repository layout
 

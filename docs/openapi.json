@@ -1078,6 +1078,28 @@
             "title": "Instruction",
             "type": "string"
           },
+          "roundabout_exit_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roundabout Exit Count"
+          },
+          "sign": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManeuverSignResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "street_names": {
             "items": {
               "type": "string"
@@ -1160,9 +1182,79 @@
           "bearing_before",
           "bearing_after",
           "travel_mode",
-          "travel_type"
+          "travel_type",
+          "sign",
+          "roundabout_exit_count"
         ],
         "title": "ManeuverResponse",
+        "type": "object"
+      },
+      "ManeuverSignElementResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "consecutive_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consecutive Count"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ManeuverSignElementResponse",
+        "type": "object"
+      },
+      "ManeuverSignResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "exit_branch_elements": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverSignElementResponse"
+            },
+            "title": "Exit Branch Elements",
+            "type": "array"
+          },
+          "exit_name_elements": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverSignElementResponse"
+            },
+            "title": "Exit Name Elements",
+            "type": "array"
+          },
+          "exit_number_elements": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverSignElementResponse"
+            },
+            "title": "Exit Number Elements",
+            "type": "array"
+          },
+          "exit_toward_elements": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverSignElementResponse"
+            },
+            "title": "Exit Toward Elements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exit_number_elements",
+          "exit_branch_elements",
+          "exit_toward_elements",
+          "exit_name_elements"
+        ],
+        "title": "ManeuverSignResponse",
         "type": "object"
       },
       "NavigationTimingResponse": {
@@ -1227,6 +1319,11 @@
             "title": "Total Trip Duration Seconds",
             "type": "number"
           },
+          "traffic_aware": {
+            "default": false,
+            "title": "Traffic Aware",
+            "type": "boolean"
+          },
           "traffic_delay_seconds": {
             "anyOf": [
               {
@@ -1246,6 +1343,31 @@
               "estimated"
             ],
             "title": "Traffic Delay State",
+            "type": "string"
+          },
+          "traffic_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traffic Observed At"
+          },
+          "traffic_state": {
+            "default": "not_configured",
+            "enum": [
+              "not_configured",
+              "configured",
+              "mock",
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Traffic State",
             "type": "string"
           },
           "trip_arrival_at": {
