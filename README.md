@@ -411,6 +411,15 @@ at 75% of the unobscured map above it. The details sheet grows only as far as it
 Android version is `0.18.0` (`versionCode=19`). See
 `docs/phases/navigation-ui-phase-8-acceptance.md`.
 
+Navigation UI Phase 9, accepted on the live backend and physical device on 2026-09-06, adds a local
+visual speed-compliance state without changing route semantics. It compares only the filtered
+matched speed with the Phase 8 graph-backed limit, enters warning at five km/h above the limit and
+clears at two km/h above it to prevent flicker. These are UI stability buffers, not legal
+tolerances. The regulatory sign retains its white/red face and gains a second bright-red ring, red
+number and Italian accessibility description while over limit. Missing inputs remain explicitly
+unavailable, and no sound or vibration is emitted. Android version is `0.19.0` (`versionCode=20`).
+See `docs/phases/navigation-ui-phase-9-acceptance.md`.
+
 ## Repository layout
 
 ```text

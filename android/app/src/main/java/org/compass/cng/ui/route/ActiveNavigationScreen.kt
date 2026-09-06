@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -52,6 +53,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,6 +61,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import org.compass.cng.BuildConfig
+import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.NavigationState
@@ -75,7 +78,7 @@ internal fun ActiveNavigationScreen(
     onReplaceUnavailableFuelStop: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
-    requireNotNull(state.route)
+    val activeRoute = requireNotNull(state.route)
     LaunchedEffect(Unit) {
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
@@ -95,6 +98,9 @@ internal fun ActiveNavigationScreen(
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
     var tripSummaryHeightPixels by remember { mutableIntStateOf(0) }
+    var speedCompliance by remember(activeRoute.routeId) {
+        mutableStateOf(SpeedLimitComplianceStatus.UNAVAILABLE)
+    }
     val density = LocalDensity.current
     val tripSummaryObstructionPixels = if (showTripSummary) {
         tripSummaryHeightPixels + WindowInsets.safeDrawing.getBottom(density)
@@ -107,6 +113,26 @@ internal fun ActiveNavigationScreen(
                 NAVIGATION_UI_LOG_TAG,
                 "trip_summary_layout bottom_obstruction_px=$tripSummaryObstructionPixels",
             )
+        }
+    }
+    val observedSpeedMetersPerSecond = state.navigationPosition
+        ?.speedMetersPerSecond
+        ?.takeIf { state.gpsStatus == GpsStatus.ACTIVE }
+    val currentSpeedKph = speedKphForDisplay(observedSpeedMetersPerSecond)
+    LaunchedEffect(observedSpeedMetersPerSecond, ui.currentSpeedLimitKph) {
+        val next = speedLimitComplianceStatus(
+            previous = speedCompliance,
+            speedMetersPerSecond = observedSpeedMetersPerSecond,
+            speedLimitKph = ui.currentSpeedLimitKph,
+        )
+        if (next != speedCompliance) {
+            Log.i(
+                NAVIGATION_UI_LOG_TAG,
+                "speed_compliance from=${speedCompliance.name.lowercase()} " +
+                    "to=${next.name.lowercase()} speed_kph=${currentSpeedKph ?: "unavailable"} " +
+                    "limit_kph=${ui.currentSpeedLimitKph ?: "unavailable"}",
+            )
+            speedCompliance = next
         }
     }
 
@@ -194,6 +220,8 @@ internal fun ActiveNavigationScreen(
                 ui.currentSpeedLimitKph?.let { limit ->
                     SpeedLimitBadge(
                         speedLimitKph = limit,
+                        currentSpeedKph = currentSpeedKph,
+                        complianceStatus = speedCompliance,
                         modifier = Modifier.padding(bottom = 44.dp),
                     )
                 }
@@ -239,20 +267,45 @@ internal fun ActiveNavigationScreen(
 }
 
 @Composable
-private fun SpeedLimitBadge(speedLimitKph: Int, modifier: Modifier = Modifier) {
-    Surface(
+private fun SpeedLimitBadge(
+    speedLimitKph: Int,
+    currentSpeedKph: Int?,
+    complianceStatus: SpeedLimitComplianceStatus,
+    modifier: Modifier = Modifier,
+) {
+    val overLimit = complianceStatus == SpeedLimitComplianceStatus.OVER_LIMIT
+    val warningColor = Color(0xFFFF3B30)
+    val accessibilityLabel = if (overLimit && currentSpeedKph != null) {
+        "Limite $speedLimitKph chilometri orari superato, velocità $currentSpeedKph"
+    } else {
+        "Limite $speedLimitKph chilometri orari"
+    }
+    Box(
         modifier = modifier
-            .size(58.dp)
-            .testTag("navigation_speed_limit"),
-        shape = CircleShape,
-        color = Color.White,
-        contentColor = Color.Black,
-        border = BorderStroke(4.dp, Color(0xFFD20A0A)),
-        shadowElevation = 7.dp,
+            .size(68.dp)
+            .testTag(if (overLimit) "navigation_speed_limit_over" else "navigation_speed_limit")
+            .clearAndSetSemantics { contentDescription = accessibilityLabel },
+        contentAlignment = Alignment.Center,
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        if (overLimit) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = CircleShape,
+                color = Color.Transparent,
+                border = BorderStroke(3.dp, warningColor),
+            ) {}
+        }
+        Surface(
+            modifier = Modifier.size(58.dp),
+            shape = CircleShape,
+            color = Color.White,
+            contentColor = if (overLimit) warningColor else Color.Black,
+            border = BorderStroke(4.dp, Color(0xFFD20A0A)),
+            shadowElevation = if (overLimit) 12.dp else 7.dp,
+        ) {
             Text(
                 text = speedLimitKph.toString(),
+                modifier = Modifier.wrapContentSize(Alignment.Center),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,

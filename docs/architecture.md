@@ -753,3 +753,15 @@ single-finger pan enters `FREE`. The compact trip panel owns its `Nascondi` and 
 reports its actual pixel height to the camera adapter and uses centered vector chevrons. Camera
 padding then anchors the puck at 75% of the unobscured map above the panel. The modal details
 surface measures to short content before falling back to scrolling.
+
+## Navigation UI Phase 9 speed-compliance boundary
+
+Speed compliance remains a device-side presentation state. It consumes only the filtered,
+map-matched `NavigationPosition` speed and the graph-backed limit already resolved for that route
+segment. A five km/h entry buffer and two km/h exit buffer provide hysteresis; they are explicitly
+UI stability values rather than legal tolerances. Missing GPS or limit data yields `UNAVAILABLE`
+instead of retaining an old warning.
+
+Compose owns the transient previous state and renders a second alert ring plus red limit number.
+The navigation engine, API schemas, traffic costing and route cache remain unchanged. Sound and
+haptics are excluded until a later preference contract can make them explicitly opt-in.

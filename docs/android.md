@@ -56,7 +56,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.18.0` (`versionCode=19`).
+Android version is `0.19.0` (`versionCode=20`).
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1
@@ -79,6 +79,16 @@ The optional trip panel contains `Nascondi ﹀` on the left and `Dettagli ︿` o
 actions use vertically centered vector chevrons. Opening the panel shortens the unobscured driving
 viewport, so the puck remains at 75% of the visible map above it instead of sinking behind the
 panel. The details sheet wraps its content instead of forcing a nearly full-screen height.
+
+Navigation UI Phase 9, accepted on the live backend and physical device on 2026-09-06, derives a
+three-state speed-compliance presentation from the filtered matched speed and the current Phase 8
+limit. It enters `OVER_LIMIT` at five km/h above the limit and clears at two km/h above it, avoiding
+boundary flicker without presenting those values as legal tolerances. The regulatory badge retains
+its white face and red border; the warning adds a second bright-red ring, red number and an Italian
+accessibility description. Missing speed or limit stays `UNAVAILABLE`. The phase deliberately adds
+no sound or vibration.
+Its live gate treats visual behavior as operator-owned evidence and does not use UIAutomator or
+screenshot parsing.
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
 overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
