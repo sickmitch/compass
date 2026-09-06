@@ -8,10 +8,12 @@ import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.ManeuverSign
 import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationConnectivity
 import org.compass.cng.navigation.NavigationFuelStop
 import org.compass.cng.navigation.NavigationRoute
+import org.compass.cng.navigation.NavigationPosition
 import org.compass.cng.navigation.NavigationRouteSource
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.ReroutingStatus
@@ -70,6 +72,37 @@ class NavigationDrivingUiModelTest {
         assertEquals("A1 / E 35", ui.junctionSign?.branches)
         assertEquals("Bologna", ui.junctionSign?.toward)
         assertEquals("Casalecchio", ui.junctionSign?.exitName)
+    }
+
+    @Test
+    fun exposesGraphSpeedLimitOnlyForTheCurrentlyMatchedShapeSegment() {
+        val initial = sampleState()
+        val route = requireNotNull(initial.route).copy(
+            speedLimits = listOf(RouteSpeedLimit(0, 1, 50)),
+            speedLimitSource = "valhalla_graph",
+        )
+        val matched = initial.copy(
+            route = route,
+            navigationPosition = NavigationPosition(
+                coordinate = route.origin,
+                routeSegmentIndex = 0,
+                speedMetersPerSecond = 12.0,
+                bearingDegrees = 90.0,
+                horizontalAccuracyMeters = 4.0,
+                timestampEpochMillis = 1_725_000_000_000,
+            ),
+        )
+
+        assertEquals(50, matched.toDrivingUiModel().currentSpeedLimitKph)
+        assertEquals(null, initial.toDrivingUiModel().currentSpeedLimitKph)
+        assertEquals(
+            null,
+            matched.copy(
+                navigationPosition = requireNotNull(matched.navigationPosition).copy(
+                    routeSegmentIndex = 1,
+                ),
+            ).toDrivingUiModel().currentSpeedLimitKph,
+        )
     }
 
     @Test

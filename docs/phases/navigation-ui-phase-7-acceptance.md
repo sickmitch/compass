@@ -1,7 +1,6 @@
 # Navigation UI upgrade — Phase 7 acceptance record
 
-Status: live structured-data checks passed on 2026-09-06; device gate pending UX remediation
-retest.
+Status: accepted on backend and physical Android device on 2026-09-06.
 
 ## Scope
 
@@ -135,5 +134,6 @@ geometry misleading: a right branch originated on the left and overlapping compl
 to cross; its arrowhead also did not meet the selected line cleanly. The same review requested the
 predictive-form rename and sequential IME focus. These points are corrected in the repository and
 the operator confirmed the corrected fork/exit families. A second inspection isolated the remaining
-visual defect to slight-left/right types 9 and 16; their centred, tangent-aligned replacement remains
-pending a focused device retest before acceptance.
+visual defect to slight-left/right types 9 and 16. The operator's final physical-device screenshot
+on 2026-09-06 confirms their centred entry, mirrored bend and continuous arrowhead join. This closes
+Navigation UI Phase 7; Phase 8 may proceed.

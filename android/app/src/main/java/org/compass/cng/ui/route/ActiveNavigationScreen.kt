@@ -1,13 +1,14 @@
 package org.compass.cng.ui.route
 
 import android.util.Log
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,13 +39,19 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,6 +80,13 @@ internal fun ActiveNavigationScreen(
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
     val ui = state.toDrivingUiModel()
+    LaunchedEffect(ui.currentSpeedLimitKph, state.currentRouteSegmentIndex) {
+        Log.i(
+            NAVIGATION_UI_LOG_TAG,
+            "road_context segment=${state.currentRouteSegmentIndex ?: "unmatched"} " +
+                "speed_limit_kph=${ui.currentSpeedLimitKph ?: "unavailable"}",
+        )
+    }
     val cameraConfig = remember { NavigationCameraConfig() }
     var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
     var cameraGestureRevision by rememberSaveable { mutableStateOf(0L) }
@@ -80,6 +94,21 @@ internal fun ActiveNavigationScreen(
     var showDetails by rememberSaveable { mutableStateOf(false) }
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
+    var tripSummaryHeightPixels by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val tripSummaryObstructionPixels = if (showTripSummary) {
+        tripSummaryHeightPixels + WindowInsets.safeDrawing.getBottom(density)
+    } else {
+        0
+    }
+    LaunchedEffect(showTripSummary, tripSummaryObstructionPixels) {
+        if (showTripSummary && tripSummaryObstructionPixels > 0) {
+            Log.i(
+                NAVIGATION_UI_LOG_TAG,
+                "trip_summary_layout bottom_obstruction_px=$tripSummaryObstructionPixels",
+            )
+        }
+    }
 
     LaunchedEffect(cameraMode, cameraGestureRevision) {
         if (cameraMode == NavigationCameraMode.FREE) {
@@ -130,6 +159,7 @@ internal fun ActiveNavigationScreen(
             state = state,
             cameraMode = cameraMode,
             cameraConfig = cameraConfig,
+            bottomObstructionPixels = tripSummaryObstructionPixels,
             onCameraModeChange = { mode ->
                 if (mode == NavigationCameraMode.FREE) {
                     cameraGestureRevision += 1
@@ -155,34 +185,78 @@ internal fun ActiveNavigationScreen(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             )
             Spacer(modifier = Modifier.weight(1f))
-            MapModeControls(
-                cameraMode = cameraMode,
-                tripSummaryVisible = showTripSummary,
-                onOverview = {
-                    Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=overview reason=control")
-                    cameraMode = NavigationCameraMode.OVERVIEW
-                },
-                onRecenter = {
-                    Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=follow reason=recenter")
-                    cameraMode = NavigationCameraMode.FOLLOW
-                },
-                onToggleTripSummary = {
-                    showTripSummary = !showTripSummary
-                    Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=$showTripSummary")
-                },
+            Row(
                 modifier = Modifier
-                    .align(Alignment.End)
+                    .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-            if (showTripSummary) {
-                TripBottomBar(
-                    ui = ui,
-                    onOpenDetails = { showDetails = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                ui.currentSpeedLimitKph?.let { limit ->
+                    SpeedLimitBadge(
+                        speedLimitKph = limit,
+                        modifier = Modifier.padding(bottom = 44.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                MapModeControls(
+                    cameraMode = cameraMode,
+                    tripSummaryVisible = showTripSummary,
+                    onOverview = {
+                        Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=overview reason=control")
+                        cameraMode = NavigationCameraMode.OVERVIEW
+                    },
+                    onRecenter = {
+                        Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=follow reason=recenter")
+                        cameraMode = NavigationCameraMode.FOLLOW
+                    },
+                    onShowTripSummary = {
+                        showTripSummary = true
+                        Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=true")
+                    },
                 )
             }
+            if (showTripSummary) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { tripSummaryHeightPixels = it.height },
+                ) {
+                    TripBottomBar(
+                        ui = ui,
+                        onOpenDetails = { showDetails = true },
+                        onHide = {
+                            showTripSummary = false
+                            Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=false")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeedLimitBadge(speedLimitKph: Int, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .size(58.dp)
+            .testTag("navigation_speed_limit"),
+        shape = CircleShape,
+        color = Color.White,
+        contentColor = Color.Black,
+        border = BorderStroke(4.dp, Color(0xFFD20A0A)),
+        shadowElevation = 7.dp,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = speedLimitKph.toString(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -348,30 +422,24 @@ private fun MapModeControls(
     tripSummaryVisible: Boolean,
     onOverview: () -> Unit,
     onRecenter: () -> Unit,
-    onToggleTripSummary: () -> Unit,
+    onShowTripSummary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Surface(
-            shape = CircleShape,
-            tonalElevation = 6.dp,
-            color = if (tripSummaryVisible) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
-            },
-        ) {
-            TextButton(
-                onClick = onToggleTripSummary,
-                modifier = Modifier.testTag("navigation_trip_toggle"),
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = if (tripSummaryVisible) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                ),
-            ) { Text(if (tripSummaryVisible) "Nascondi" else "Viaggio") }
+        if (!tripSummaryVisible) {
+            Surface(
+                shape = CircleShape,
+                tonalElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            ) {
+                TextButton(
+                    onClick = onShowTripSummary,
+                    modifier = Modifier.testTag("navigation_trip_toggle"),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) { Text("Viaggio") }
+            }
         }
         Surface(
             shape = CircleShape,
@@ -409,6 +477,7 @@ private fun MapModeControls(
 private fun TripBottomBar(
     ui: NavigationDrivingUiModel,
     onOpenDetails: () -> Unit,
+    onHide: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -469,14 +538,59 @@ private fun TripBottomBar(
                     }
                 }
             }
-            TextButton(
-                onClick = onOpenDetails,
-                modifier = Modifier
-                    .align(Alignment.End)
-                    .testTag("navigation_details_button"),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Dettagli viaggio ︿")
+                TextButton(
+                    onClick = onHide,
+                    modifier = Modifier.testTag("navigation_trip_toggle"),
+                ) {
+                    TripPanelActionLabel("Nascondi", pointsUp = false)
+                }
+                TextButton(
+                    onClick = onOpenDetails,
+                    modifier = Modifier.testTag("navigation_details_button"),
+                ) {
+                    TripPanelActionLabel("Dettagli", pointsUp = true)
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun TripPanelActionLabel(label: String, pointsUp: Boolean) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(label)
+        val color = androidx.compose.material3.LocalContentColor.current
+        Canvas(
+            modifier = Modifier
+                .size(14.dp)
+                .clearAndSetSemantics {},
+        ) {
+            val upperY = size.height * 0.34f
+            val lowerY = size.height * 0.66f
+            val centerY = if (pointsUp) upperY else lowerY
+            val outerY = if (pointsUp) lowerY else upperY
+            val strokeWidth = 1.8.dp.toPx()
+            drawLine(
+                color = color,
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.16f, outerY),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.5f, centerY),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = color,
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.5f, centerY),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.84f, outerY),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
         }
     }
 }
@@ -519,9 +633,7 @@ private fun NavigationDetailsSheet(
         modifier = Modifier.testTag("navigation_details_sheet"),
     ) {
         LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.9f),
+            modifier = Modifier.fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 start = 20.dp,
                 end = 20.dp,
@@ -718,6 +830,8 @@ private fun NavigationDeveloperScreen(
                             Text("Fase: ${state.phase}")
                             Text("GPS: ${state.gpsStatus}")
                             Text("Segmento: ${state.currentRouteSegmentIndex ?: "—"}")
+                            Text("Limite tratto: ${state.currentSpeedLimitKph?.let { "$it km/h" } ?: "—"}")
+                            Text("Fonte limiti: ${route.speedLimitSource ?: "NON DISPONIBILE"}")
                             Text("Sorgente rotta: ${state.routeSource}")
                             Text("Connettività: ${state.connectivity}")
                             Text("Fuori rotta: ${state.offRouteStatus}")

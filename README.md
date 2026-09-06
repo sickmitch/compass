@@ -388,13 +388,28 @@ inspectable without synthetic production routes. Android version is `0.16.0` (`v
 Run `bash scripts/run-navigation-ui-phase6-live.sh`; see
 `docs/phases/navigation-ui-phase-6-acceptance.md`.
 
-Navigation UI Phase 7 carries Valhalla's structured exit numbers, road branches, toward/name sign
-elements and roundabout exit count through the strict API, Android client and offline route cache.
+Navigation UI Phase 7, accepted on backend and physical device on 2026-09-06, carries Valhalla's
+structured exit numbers, road branches, toward/name sign elements and roundabout exit count through
+the strict API, Android client and offline route cache.
 The active overlay shows a compact provider-backed sign and roundabout exit badge only when those
 fields exist; it never parses localized instructions to invent missing guidance. A debug-only
 gallery covers rare signage layouts. Android version is `0.17.0` (`versionCode=18`). Run
 `bash scripts/run-navigation-ui-phase7-live.sh`; see
 `docs/phases/navigation-ui-phase-7-acceptance.md`.
+
+Navigation UI Phase 8, accepted on the live backend and physical device on 2026-09-06, adds
+source-backed speed-limit context. Compass asks Valhalla
+`/trace_attributes` for ordered graph-edge limits and publishes their polyline6 shape-index ranges;
+Android selects the current limit only from its matched route segment and renders a compact Italian
+regulatory badge. Missing, unlimited or unavailable graph data remains absent and never becomes an
+invented numeric limit. Lane-level guidance remains outside this phase because the current route
+contract has no authoritative lane assignment. Follow-mode pinch zoom keeps the puck anchored one
+quarter of the viewport above the bottom, and the camera follows the puck's exact interpolated pose;
+deliberate panning still enters temporary free mode. Trip controls live inside their compact panel,
+using centered vector chevrons; the panel's measured height becomes camera padding so the puck stays
+at 75% of the unobscured map above it. The details sheet grows only as far as its content requires.
+Android version is `0.18.0` (`versionCode=19`). See
+`docs/phases/navigation-ui-phase-8-acceptance.md`.
 
 ## Repository layout
 

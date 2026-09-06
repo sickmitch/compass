@@ -12,6 +12,7 @@ import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.ManeuverSign
 import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.navigation.CachedNavigationRoute
 import org.compass.cng.navigation.NavigationFuelPlan
 import org.compass.cng.navigation.NavigationFuelStop
@@ -239,6 +240,23 @@ private data class StoredNavigationTiming(
 }
 
 @Serializable
+private data class StoredRouteSpeedLimit(
+    val beginShapeIndex: Int,
+    val endShapeIndex: Int,
+    val speedLimitKph: Int,
+) {
+    fun toDomain() = RouteSpeedLimit(beginShapeIndex, endShapeIndex, speedLimitKph)
+
+    companion object {
+        fun fromDomain(value: RouteSpeedLimit) = StoredRouteSpeedLimit(
+            value.beginShapeIndex,
+            value.endShapeIndex,
+            value.speedLimitKph,
+        )
+    }
+}
+
+@Serializable
 private data class StoredNavigationLeg(
     val sequence: Int,
     val origin: StoredCoordinate,
@@ -251,12 +269,15 @@ private data class StoredNavigationLeg(
     val availableRangeAtDepartureKm: Double?,
     val estimatedRemainingRangeAtArrivalKm: Double?,
     val reserveMarginAtArrivalKm: Double?,
+    val speedLimits: List<StoredRouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
 ) {
     fun toDomain() = NavigationLeg(
         sequence, origin.toDomain(), destination.toDomain(), distanceMeters, durationSeconds,
         geometry.map(StoredCoordinate::toDomain), maneuvers.map(StoredManeuver::toDomain),
         shapeIndexOffset, availableRangeAtDepartureKm, estimatedRemainingRangeAtArrivalKm,
-        reserveMarginAtArrivalKm,
+        reserveMarginAtArrivalKm, speedLimits.map(StoredRouteSpeedLimit::toDomain),
+        speedLimitSource,
     )
 
     companion object {
@@ -267,6 +288,7 @@ private data class StoredNavigationLeg(
             value.maneuvers.map(StoredManeuver::fromDomain), value.shapeIndexOffset,
             value.availableRangeAtDepartureKm, value.estimatedRemainingRangeAtArrivalKm,
             value.reserveMarginAtArrivalKm,
+            value.speedLimits.map(StoredRouteSpeedLimit::fromDomain), value.speedLimitSource,
         )
     }
 }
@@ -358,6 +380,8 @@ private data class StoredNavigationRoute(
     val timing: StoredNavigationTiming,
     val provider: String,
     val gasolineFallback: StoredGasolineFallback?,
+    val speedLimits: List<StoredRouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
 ) {
     fun toDomain() = NavigationRoute(
         routeId, origin.toDomain(), destination.toDomain(), totalDistanceMeters,
@@ -365,6 +389,7 @@ private data class StoredNavigationRoute(
         geometry.map(StoredCoordinate::toDomain), legs.map(StoredNavigationLeg::toDomain),
         maneuvers.map(StoredManeuver::toDomain), fuelStops.map(StoredFuelStop::toDomain),
         fuelPlan?.toDomain(), timing.toDomain(), provider, gasolineFallback?.toDomain(),
+        speedLimits.map(StoredRouteSpeedLimit::toDomain), speedLimitSource,
     )
 
     companion object {
@@ -378,6 +403,7 @@ private data class StoredNavigationRoute(
             value.fuelStops.map(StoredFuelStop::fromDomain), value.fuelPlan?.let(StoredFuelPlan::fromDomain),
             StoredNavigationTiming.fromDomain(value.timing), value.provider,
             value.gasolineFallback?.let(StoredGasolineFallback::fromDomain),
+            value.speedLimits.map(StoredRouteSpeedLimit::fromDomain), value.speedLimitSource,
         )
     }
 }

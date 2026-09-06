@@ -21,6 +21,7 @@ from compass.routing.domain import (
     NoRouteError,
     RouteLeg,
     RouteRequest,
+    RouteSpeedLimit,
     RoutingProviderError,
     RoutingUnavailableError,
     WaypointRoute,
@@ -43,6 +44,7 @@ class ValhallaRoutingAdapter:
         connect_timeout_seconds: float,
         read_timeout_seconds: float,
         user_agent: str,
+        speed_limits_enabled: bool = False,
         traffic_aware: bool = False,
         traffic_speed_types: tuple[str, ...] = (
             "current",
@@ -61,6 +63,7 @@ class ValhallaRoutingAdapter:
             pool=connect_timeout_seconds,
         )
         self._headers = {"User-Agent": user_agent}
+        self._speed_limits_enabled = speed_limits_enabled
         self._traffic_aware = traffic_aware
         self._traffic_speed_types = traffic_speed_types
         self._departure_timezone = ZoneInfo(departure_timezone)
@@ -88,9 +91,16 @@ class ValhallaRoutingAdapter:
                 json=_without_time_dependent_costing(payload),
             )
             _raise_route_http_error(response)
-            return replace(_parse_route(_json_mapping(response)), traffic_fallback_used=True)
+            route = await self._with_base_speed_limits(
+                _parse_route(_json_mapping(response)),
+                costing=request.costing,
+            )
+            return replace(route, traffic_fallback_used=True)
         _raise_route_http_error(response)
-        route = _parse_route(_json_mapping(response))
+        route = await self._with_base_speed_limits(
+            _parse_route(_json_mapping(response)),
+            costing=request.costing,
+        )
         if not self._traffic_aware:
             return route
         baseline = await self._route_baseline(payload, expected_leg_count=1)
@@ -131,15 +141,19 @@ class ValhallaRoutingAdapter:
                 json=_without_time_dependent_costing(payload),
             )
             _raise_route_http_error(response)
-            return replace(
+            route = await self._with_waypoint_speed_limits(
                 _parse_waypoint_route(
                     _json_mapping(response), expected_leg_count=len(locations) - 1
                 ),
-                traffic_fallback_used=True,
+                costing=request.costing,
             )
+            return replace(route, traffic_fallback_used=True)
         _raise_route_http_error(response)
-        route = _parse_waypoint_route(
-            _json_mapping(response), expected_leg_count=len(locations) - 1
+        route = await self._with_waypoint_speed_limits(
+            _parse_waypoint_route(
+                _json_mapping(response), expected_leg_count=len(locations) - 1
+            ),
+            costing=request.costing,
         )
         if not self._traffic_aware:
             return route
@@ -241,6 +255,84 @@ class ValhallaRoutingAdapter:
             )
             return None
 
+    async def _with_base_speed_limits(
+        self,
+        route: BaseRoute,
+        *,
+        costing: str,
+    ) -> BaseRoute:
+        speed_limits, source = await self._speed_limit_profile(
+            route.encoded_polyline,
+            costing=costing,
+            maximum_shape_index=max(
+                (maneuver.end_shape_index for maneuver in route.maneuvers),
+                default=0,
+            ),
+        )
+        return replace(
+            route,
+            speed_limits=speed_limits,
+            speed_limit_source=source,
+        )
+
+    async def _with_waypoint_speed_limits(
+        self,
+        route: WaypointRoute,
+        *,
+        costing: str,
+    ) -> WaypointRoute:
+        legs: list[RouteLeg] = []
+        for leg in route.legs:
+            speed_limits, source = await self._speed_limit_profile(
+                leg.encoded_polyline,
+                costing=costing,
+                maximum_shape_index=max(
+                    (maneuver.end_shape_index for maneuver in leg.maneuvers),
+                    default=0,
+                ),
+            )
+            legs.append(
+                replace(
+                    leg,
+                    speed_limits=speed_limits,
+                    speed_limit_source=source,
+                )
+            )
+        return replace(route, legs=tuple(legs))
+
+    async def _speed_limit_profile(
+        self,
+        encoded_polyline: str,
+        *,
+        costing: str,
+        maximum_shape_index: int,
+    ) -> tuple[tuple[RouteSpeedLimit, ...], str | None]:
+        if not self._speed_limits_enabled:
+            return (), None
+        try:
+            response = await self._request(
+                "POST",
+                "/trace_attributes",
+                json=_speed_limit_trace_payload(encoded_polyline, costing=costing),
+            )
+            if response.status_code < 200 or response.status_code >= 300:
+                raise RoutingProviderError(
+                    f"Valhalla rejected speed-limit enrichment with HTTP {response.status_code}"
+                )
+            return (
+                _parse_speed_limit_profile(
+                    _json_mapping(response),
+                    maximum_shape_index=maximum_shape_index,
+                ),
+                "valhalla_graph",
+            )
+        except (RoutingUnavailableError, RoutingProviderError):
+            LOGGER.warning(
+                "route speed-limit enrichment unavailable; continuing without speed limits",
+                extra={"road_context_fallback": "speed_limits_unavailable"},
+            )
+            return (), None
+
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             if self._client is not None:
@@ -271,6 +363,84 @@ def _json_mapping(response: httpx.Response) -> Mapping[str, Any]:
     if not isinstance(payload, Mapping):
         raise RoutingProviderError("Valhalla returned an invalid response object")
     return payload
+
+
+def _speed_limit_trace_payload(
+    encoded_polyline: str,
+    *,
+    costing: str,
+) -> dict[str, Any]:
+    return {
+        "encoded_polyline": encoded_polyline,
+        "shape_match": "edge_walk",
+        "costing": costing,
+        "filters": {
+            "attributes": [
+                "edge.begin_shape_index",
+                "edge.end_shape_index",
+                "edge.speed_limit",
+            ],
+            "action": "include",
+        },
+    }
+
+
+def _parse_speed_limit_profile(
+    payload: Mapping[str, Any],
+    *,
+    maximum_shape_index: int | None = None,
+) -> tuple[RouteSpeedLimit, ...]:
+    edges = _list(payload.get("edges"), "edges")
+    if not edges:
+        raise RoutingProviderError("Valhalla speed-limit trace contains no edges")
+
+    profile: list[RouteSpeedLimit] = []
+    previous_end = 0
+    for index, raw_edge in enumerate(edges):
+        field = f"edges[{index}]"
+        edge = _mapping(raw_edge, field)
+        begin = _integer(edge.get("begin_shape_index"), f"{field}.begin_shape_index")
+        end = _integer(edge.get("end_shape_index"), f"{field}.end_shape_index")
+        if (
+            begin < 0
+            or end <= begin
+            or begin < previous_end
+            or (maximum_shape_index is not None and end > maximum_shape_index)
+        ):
+            raise RoutingProviderError(f"{field} has invalid shape indexes")
+        previous_end = end
+
+        raw_limit = edge.get("speed_limit")
+        if raw_limit is None:
+            continue
+        speed_limit = _integer(raw_limit, f"{field}.speed_limit")
+        # Valhalla uses zero for absent data and 255 for an unlimited edge.
+        # Neither is a numeric regulatory limit suitable for the UI.
+        if speed_limit in {0, 255}:
+            continue
+        if not 1 <= speed_limit <= 250:
+            raise RoutingProviderError(f"{field}.speed_limit is outside the supported range")
+
+        if (
+            profile
+            and profile[-1].speed_limit_kph == speed_limit
+            and profile[-1].end_shape_index == begin
+        ):
+            previous = profile[-1]
+            profile[-1] = RouteSpeedLimit(
+                begin_shape_index=previous.begin_shape_index,
+                end_shape_index=end,
+                speed_limit_kph=speed_limit,
+            )
+        else:
+            profile.append(
+                RouteSpeedLimit(
+                    begin_shape_index=begin,
+                    end_shape_index=end,
+                    speed_limit_kph=speed_limit,
+                )
+            )
+    return tuple(profile)
 
 
 def _route_payload(

@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     valhalla_read_timeout_seconds: float = Field(default=60, gt=0)
     valhalla_route_language: str = Field(default="it-IT", pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$")
     valhalla_matrix_batch_size: int = Field(default=40, gt=0, le=100)
+    valhalla_speed_limits_enabled: bool = True
     geocoding_provider: Literal["none", "nominatim"] = "nominatim"
     nominatim_url: str = "https://nominatim.openstreetmap.org"
     geocoding_timeout_seconds: float = Field(default=15, gt=0)

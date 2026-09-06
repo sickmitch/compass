@@ -221,3 +221,14 @@ GET /api/v1/data-freshness
 ```json
 {"code":"invalid_request","message":"The request payload is invalid."}
 ```
+
+### Route speed-limit profile
+
+Every base route response includes `speed_limits` and nullable `speed_limit_source`. Each profile
+entry contains `begin_shape_index`, exclusive `end_shape_index`, and `speed_limit_kph`. A source of
+`valhalla_graph` means Compass successfully walked the returned polyline through Valhalla
+`/trace_attributes`; an empty profile can still mean the graph has no numeric limit on those edges.
+If enrichment is disabled, unavailable or malformed, the source is `null`, the list is empty, and
+the otherwise valid route remains available. The same fields exist on every selected-stop and
+predictive-itinerary leg. Values `0` (unknown) and `255` (unlimited) are never serialized as numeric
+limits.

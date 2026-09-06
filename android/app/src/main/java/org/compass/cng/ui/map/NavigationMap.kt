@@ -1,10 +1,12 @@
 package org.compass.cng.ui.map
 
+import android.graphics.PointF
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalDensity
@@ -15,11 +17,14 @@ import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraController
 import org.compass.cng.navigation.NavigationCameraMode
+import org.compass.cng.navigation.followTopPaddingPixels
 import org.compass.cng.navigation.routePortions
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.gestures.MoveGestureDetector
+import org.maplibre.android.gestures.StandardScaleGestureDetector
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
@@ -66,6 +71,7 @@ fun NavigationMap(
     state: NavigationState,
     cameraMode: NavigationCameraMode,
     cameraConfig: NavigationCameraConfig = NavigationCameraConfig(),
+    bottomObstructionPixels: Int = 0,
     onCameraModeChange: (NavigationCameraMode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -74,24 +80,84 @@ fun NavigationMap(
     val mapView = rememberMapViewWithLifecycle()
     val cameraController = remember(cameraConfig) { NavigationCameraController(cameraConfig) }
     val puckAnimator = remember(route.routeId) { MapPuckAnimator() }
+    val scaleGestureActive = remember(mapView) { mutableStateOf(false) }
+    val manualFollowZoom = remember(mapView) { mutableStateOf<Double?>(null) }
     val density = LocalDensity.current.density
     val currentCameraMode by rememberUpdatedState(cameraMode)
     val currentOnCameraModeChange by rememberUpdatedState(onCameraModeChange)
+    val currentNavigationState by rememberUpdatedState(state)
+    val currentBottomObstructionPixels by rememberUpdatedState(bottomObstructionPixels)
     AndroidView(factory = { mapView }, modifier = modifier)
 
     DisposableEffect(mapView, puckAnimator) {
         var registeredMap: MapLibreMap? = null
-        val interactionListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
-            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
-                currentOnCameraModeChange(NavigationCameraMode.FREE)
+        val scaleListener = object : MapLibreMap.OnScaleListener {
+            override fun onScaleBegin(detector: StandardScaleGestureDetector) {
+                scaleGestureActive.value = true
+                if (currentCameraMode == NavigationCameraMode.FOLLOW) {
+                    registeredMap?.let { map ->
+                        map.uiSettings.focalPoint = followPuckFocalPoint(
+                            map,
+                            cameraConfig,
+                            currentBottomObstructionPixels,
+                        )
+                    }
+                    Log.i(NAVIGATION_MAP_LOG_TAG, "camera_interaction=zoom mode=follow")
+                }
             }
+
+            override fun onScale(detector: StandardScaleGestureDetector) = Unit
+
+            override fun onScaleEnd(detector: StandardScaleGestureDetector) {
+                scaleGestureActive.value = false
+                if (currentCameraMode == NavigationCameraMode.FOLLOW) {
+                    registeredMap?.let { map ->
+                        manualFollowZoom.value = map.cameraPosition.zoom
+                        Log.i(
+                            NAVIGATION_MAP_LOG_TAG,
+                            "camera_interaction=zoom mode=follow " +
+                                "manual_zoom=${manualFollowZoom.value} retained=true",
+                        )
+                        updateCamera(
+                            map = map,
+                            state = currentNavigationState,
+                            cameraMode = NavigationCameraMode.FOLLOW,
+                            cameraController = cameraController,
+                            density = density,
+                            viewportHeightPixels = mapView.height,
+                            bottomObstructionPixels = currentBottomObstructionPixels,
+                            followImmediately = true,
+                            zoomOverride = manualFollowZoom.value,
+                        )
+                    }
+                }
+            }
+        }
+        val moveListener = object : MapLibreMap.OnMoveListener {
+            override fun onMoveBegin(detector: MoveGestureDetector) {
+                val scaleInProgress = registeredMap
+                    ?.gesturesManager
+                    ?.standardScaleGestureDetector
+                    ?.isInProgress == true
+                val isMultiTouch = (detector.currentEvent?.pointerCount ?: 1) > 1
+                if (!scaleGestureActive.value && !scaleInProgress && !isMultiTouch) {
+                    manualFollowZoom.value = null
+                    currentOnCameraModeChange(NavigationCameraMode.FREE)
+                }
+            }
+
+            override fun onMove(detector: MoveGestureDetector) = Unit
+
+            override fun onMoveEnd(detector: MoveGestureDetector) = Unit
         }
         mapView.getMapAsync { map ->
             registeredMap = map
-            map.addOnCameraMoveStartedListener(interactionListener)
+            map.addOnScaleListener(scaleListener)
+            map.addOnMoveListener(moveListener)
         }
         onDispose {
-            registeredMap?.removeOnCameraMoveStartedListener(interactionListener)
+            registeredMap?.removeOnScaleListener(scaleListener)
+            registeredMap?.removeOnMoveListener(moveListener)
             puckAnimator.cancel()
         }
     }
@@ -206,13 +272,23 @@ fun NavigationMap(
                     cameraController = cameraController,
                     density = density,
                     viewportHeightPixels = mapView.height,
+                    bottomObstructionPixels = bottomObstructionPixels,
                 )
             }
         }
     }
 
-    LaunchedEffect(mapView, cameraMode, route.routeId) {
+    LaunchedEffect(mapView, cameraMode, route.routeId, bottomObstructionPixels) {
         mapView.getMapAsync { map ->
+            if (cameraMode != NavigationCameraMode.FOLLOW) {
+                manualFollowZoom.value = null
+            }
+            configureNavigationGestures(
+                map,
+                cameraMode,
+                cameraConfig,
+                bottomObstructionPixels,
+            )
             map.style?.getLayerAs<SymbolLayer>(PUCK_LAYER)?.let { layer ->
                 configureVehicleLayer(layer, cameraMode)
                 Log.i(
@@ -231,6 +307,7 @@ fun NavigationMap(
         state.currentManeuver,
         state.nextManeuver,
         state.distanceToNextManeuverMeters,
+        bottomObstructionPixels,
     ) {
         val portions = state.routePortions()
         mapView.getMapAsync { map ->
@@ -241,6 +318,8 @@ fun NavigationMap(
             style.getSourceAs<GeoJsonSource>(REMAINING_SOURCE)?.setGeoJson(
                 lineFeature(portions.remaining.map(::point)),
             )
+            val cameraDrivenByPuck =
+                state.navigationPosition != null && cameraMode == NavigationCameraMode.FOLLOW
             state.navigationPosition?.let { position ->
                 puckAnimator.moveTo(
                     position = position,
@@ -250,24 +329,48 @@ fun NavigationMap(
                             "puck_motion mode=${transition.mode.name.lowercase()} " +
                                 "duration_ms=${transition.durationMillis} " +
                                 "distance_m=${transition.distanceMeters.toInt()} " +
-                                "source=matched",
+                                "source=matched camera_sync=puck_pose",
                         )
                     },
                 ) { pose ->
                     map.style?.getSourceAs<GeoJsonSource>(PUCK_SOURCE)?.setGeoJson(
                         navigationPuckFeature(pose.coordinate, pose.bearingDegrees),
                     )
+                    if (
+                        currentCameraMode == NavigationCameraMode.FOLLOW &&
+                        !scaleGestureActive.value
+                    ) {
+                        updateCamera(
+                            map = map,
+                            state = state.copy(
+                                navigationPosition = position.copy(
+                                    coordinate = pose.coordinate,
+                                    bearingDegrees = pose.bearingDegrees,
+                                ),
+                            ),
+                            cameraMode = NavigationCameraMode.FOLLOW,
+                            cameraController = cameraController,
+                            density = density,
+                            viewportHeightPixels = mapView.height,
+                            bottomObstructionPixels = bottomObstructionPixels,
+                            followImmediately = true,
+                            zoomOverride = manualFollowZoom.value,
+                        )
+                    }
                 }
             }
 
-            updateCamera(
-                map = map,
-                state = state,
-                cameraMode = cameraMode,
-                cameraController = cameraController,
-                density = density,
-                viewportHeightPixels = mapView.height,
-            )
+            if (!cameraDrivenByPuck) {
+                updateCamera(
+                    map = map,
+                    state = state,
+                    cameraMode = cameraMode,
+                    cameraController = cameraController,
+                    density = density,
+                    viewportHeightPixels = mapView.height,
+                    bottomObstructionPixels = bottomObstructionPixels,
+                )
+            }
         }
     }
 }
@@ -279,6 +382,9 @@ private fun updateCamera(
     cameraController: NavigationCameraController,
     density: Float,
     viewportHeightPixels: Int,
+    bottomObstructionPixels: Int,
+    followImmediately: Boolean = false,
+    zoomOverride: Double? = null,
 ) {
     when (cameraMode) {
         NavigationCameraMode.FREE -> return
@@ -321,34 +427,88 @@ private fun updateCamera(
         }
         NavigationCameraMode.FOLLOW -> {
             val camera = cameraController.instruction(state)
-            Log.i(
-                NAVIGATION_MAP_LOG_TAG,
-                "camera_instruction mode=follow bearing=${camera.bearingDegrees.toInt()} " +
-                    "pitch=${camera.pitchDegrees.toInt()} zoom=${camera.zoom} " +
-                    "next_maneuver_spacing=${state.nextManeuver?.distanceMeters} " +
-                    "target_alignment=centerline",
+            val bottomPaddingPixels = bottomObstructionPixels
+                .coerceIn(0, viewportHeightPixels)
+            val bearing = if (followImmediately) {
+                state.vehicleBearingDegrees ?: camera.bearingDegrees
+            } else {
+                camera.bearingDegrees
+            }
+            map.uiSettings.focalPoint = followPuckFocalPoint(
+                map,
+                cameraController.config,
+                bottomObstructionPixels,
             )
-            map.easeCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(LatLng(camera.target.latitude, camera.target.longitude))
-                        .bearing(camera.bearingDegrees)
-                        .tilt(camera.pitchDegrees)
-                        .zoom(camera.zoom)
-                        .padding(
-                            0.0,
-                            viewportHeightPixels *
-                                cameraController.config.followTopPaddingFraction,
-                            0.0,
-                            0.0,
-                        )
-                        .build(),
-                ),
-                camera.animationMillis,
+            val update = CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(camera.target.latitude, camera.target.longitude))
+                    .bearing(bearing)
+                    .tilt(camera.pitchDegrees)
+                    .zoom(zoomOverride ?: camera.zoom)
+                    .padding(
+                        0.0,
+                        followTopPaddingPixels(
+                            viewportHeightPixels,
+                            cameraController.config.followPuckVerticalFraction,
+                            bottomPaddingPixels,
+                        ),
+                        0.0,
+                        bottomPaddingPixels.toDouble(),
+                    )
+                    .build(),
             )
+            if (followImmediately) {
+                map.moveCamera(update)
+            } else {
+                Log.i(
+                    NAVIGATION_MAP_LOG_TAG,
+                    "camera_instruction mode=follow bearing=${camera.bearingDegrees.toInt()} " +
+                        "pitch=${camera.pitchDegrees.toInt()} zoom=${camera.zoom} " +
+                        "next_maneuver_spacing=${state.nextManeuver?.distanceMeters} " +
+                        "target_alignment=puck_anchor",
+                )
+                map.easeCamera(update, camera.animationMillis)
+            }
         }
     }
 }
+
+private fun configureNavigationGestures(
+    map: MapLibreMap,
+    cameraMode: NavigationCameraMode,
+    cameraConfig: NavigationCameraConfig,
+    bottomObstructionPixels: Int,
+) {
+    val following = cameraMode == NavigationCameraMode.FOLLOW
+    map.uiSettings.apply {
+        isRotateGesturesEnabled = !following
+        isTiltGesturesEnabled = !following
+        focalPoint = if (following) {
+            followPuckFocalPoint(map, cameraConfig, bottomObstructionPixels)
+        } else {
+            null
+        }
+    }
+    Log.i(
+        NAVIGATION_MAP_LOG_TAG,
+        if (following) {
+            "gesture_policy=zoom_follow pan_free " +
+                "puck_vertical_fraction=${cameraConfig.followPuckVerticalFraction}"
+        } else {
+            "gesture_policy=free focal_point=gesture"
+        },
+    )
+}
+
+private fun followPuckFocalPoint(
+    map: MapLibreMap,
+    cameraConfig: NavigationCameraConfig,
+    bottomObstructionPixels: Int,
+): PointF = PointF(
+    map.width / 2f,
+    (map.height - bottomObstructionPixels.toFloat().coerceIn(0f, map.height)) *
+        cameraConfig.followPuckVerticalFraction.toFloat(),
+)
 
 private fun configureVehicleLayer(
     layer: SymbolLayer,

@@ -80,6 +80,25 @@
             "const": "valhalla",
             "title": "Provider",
             "type": "string"
+          },
+          "speed_limit_source": {
+            "anyOf": [
+              {
+                "const": "valhalla_graph",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Source"
+          },
+          "speed_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSpeedLimitResponse"
+            },
+            "title": "Speed Limits",
+            "type": "array"
           }
         },
         "required": [
@@ -87,6 +106,8 @@
           "duration_seconds",
           "geometry",
           "maneuvers",
+          "speed_limits",
+          "speed_limit_source",
           "provider",
           "navigation"
         ],
@@ -150,6 +171,25 @@
             "exclusiveMinimum": 0.0,
             "title": "Sequence",
             "type": "integer"
+          },
+          "speed_limit_source": {
+            "anyOf": [
+              {
+                "const": "valhalla_graph",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Source"
+          },
+          "speed_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSpeedLimitResponse"
+            },
+            "title": "Speed Limits",
+            "type": "array"
           }
         },
         "required": [
@@ -161,6 +201,8 @@
           "duration_seconds",
           "geometry",
           "maneuvers",
+          "speed_limits",
+          "speed_limit_source",
           "available_range_at_departure_km",
           "estimated_remaining_range_at_arrival_km",
           "reserve_margin_at_arrival_km"
@@ -3095,6 +3137,25 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "speed_limit_source": {
+            "anyOf": [
+              {
+                "const": "valhalla_graph",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Source"
+          },
+          "speed_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSpeedLimitResponse"
+            },
+            "title": "Speed Limits",
+            "type": "array"
           }
         },
         "required": [
@@ -3104,9 +3165,39 @@
           "distance_meters",
           "duration_seconds",
           "geometry",
-          "maneuvers"
+          "maneuvers",
+          "speed_limits",
+          "speed_limit_source"
         ],
         "title": "RouteLegResponse",
+        "type": "object"
+      },
+      "RouteSpeedLimitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "begin_shape_index": {
+            "minimum": 0.0,
+            "title": "Begin Shape Index",
+            "type": "integer"
+          },
+          "end_shape_index": {
+            "exclusiveMinimum": 0.0,
+            "title": "End Shape Index",
+            "type": "integer"
+          },
+          "speed_limit_kph": {
+            "maximum": 250.0,
+            "minimum": 1.0,
+            "title": "Speed Limit Kph",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "begin_shape_index",
+          "end_shape_index",
+          "speed_limit_kph"
+        ],
+        "title": "RouteSpeedLimitResponse",
         "type": "object"
       },
       "RouteWithCngItineraryRequest": {

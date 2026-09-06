@@ -17,7 +17,11 @@ from compass.routing.domain import (
     RoutingUnavailableError,
     WaypointRouteRequest,
 )
-from compass.routing.valhalla import ValhallaRoutingAdapter, _parse_matrix
+from compass.routing.valhalla import (
+    ValhallaRoutingAdapter,
+    _parse_matrix,
+    _parse_speed_limit_profile,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "valhalla_route_response.json"
 
@@ -54,6 +58,23 @@ def _traffic_adapter(
             read_timeout_seconds=2,
             user_agent="compass-test/0.1.0",
             traffic_aware=True,
+            client=client,
+        ),
+        client,
+    )
+
+
+def _speed_limit_adapter(
+    handler: httpx.AsyncBaseTransport,
+) -> tuple[ValhallaRoutingAdapter, httpx.AsyncClient]:
+    client = httpx.AsyncClient(transport=handler)
+    return (
+        ValhallaRoutingAdapter(
+            base_url="http://valhalla.test:8002/",
+            connect_timeout_seconds=1,
+            read_timeout_seconds=2,
+            user_agent="compass-test/0.1.0",
+            speed_limits_enabled=True,
             client=client,
         ),
         client,
@@ -103,6 +124,129 @@ def test_route_translates_request_and_normalizes_response() -> None:
     assert tuple(element.text for element in sign.exit_toward_elements) == ("Bologna",)
     assert tuple(element.text for element in sign.exit_name_elements) == ("Casalecchio",)
     assert route.maneuvers[1].roundabout_exit_count == 2
+
+
+def test_route_enriches_speed_limits_by_shape_index_and_merges_equal_edges() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/route":
+            return httpx.Response(200, json=fixture)
+        assert request.url.path == "/trace_attributes"
+        assert json.loads(request.content) == {
+            "encoded_polyline": fixture["trip"]["legs"][0]["shape"],
+            "shape_match": "edge_walk",
+            "costing": "auto",
+            "filters": {
+                "attributes": [
+                    "edge.begin_shape_index",
+                    "edge.end_shape_index",
+                    "edge.speed_limit",
+                ],
+                "action": "include",
+            },
+        }
+        return httpx.Response(
+            200,
+            json={
+                "edges": [
+                    {"begin_shape_index": 0, "end_shape_index": 3, "speed_limit": 50},
+                    {"begin_shape_index": 3, "end_shape_index": 7, "speed_limit": 50},
+                    {"begin_shape_index": 7, "end_shape_index": 9, "speed_limit": 0},
+                    {"begin_shape_index": 9, "end_shape_index": 10, "speed_limit": 90},
+                ]
+            },
+        )
+
+    adapter, client = _speed_limit_adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(adapter.route(_request()))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert calls == ["/route", "/trace_attributes"]
+    assert route.speed_limit_source == "valhalla_graph"
+    assert [
+        (item.begin_shape_index, item.end_shape_index, item.speed_limit_kph)
+        for item in route.speed_limits
+    ] == [(0, 7, 50), (9, 10, 90)]
+
+
+@pytest.mark.parametrize(
+    ("status_code", "trace_payload"),
+    [
+        (503, {"error": "trace unavailable"}),
+        (200, {"edges": [{"end_shape_index": 1, "speed_limit": 50}]}),
+    ],
+)
+def test_route_keeps_navigation_available_when_speed_limit_trace_fails(
+    status_code: int,
+    trace_payload: dict[str, object],
+) -> None:
+    fixture = json.loads(FIXTURE.read_text())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/route":
+            return httpx.Response(200, json=fixture)
+        return httpx.Response(status_code, json=trace_payload)
+
+    adapter, client = _speed_limit_adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(adapter.route(_request()))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.distance_meters == 2500
+    assert route.speed_limits == ()
+    assert route.speed_limit_source is None
+
+
+def test_speed_limit_profile_rejects_malformed_or_non_monotonic_edges() -> None:
+    with pytest.raises(RoutingProviderError, match="invalid shape indexes"):
+        _parse_speed_limit_profile(
+            {
+                "edges": [
+                    {"begin_shape_index": 4, "end_shape_index": 6, "speed_limit": 50},
+                    {"begin_shape_index": 3, "end_shape_index": 7, "speed_limit": 70},
+                ]
+            }
+        )
+
+    with pytest.raises(RoutingProviderError, match="begin_shape_index"):
+        _parse_speed_limit_profile(
+            {"edges": [{"end_shape_index": 1, "speed_limit": 50}]}
+        )
+
+    with pytest.raises(RoutingProviderError, match="invalid shape indexes"):
+        _parse_speed_limit_profile(
+            {
+                "edges": [
+                    {"begin_shape_index": 0, "end_shape_index": 4, "speed_limit": 50},
+                    {"begin_shape_index": 3, "end_shape_index": 5, "speed_limit": 70},
+                ]
+            }
+        )
+
+    with pytest.raises(RoutingProviderError, match="invalid shape indexes"):
+        _parse_speed_limit_profile(
+            {
+                "edges": [
+                    {"begin_shape_index": 0, "end_shape_index": 3, "speed_limit": 50}
+                ]
+            },
+            maximum_shape_index=2,
+        )
+
+    assert _parse_speed_limit_profile(
+        {
+            "edges": [
+                {"begin_shape_index": 0, "end_shape_index": 1, "speed_limit": 0},
+                {"begin_shape_index": 1, "end_shape_index": 2, "speed_limit": 255},
+            ]
+        }
+    ) == ()
 
 
 def test_route_rejects_zero_cost_provider_result_as_non_navigable() -> None:
@@ -362,6 +506,55 @@ def test_waypoint_route_preserves_leg_boundaries() -> None:
     assert len(route.legs) == 2
     assert route.legs[0].distance_meters == 2500
     assert route.legs[1].distance_meters == 3500
+    assert route.legs[1].encoded_polyline == "second-leg-polyline"
+
+
+def test_waypoint_route_enriches_each_leg_with_its_own_speed_profile() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    second_leg = json.loads(json.dumps(fixture["trip"]["legs"][0]))
+    second_leg["shape"] = "second-leg-polyline"
+    fixture["trip"]["summary"] = {"length": 5.0, "time": 640}
+    fixture["trip"]["legs"] = [fixture["trip"]["legs"][0], second_leg]
+    traced_shapes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/route":
+            return httpx.Response(200, json=fixture)
+        payload = json.loads(request.content)
+        traced_shapes.append(payload["encoded_polyline"])
+        limit = 50 if len(traced_shapes) == 1 else 130
+        return httpx.Response(
+            200,
+            json={
+                "edges": [
+                    {"begin_shape_index": 0, "end_shape_index": 10, "speed_limit": limit}
+                ]
+            },
+        )
+
+    adapter, client = _speed_limit_adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(
+            adapter.route_with_waypoints(
+                WaypointRouteRequest(
+                    origin=Coordinate(45.4642, 9.19),
+                    destination=Coordinate(44.4949, 11.3426),
+                    waypoints=(Coordinate(45.2, 9.7),),
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert traced_shapes == [
+        fixture["trip"]["legs"][0]["shape"],
+        "second-leg-polyline",
+    ]
+    assert [leg.speed_limits[0].speed_limit_kph for leg in route.legs] == [50, 130]
+    assert route.duration_seconds == 640
+    assert len(route.legs) == 2
+    assert route.legs[0].distance_meters == 2500
+    assert route.legs[1].distance_meters == 2500
     assert route.legs[1].encoded_polyline == "second-leg-polyline"
 
 

@@ -17,6 +17,7 @@ from compass.api.routes import (
     ManeuverResponse,
     NavigationTimingResponse,
     RouteGeometry,
+    RouteSpeedLimitResponse,
     _navigation_timing_response,
     _navigation_traffic,
 )
@@ -117,6 +118,8 @@ class RouteLegResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     geometry: RouteGeometry
     maneuvers: list[ManeuverResponse]
+    speed_limits: list[RouteSpeedLimitResponse]
+    speed_limit_source: Literal["valhalla_graph"] | None
 
 
 class RouteWithCngStopResponse(StrictModel):
@@ -174,6 +177,8 @@ class CngItineraryRouteLegResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     geometry: RouteGeometry
     maneuvers: list[ManeuverResponse]
+    speed_limits: list[RouteSpeedLimitResponse]
+    speed_limit_source: Literal["valhalla_graph"] | None
     available_range_at_departure_km: float = Field(gt=0)
     estimated_remaining_range_at_arrival_km: float = Field(ge=0)
     reserve_margin_at_arrival_km: float = Field(ge=0)
@@ -326,6 +331,13 @@ async def route_with_cng_stop(
             maneuvers=[
                 ManeuverResponse.model_validate(asdict(maneuver)) for maneuver in leg.maneuvers
             ],
+            speed_limits=[
+                RouteSpeedLimitResponse.model_validate(asdict(speed_limit))
+                for speed_limit in leg.speed_limits
+            ],
+            speed_limit_source=(
+                "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
+            ),
         )
         for index, leg in enumerate(route.legs)
     ]
@@ -479,6 +491,13 @@ async def route_with_cng_itinerary(
                     ManeuverResponse.model_validate(asdict(maneuver))
                     for maneuver in leg.maneuvers
                 ],
+                speed_limits=[
+                    RouteSpeedLimitResponse.model_validate(asdict(speed_limit))
+                    for speed_limit in leg.speed_limits
+                ],
+                speed_limit_source=(
+                    "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
+                ),
                 available_range_at_departure_km=available_range_km,
                 estimated_remaining_range_at_arrival_km=remaining_range_km,
                 reserve_margin_at_arrival_km=reserve_margin_km,

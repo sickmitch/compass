@@ -57,6 +57,13 @@ class ManeuverSign:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteSpeedLimit:
+    begin_shape_index: int
+    end_shape_index: int
+    speed_limit_kph: int
+
+
+@dataclass(frozen=True, slots=True)
 class Maneuver:
     type: int
     instruction: str
@@ -86,6 +93,8 @@ class BaseRoute:
     traffic_aware: bool = False
     traffic_delay_seconds: float | None = None
     traffic_fallback_used: bool = False
+    speed_limits: tuple[RouteSpeedLimit, ...] = ()
+    speed_limit_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +103,8 @@ class RouteLeg:
     duration_seconds: float
     encoded_polyline: str
     maneuvers: tuple[Maneuver, ...]
+    speed_limits: tuple[RouteSpeedLimit, ...] = ()
+    speed_limit_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

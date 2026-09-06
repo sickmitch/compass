@@ -24,6 +24,14 @@ data class ApiRoute(
     val maneuvers: List<ApiManeuver>,
     val provider: String,
     val navigation: ApiNavigationTiming,
+    val speedLimits: List<ApiRouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
+)
+
+data class ApiRouteSpeedLimit(
+    val beginShapeIndex: Int,
+    val endShapeIndex: Int,
+    val speedLimitKph: Int,
 )
 
 data class ApiNavigationTiming(
@@ -256,6 +264,8 @@ data class ApiCngItineraryRouteLeg(
     val availableRangeAtDepartureKm: Double,
     val estimatedRemainingRangeAtArrivalKm: Double,
     val reserveMarginAtArrivalKm: Double,
+    val speedLimits: List<ApiRouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
 )
 
 data class ApiSelectedCngStop(
@@ -279,4 +289,6 @@ data class ApiRouteLeg(
     val durationSeconds: Double,
     val encodedPolyline: String,
     val maneuvers: List<ApiManeuver>,
+    val speedLimits: List<ApiRouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
 )

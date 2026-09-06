@@ -515,14 +515,15 @@ does not parse localized instruction prose or make a routing decision. Lane guid
 limits require a future source-backed contract because they are not fields of the standard
 turn-by-turn maneuver response used here.
 
-Navigation UI Phase 2 formalizes that camera boundary. `NavigationCameraConfig` owns the driving
-pitch, continuous speed- and maneuver-density-dependent zoom, forward look-ahead and transition
-timing policy;
+Navigation UI Phase 2 introduced that camera boundary. `NavigationCameraConfig` owns the driving
+pitch, continuous speed- and maneuver-density-dependent zoom, screen anchor and transition timing
+policy;
 `NavigationCameraController` converts the current `NavigationState` into a MapLibre-independent
-camera instruction whose target lies ahead on the local route-heading centreline and whose bearing follows a
+camera instruction whose geographic target is the matched vehicle pose and whose bearing follows a
 short forward route tangent instead of a potentially lagging location heading. `NavigationMap`
-only renders that instruction with an eased transition. A MapLibre gesture changes UI-owned camera mode to
-`FREE`, suppressing later automatic camera updates until `Ricentra` or the inactivity timeout;
+places the target at the configured screen-space anchor. A deliberate single-finger pan changes the
+UI-owned camera mode to `FREE`, suppressing later automatic camera updates until `Ricentra` or the
+inactivity timeout; pinch zoom retains follow mode and the manually selected scale;
 north-up overview continues to fit only remaining geometry. This keeps camera presentation out of route matching and avoids a
 second copy of navigation progress.
 
@@ -589,10 +590,10 @@ in the MapLibre presentation adapter, while all thresholds and transition math a
 and unit tested.
 
 Phase 3 device evidence revealed that using a farther point on curved remaining geometry as the
-camera target could move the vehicle sideways even with the correct local bearing. The target is
-therefore projected from the matched position along that local bearing. This preserves the
-heading-up invariant and keeps the vehicle on the horizontal centreline; stronger bounded
-maneuver-proximity zoom and slightly greater top padding improve dense urban junction readability.
+camera target could move the vehicle sideways even with the correct local bearing. Phase 8 removes
+the remaining geographic projection entirely: the target is the puck's exact interpolated pose,
+with the forward view created by asymmetric screen padding. This preserves the heading-up invariant
+at every zoom and prevents separately eased camera motion from advancing ahead of the puck.
 
 The repeated Phase 3 gate also exposed a Valhalla failure mode independent of Android: a
 time-dependent request may terminate with error 442 after reaching its convergence limit even when
@@ -730,3 +731,25 @@ The HTTP repository independently keeps ten normalized exact-query search result
 network/server failures may read that cache. MapLibre retains already requested style/tile/font
 resources in its bounded ambient database. Neither cache performs routing; any new physical route
 or reroute continues to cross the Compass API and server-side Valhalla boundary. See ADR 0018.
+
+## Navigation UI Phase 8 road-context boundary
+
+Speed limits are immutable attributes of the routed Valhalla graph snapshot, not traffic-provider
+speeds and not text parsed from maneuver instructions. After a successful route calculation the
+routing adapter performs an `edge_walk` `/trace_attributes` request for only
+`edge.begin_shape_index`, `edge.end_shape_index`, and `edge.speed_limit`. Consecutive equal limits
+are compacted into a provider-independent shape profile. Enrichment failure is logged and degrades
+to an explicitly absent source without invalidating the route.
+
+Android retains the profile across its DTO, domain, multi-leg joining and private cache boundaries.
+The existing `NavigationPosition.routeSegmentIndex` is the sole selector for the current limit;
+Compose receives only the resolved nullable value. Lane guidance is deliberately excluded because
+the accepted route contract does not provide a stable lane-level assignment.
+
+The same phase tightens the driving presentation contract. The MapLibre camera consumes the exact
+pose emitted to the puck source on each animation frame and places it at 75% of viewport height via
+screen padding. Pinch uses that point as its focal point and retains the chosen zoom; only a
+single-finger pan enters `FREE`. The compact trip panel owns its `Nascondi` and `Dettagli` controls,
+reports its actual pixel height to the camera adapter and uses centered vector chevrons. Camera
+padding then anchors the puck at 75% of the unobscured map above the panel. The modal details
+surface measures to short content before falling back to scrolling.

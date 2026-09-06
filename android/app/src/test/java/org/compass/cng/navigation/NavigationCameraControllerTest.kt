@@ -4,6 +4,7 @@ import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -29,7 +30,7 @@ class NavigationCameraControllerTest {
     )
 
     @Test
-    fun followTargetLooksAheadOfMatchedVehicleAlongRemainingRoute() {
+    fun followTargetIsTheMatchedVehicleAndBearingLooksAlongTheRemainingRoute() {
         val controller = NavigationCameraController()
         val state = NavigationState(
             route = route,
@@ -39,14 +40,13 @@ class NavigationCameraControllerTest {
         val instruction = controller.instruction(state)
 
         assertEquals(45.0, instruction.target.latitude, 0.000_001)
-        assertTrue(instruction.target.longitude > route.origin.longitude)
-        assertTrue(instruction.target.longitude < route.geometry[1].longitude)
+        assertEquals(route.origin.longitude, instruction.target.longitude, 0.000_001)
         assertEquals(90.0, instruction.bearingDegrees, 0.5)
         assertTrue(instruction.pitchDegrees in 45.0..60.0)
     }
 
     @Test
-    fun speedContinuouslyWidensViewAndExtendsLookAhead() {
+    fun speedContinuouslyWidensViewWithoutMovingTheVehicleAnchor() {
         val controller = NavigationCameraController()
         val base = NavigationState(
             route = route,
@@ -58,7 +58,7 @@ class NavigationCameraControllerTest {
 
         assertTrue(urban.zoom > motorway.zoom)
         assertTrue(urban.pitchDegrees < motorway.pitchDegrees)
-        assertTrue(motorway.target.longitude > urban.target.longitude)
+        assertEquals(urban.target, motorway.target)
     }
 
     @Test
@@ -87,7 +87,7 @@ class NavigationCameraControllerTest {
             base.copy(currentManeuver = turn, distanceToNextManeuverMeters = 20.0),
         )
 
-        assertTrue(approaching.target.longitude < cruising.target.longitude)
+        assertEquals(cruising.target, approaching.target)
         assertTrue(approaching.zoom > cruising.zoom)
         assertEquals(90.0, approaching.bearingDegrees, 0.5)
         assertTrue(approaching.pitchDegrees in 45.0..60.0)
@@ -124,7 +124,7 @@ class NavigationCameraControllerTest {
 
         assertEquals(90.0, instruction.bearingDegrees, 0.5)
         assertEquals(bentRoute.origin.latitude, instruction.target.latitude, 0.000_001)
-        assertTrue(instruction.target.longitude > bentRoute.origin.longitude)
+        assertEquals(bentRoute.origin.longitude, instruction.target.longitude, 0.000_001)
     }
 
     @Test
@@ -180,8 +180,25 @@ class NavigationCameraControllerTest {
     fun drivingViewportAndManualCameraTimeoutHaveCentralizedSafeDefaults() {
         val config = NavigationCameraConfig()
 
-        assertEquals(0.22, config.followTopPaddingFraction, 0.0)
+        assertEquals(0.75, config.followPuckVerticalFraction, 0.0)
         assertEquals(10_000L, config.freeModeAutoRecenterMillis)
+    }
+
+    @Test
+    fun followPuckAnchorRejectsPositionsOutsideTheLowerDrivingViewport() {
+        assertThrows(IllegalArgumentException::class.java) {
+            NavigationCameraConfig(followPuckVerticalFraction = 0.49)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NavigationCameraConfig(followPuckVerticalFraction = 0.91)
+        }
+    }
+
+    @Test
+    fun followPaddingPlacesTheCameraTargetOnTheConfiguredScreenFraction() {
+        assertEquals(500.0, followTopPaddingPixels(1_000, 0.75), 0.0)
+        assertEquals(0.0, followTopPaddingPixels(1_000, 0.5), 0.0)
+        assertEquals(400.0, followTopPaddingPixels(1_000, 0.75, 200), 0.0)
     }
 
     private fun maneuver(distanceMeters: Double) = Maneuver(

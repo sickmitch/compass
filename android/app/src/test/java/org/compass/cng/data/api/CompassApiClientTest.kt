@@ -65,6 +65,8 @@ class CompassApiClientTest {
         assertEquals(181, route.maneuvers.single().bearingAfter)
         assertEquals("1", route.maneuvers.single().sign?.exitNumberElements?.single()?.text)
         assertEquals(2, route.maneuvers.single().roundaboutExitCount)
+        assertEquals(50, route.speedLimits.single().speedLimitKph)
+        assertEquals("valhalla_graph", route.speedLimitSource)
 
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
@@ -341,6 +343,8 @@ class CompassApiClientTest {
         assertEquals("origin_to_cng_station", result.legs.first().kind)
         assertEquals("cng_station_to_destination", result.legs.last().kind)
         assertEquals(210_931.0, result.distanceMeters, 0.0)
+        assertEquals(50, result.legs.first().speedLimits.single().speedLimitKph)
+        assertEquals("valhalla_graph", result.legs.first().speedLimitSource)
 
         val recorded = server.takeRequest()
         assertEquals("/api/v1/routes/with-cng-stop", recorded.path)
@@ -457,6 +461,9 @@ class CompassApiClientTest {
         assertEquals("cng_station_to_cng_station", result.legs[1].kind)
         assertEquals(0.0, result.legs.last().reserveMarginAtArrivalKm, 0.0)
         assertEquals("all_legs_preserve_reserve", result.rangeValidation)
+        assertEquals(listOf(50, 90, 110, 130), result.legs.map {
+            it.speedLimits.single().speedLimitKph
+        })
 
         val recorded = server.takeRequest()
         assertEquals("/api/v1/routes/with-cng-itinerary", recorded.path)
@@ -611,6 +618,14 @@ class CompassApiClientTest {
                   "roundabout_exit_count": 2
                 }
               ],
+              "speed_limits": [
+                {
+                  "begin_shape_index": 0,
+                  "end_shape_index": 2,
+                  "speed_limit_kph": 50
+                }
+              ],
+              "speed_limit_source": "valhalla_graph",
               "provider": "valhalla",
               "navigation": {
                 "route_id": "route_1234567890abcdef1234567890abcdef",

@@ -1,7 +1,5 @@
 package org.compass.cng.navigation
 
-import kotlin.math.cos
-import kotlin.math.sin
 import org.compass.cng.domain.model.Coordinate
 
 enum class NavigationCameraMode {
@@ -38,11 +36,8 @@ data class NavigationCameraConfig(
     val sparseManeuverZoomReduction: Double = 0.55,
     val minimumFollowZoom: Double = 13.2,
     val maximumFollowZoom: Double = 18.2,
-    val minimumLookAheadMeters: Double = 38.0,
-    val maximumLookAheadMeters: Double = 240.0,
-    val lookAheadSeconds: Double = 5.5,
     val headingLookAheadMeters: Double = 28.0,
-    val followTopPaddingFraction: Double = 0.22,
+    val followPuckVerticalFraction: Double = 0.75,
     val freeModeAutoRecenterMillis: Long = 10_000,
     val followAnimationMillis: Int = 900,
     val overviewAnimationMillis: Int = 800,
@@ -62,11 +57,8 @@ data class NavigationCameraConfig(
         require(denseManeuverZoomBoost >= 0.0)
         require(sparseManeuverZoomReduction >= 0.0)
         require(maximumFollowZoom > minimumFollowZoom)
-        require(minimumLookAheadMeters > 0.0)
-        require(maximumLookAheadMeters >= minimumLookAheadMeters)
-        require(lookAheadSeconds > 0.0)
         require(headingLookAheadMeters > 0.0)
-        require(followTopPaddingFraction in 0.0..0.4)
+        require(followPuckVerticalFraction in 0.5..0.9)
         require(freeModeAutoRecenterMillis > 0)
         require(followAnimationMillis > 0)
         require(overviewAnimationMillis > 0)
@@ -111,11 +103,6 @@ class NavigationCameraController(
         val maneuverDensityZoomAdjustment = maneuverSpacingZoomAdjustment(maneuverSpacingMeters)
         val remaining = state.routePortions().remaining
         val position = state.snappedLocation ?: remaining.firstOrNull() ?: route.origin
-        val desiredLookAhead = (config.minimumLookAheadMeters + speed * config.lookAheadSeconds)
-            .coerceAtMost(config.maximumLookAheadMeters)
-        val lookAhead = maneuverDistance?.let { distance ->
-            minOf(desiredLookAhead, maxOf(config.minimumLookAheadMeters / 2.0, distance * 0.55))
-        } ?: desiredLookAhead
         val headingTarget = coordinateAlong(
             remaining.ifEmpty { listOf(position) },
             config.headingLookAheadMeters,
@@ -128,12 +115,10 @@ class NavigationCameraController(
                 ?.let(::normalizeBearing)
         }
             ?: 0.0
-        // Keep the vehicle on the viewport centreline. Following a curved route point as the
-        // camera target introduces a lateral offset even when the local road bearing is correct.
-        val target = coordinateAtBearing(position, bearing, lookAhead)
-
         return NavigationCameraInstruction(
-            target = target,
+            // Screen-space padding in NavigationMap places this exact coordinate on the driving
+            // anchor. A geographic look-ahead target would move the puck as zoom changes.
+            target = position,
             bearingDegrees = bearing,
             zoom = (
                 lerp(config.urbanZoom, config.motorwayZoom, speedFraction) +
@@ -179,21 +164,6 @@ class NavigationCameraController(
         )
     }
 
-    private fun coordinateAtBearing(
-        start: Coordinate,
-        bearingDegrees: Double,
-        distanceMeters: Double,
-    ): Coordinate {
-        val bearingRadians = bearingDegrees.toRadians()
-        val latitudeDelta = distanceMeters * cos(bearingRadians) / EARTH_RADIUS_METERS
-        val longitudeDelta = distanceMeters * sin(bearingRadians) /
-            (EARTH_RADIUS_METERS * cos(start.latitude.toRadians()))
-        return Coordinate(
-            latitude = start.latitude + latitudeDelta * 180.0 / Math.PI,
-            longitude = start.longitude + longitudeDelta * 180.0 / Math.PI,
-        )
-    }
-
     private companion object {
         val COMPLEX_MANEUVER_TYPES = setOf(10, 11, 12, 13, 14, 15, 16, 17, 18, 26, 27)
     }
@@ -201,3 +171,13 @@ class NavigationCameraController(
 
 private fun lerp(start: Double, end: Double, fraction: Double): Double =
     start + (end - start) * fraction
+
+internal fun followTopPaddingPixels(
+    viewportHeightPixels: Int,
+    puckVerticalFraction: Double,
+    bottomObstructionPixels: Int = 0,
+): Double {
+    val visibleHeight = viewportHeightPixels -
+        bottomObstructionPixels.coerceIn(0, viewportHeightPixels)
+    return visibleHeight * (2.0 * puckVerticalFraction - 1.0)
+}

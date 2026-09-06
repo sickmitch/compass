@@ -85,7 +85,37 @@ data class RoutePreview(
     val maneuvers: List<Maneuver>,
     val provider: String,
     val navigation: NavigationTiming = NavigationTiming.legacy(durationSeconds),
-)
+    val speedLimits: List<RouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
+) {
+    init {
+        require(speedLimitSource == null || speedLimitSource == "valhalla_graph") {
+            "unsupported speed-limit source"
+        }
+        require(speedLimits.isEmpty() || speedLimitSource == "valhalla_graph") {
+            "numeric speed limits require graph provenance"
+        }
+        require(speedLimits.zipWithNext().all { (first, second) ->
+            second.beginShapeIndex >= first.endShapeIndex
+        }) { "speed-limit profile must be ordered and non-overlapping" }
+        require(speedLimits.all { it.endShapeIndex <= geometry.lastIndex }) {
+            "speed-limit profile exceeds route geometry"
+        }
+    }
+}
+
+data class RouteSpeedLimit(
+    val beginShapeIndex: Int,
+    val endShapeIndex: Int,
+    val speedLimitKph: Int,
+) {
+    init {
+        require(beginShapeIndex >= 0 && endShapeIndex > beginShapeIndex) {
+            "speed-limit shape indexes must define a forward segment"
+        }
+        require(speedLimitKph in 1..250) { "speed limit must be between 1 and 250 km/h" }
+    }
+}
 
 data class Maneuver(
     val type: Int,

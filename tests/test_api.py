@@ -33,6 +33,7 @@ from compass.routing.domain import (
     ManeuverSignElement,
     MatrixCost,
     RouteRequest,
+    RouteSpeedLimit,
     RoutingUnavailableError,
 )
 from compass.traffic.dependencies import get_traffic_route_refresher
@@ -108,6 +109,8 @@ class FakeRoutingProvider:
                 ),
             ),
             provider="valhalla",
+            speed_limits=(RouteSpeedLimit(0, 10, 50),),
+            speed_limit_source="valhalla_graph",
         )
 
 
@@ -331,6 +334,14 @@ def test_base_route_contract_is_provider_independent() -> None:
                 "roundabout_exit_count": 2,
             }
         ],
+        "speed_limits": [
+            {
+                "begin_shape_index": 0,
+                "end_shape_index": 10,
+                "speed_limit_kph": 50,
+            }
+        ],
+        "speed_limit_source": "valhalla_graph",
         "provider": "valhalla",
         "navigation": {
             "route_id": "route_9491c0c629955aa1cb1599fa2af10efe",

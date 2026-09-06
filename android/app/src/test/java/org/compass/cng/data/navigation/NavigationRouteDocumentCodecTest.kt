@@ -13,6 +13,7 @@ import org.compass.cng.domain.model.ManeuverSign
 import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.navigation.CachedNavigationRoute
@@ -34,6 +35,10 @@ class NavigationRouteDocumentCodecTest {
         assertEquals(cached, restored)
         assertEquals("43690", restored.route.fuelStops.single().mimitStationId)
         assertEquals(1_200, restored.route.timing.totalRefuelingDwellSeconds.toInt())
+        assertEquals(50, restored.route.speedLimits.first().speedLimitKph)
+        assertEquals("valhalla_graph", restored.route.speedLimitSource)
+        assertEquals(listOf(0, 1), restored.route.speedLimits.map { it.beginShapeIndex })
+        assertEquals(listOf(1, 2), restored.route.speedLimits.map { it.endShapeIndex })
     }
 
     @Test
@@ -51,6 +56,7 @@ class NavigationRouteDocumentCodecTest {
         )
         val legacyDocument = Json.parseToJsonElement(codec.encode(cached))
             .withoutStructuredGuidance()
+            .withoutSpeedLimitContext()
             .toString()
 
         val restored = requireNotNull(codec.decode(legacyDocument))
@@ -59,6 +65,8 @@ class NavigationRouteDocumentCodecTest {
         assertEquals(2, restored.route.maneuvers.size)
         assertEquals(true, restored.route.maneuvers.all { it.sign == null })
         assertEquals(true, restored.route.maneuvers.all { it.roundaboutExitCount == null })
+        assertEquals(emptyList<RouteSpeedLimit>(), restored.route.speedLimits)
+        assertNull(restored.route.speedLimitSource)
     }
 
     private fun routeWithStop(): RouteWithCngStop {
@@ -112,6 +120,8 @@ class NavigationRouteDocumentCodecTest {
             ),
         ),
         provider = "valhalla",
+        speedLimits = listOf(RouteSpeedLimit(0, 1, 50)),
+        speedLimitSource = "valhalla_graph",
     )
 }
 
@@ -126,5 +136,20 @@ private fun JsonElement.withoutStructuredGuidance(): JsonElement = when (this) {
         }.toMap(),
     )
     is JsonArray -> JsonArray(map(JsonElement::withoutStructuredGuidance))
+    else -> this
+}
+
+
+private fun JsonElement.withoutSpeedLimitContext(): JsonElement = when (this) {
+    is JsonObject -> JsonObject(
+        entries.mapNotNull { (key, value) ->
+            if (key == "speedLimits" || key == "speedLimitSource") {
+                null
+            } else {
+                key to value.withoutSpeedLimitContext()
+            }
+        }.toMap(),
+    )
+    is JsonArray -> JsonArray(map(JsonElement::withoutSpeedLimitContext))
     else -> this
 }

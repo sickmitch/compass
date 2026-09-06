@@ -27,6 +27,7 @@ internal data class NavigationDrivingUiModel(
     val remainingDuration: String,
     val arrivalTime: String,
     val progress: Float,
+    val currentSpeedLimitKph: Int?,
     val nextCngStop: NavigationCngUiModel?,
     val statusMessages: List<NavigationStatusUiModel>,
 )
@@ -86,6 +87,7 @@ internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
             NAVIGATION_CLOCK_FORMATTER.format(it.atZone(ZoneId.systemDefault()))
         } ?: "—",
         progress = routeProgressFraction.coerceIn(0.0, 1.0).toFloat(),
+        currentSpeedLimitKph = currentSpeedLimitKph,
         nextCngStop = nextFuelStop?.let { fuel ->
             NavigationCngUiModel(
                 name = fuel.stop.displayName(),

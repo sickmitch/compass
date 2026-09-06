@@ -39,7 +39,7 @@ internal class MapPuckAnimator(
         previousTargetTimestampEpochMillis = position.timestampEpochMillis
         onTransition(transition)
         when (transition.mode) {
-            NavigationPuckTransitionMode.HOLD -> return
+            NavigationPuckTransitionMode.HOLD -> onFrame(transition.target)
             NavigationPuckTransitionMode.SNAP -> {
                 displayedPose = transition.target
                 onFrame(transition.target)

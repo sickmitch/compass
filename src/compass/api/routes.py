@@ -137,6 +137,12 @@ class ManeuverResponse(StrictModel):
     roundabout_exit_count: int | None = Field(ge=0)
 
 
+class RouteSpeedLimitResponse(StrictModel):
+    begin_shape_index: int = Field(ge=0)
+    end_shape_index: int = Field(gt=0)
+    speed_limit_kph: int = Field(ge=1, le=250)
+
+
 class NavigationTimingResponse(StrictModel):
     route_id: str = Field(pattern=r"^route_[0-9a-f]{32}$")
     driving_duration_seconds: float = Field(ge=0)
@@ -160,6 +166,8 @@ class BaseRouteResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     geometry: RouteGeometry
     maneuvers: list[ManeuverResponse]
+    speed_limits: list[RouteSpeedLimitResponse]
+    speed_limit_source: Literal["valhalla_graph"] | None
     provider: Literal["valhalla"]
     navigation: NavigationTimingResponse
 
@@ -503,6 +511,13 @@ def _base_route_response(
         maneuvers=[
             ManeuverResponse.model_validate(asdict(maneuver)) for maneuver in route.maneuvers
         ],
+        speed_limits=[
+            RouteSpeedLimitResponse.model_validate(asdict(speed_limit))
+            for speed_limit in route.speed_limits
+        ],
+        speed_limit_source=(
+            "valhalla_graph" if route.speed_limit_source == "valhalla_graph" else None
+        ),
         provider="valhalla",
         navigation=_navigation_timing_response(navigation),
     )

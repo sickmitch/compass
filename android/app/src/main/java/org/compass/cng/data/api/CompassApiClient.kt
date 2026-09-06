@@ -414,6 +414,13 @@ private data class RouteGeometryDto(
 )
 
 @Serializable
+private data class RouteSpeedLimitDto(
+    @SerialName("begin_shape_index") val beginShapeIndex: Int,
+    @SerialName("end_shape_index") val endShapeIndex: Int,
+    @SerialName("speed_limit_kph") val speedLimitKph: Int,
+)
+
+@Serializable
 private data class ManeuverDto(
     val type: Int,
     val instruction: String,
@@ -460,6 +467,8 @@ private data class RouteResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val geometry: RouteGeometryDto,
     val maneuvers: List<ManeuverDto>,
+    @SerialName("speed_limits") val speedLimits: List<RouteSpeedLimitDto> = emptyList(),
+    @SerialName("speed_limit_source") val speedLimitSource: String? = null,
     val provider: String,
     val navigation: NavigationTimingDto? = null,
 )
@@ -805,6 +814,8 @@ private data class RouteLegDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val geometry: RouteGeometryDto,
     val maneuvers: List<ManeuverDto>,
+    @SerialName("speed_limits") val speedLimits: List<RouteSpeedLimitDto> = emptyList(),
+    @SerialName("speed_limit_source") val speedLimitSource: String? = null,
 )
 
 @Serializable
@@ -840,6 +851,8 @@ private data class CngItineraryRouteLegDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val geometry: RouteGeometryDto,
     val maneuvers: List<ManeuverDto>,
+    @SerialName("speed_limits") val speedLimits: List<RouteSpeedLimitDto> = emptyList(),
+    @SerialName("speed_limit_source") val speedLimitSource: String? = null,
     @SerialName("available_range_at_departure_km") val availableRangeAtDepartureKm: Double,
     @SerialName("estimated_remaining_range_at_arrival_km")
     val estimatedRemainingRangeAtArrivalKm: Double,
@@ -904,6 +917,8 @@ private fun RouteResponseDto.toApiRoute(): ApiRoute {
         maneuvers = maneuvers.map(ManeuverDto::toApiManeuver),
         provider = provider,
         navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
+        speedLimits = speedLimits.toApiRouteSpeedLimits(),
+        speedLimitSource = speedLimitSource.validatedSpeedLimitSource(),
     )
 }
 
@@ -1187,6 +1202,8 @@ private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCng
                 durationSeconds = leg.durationSeconds,
                 encodedPolyline = leg.geometry.encodedPolyline,
                 maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
+                speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
+                speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
             )
         },
         provider = provider,
@@ -1244,6 +1261,8 @@ private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
                     leg.estimatedRemainingRangeAtArrivalKm
                 ),
                 reserveMarginAtArrivalKm = leg.reserveMarginAtArrivalKm,
+                speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
+                speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
             )
         },
         provider = provider,
@@ -1253,6 +1272,28 @@ private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
             refuelingStopCount = selectedStops.size,
         ),
     )
+}
+
+private fun List<RouteSpeedLimitDto>.toApiRouteSpeedLimits(): List<ApiRouteSpeedLimit> =
+    map { value ->
+        require(value.beginShapeIndex >= 0 && value.endShapeIndex > value.beginShapeIndex) {
+            "speed-limit shape indexes are invalid"
+        }
+        require(value.speedLimitKph in 1..250) { "speed limit is invalid" }
+        ApiRouteSpeedLimit(
+            beginShapeIndex = value.beginShapeIndex,
+            endShapeIndex = value.endShapeIndex,
+            speedLimitKph = value.speedLimitKph,
+        )
+    }.also { profile ->
+        require(profile.zipWithNext().all { (first, second) ->
+            second.beginShapeIndex >= first.endShapeIndex
+        }) { "speed-limit profile is not ordered or contains overlaps" }
+    }
+
+private fun String?.validatedSpeedLimitSource(): String? {
+    require(this == null || this == "valhalla_graph") { "unsupported speed-limit source" }
+    return this
 }
 
 private fun NavigationTimingDto?.toApiNavigationTiming(

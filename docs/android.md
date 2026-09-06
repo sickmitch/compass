@@ -56,13 +56,29 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.17.0` (`versionCode=18`).
+Android version is `0.18.0` (`versionCode=19`).
 
-Navigation UI Phase 7 preserves Valhalla junction-sign groups and roundabout exit counts across the
-strict API, Android models and version-1 private route cache. Active guidance adds a compact sign
-panel only when provider data exists, and places a numeric exit badge on roundabout icons. The UI
-does not parse localized maneuver prose to manufacture missing guidance. Debug builds provide a
-separate, clearly labelled rendering gallery under `Strumenti sviluppatore`.
+Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
+junction-sign groups and roundabout exit counts across the strict API, Android models and version-1
+private route cache. Active guidance adds a compact sign panel only when provider data exists, and
+places a numeric exit badge on roundabout icons. The UI does not parse localized maneuver prose to
+manufacture missing guidance. Debug builds provide a separate, clearly labelled rendering gallery
+under `Strumenti sviluppatore`.
+
+Navigation UI Phase 8, accepted on the live backend and physical device on 2026-09-06, carries
+ordered Valhalla graph speed limits with each routed shape. The
+navigation engine resolves a limit only when the map-matched segment falls inside its half-open
+shape-index range. Active guidance then shows a white/red regulatory badge above the MapLibre
+attribution; unavailable, zero and unlimited values produce no badge. Profiles survive selected
+CNG routes, predictive multi-stop routes, route replacement and the version-1 private cache.
+Pinch zoom remains in follow mode and uses the puck's driving position at 75% of viewport height as
+its focal point; its selected zoom survives later location frames, while only a deliberate
+single-finger pan releases the camera into temporary free mode. Camera and puck consume the same
+interpolated pose on every frame, preventing either from advancing first.
+The optional trip panel contains `Nascondi ﹀` on the left and `Dettagli ︿` on the right; the details
+actions use vertically centered vector chevrons. Opening the panel shortens the unobscured driving
+viewport, so the puck remains at 75% of the visible map above it instead of sinking behind the
+panel. The details sheet wraps its content instead of forcing a nearly full-screen height.
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
 overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
@@ -80,8 +96,9 @@ projected ahead on the local route-heading centreline. Heading follows a short m
 leave the road diagonal after recentering. Centralized top padding places the directional vehicle
 lower in the viewport. The vehicle stays vertically aligned in follow while retaining route-bearing
 rotation in free/overview mode. Nearby consecutive maneuvers increase zoom; sparse maneuvers widen
-the view within centralized bounds. MapLibre pan, rotate or zoom gestures enter free mode and expose a
-contrasting `Ricentra`; ten seconds without a gesture restore follow automatically. Overview remains
+the view within centralized bounds. The current gesture policy keeps pinch zoom in follow and
+releases only a deliberate single-finger pan, exposing a contrasting `Ricentra`; ten seconds
+without a pan restore follow automatically. Overview remains
 north-up and uses only untravelled geometry. Name-bearing style layers prefer Italian labels, map
 waypoints and the optional trip summary use CNG-specific markers, and the summary is hidden until
 the driver taps `Viaggio`. During active navigation, generic basemap POIs are filtered out while

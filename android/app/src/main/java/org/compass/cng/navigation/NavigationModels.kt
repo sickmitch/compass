@@ -5,6 +5,7 @@ import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.SelectedCngStop
@@ -45,7 +46,18 @@ data class NavigationLeg(
     val availableRangeAtDepartureKm: Double? = null,
     val estimatedRemainingRangeAtArrivalKm: Double? = null,
     val reserveMarginAtArrivalKm: Double? = null,
-)
+    val speedLimits: List<RouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
+) {
+    init {
+        require(speedLimitSource == null || speedLimitSource == "valhalla_graph")
+        require(speedLimits.isEmpty() || speedLimitSource == "valhalla_graph")
+        require(speedLimits.all {
+            it.beginShapeIndex >= shapeIndexOffset &&
+                it.endShapeIndex <= shapeIndexOffset + geometry.lastIndex
+        }) { "leg speed-limit profile exceeds its joined geometry range" }
+    }
+}
 
 data class NavigationFuelPlan(
     val effectiveCngRangeKm: Double,
@@ -70,7 +82,20 @@ data class NavigationRoute(
     val timing: NavigationTiming,
     val provider: String,
     val gasolineFallback: GasolineFallback? = null,
+    val speedLimits: List<RouteSpeedLimit> = emptyList(),
+    val speedLimitSource: String? = null,
 ) {
+    init {
+        require(speedLimitSource == null || speedLimitSource == "valhalla_graph")
+        require(speedLimits.isEmpty() || speedLimitSource == "valhalla_graph")
+        require(speedLimits.zipWithNext().all { (first, second) ->
+            second.beginShapeIndex >= first.endShapeIndex
+        }) { "navigation speed-limit profile must be ordered and non-overlapping" }
+        require(speedLimits.all { it.endShapeIndex <= geometry.lastIndex }) {
+            "navigation speed-limit profile exceeds route geometry"
+        }
+    }
+
     fun asRoutePreview(): RoutePreview = RoutePreview(
         origin = origin,
         destination = destination,
@@ -80,6 +105,8 @@ data class NavigationRoute(
         maneuvers = maneuvers,
         provider = provider,
         navigation = timing,
+        speedLimits = speedLimits,
+        speedLimitSource = speedLimitSource,
     )
 }
 
@@ -118,6 +145,14 @@ data class NavigationState(
 
     val currentSpeedMetersPerSecond: Double
         get() = navigationPosition?.speedMetersPerSecond ?: 0.0
+
+    val currentSpeedLimitKph: Int?
+        get() {
+            val segmentIndex = currentRouteSegmentIndex ?: return null
+            return route?.speedLimits
+                ?.firstOrNull { segmentIndex in it.beginShapeIndex until it.endShapeIndex }
+                ?.speedLimitKph
+        }
 
     val vehicleBearingDegrees: Double?
         get() = navigationPosition?.bearingDegrees
@@ -245,6 +280,12 @@ private fun buildNavigationRoute(
                 endShapeIndex = maneuver.endShapeIndex + shapeOffset,
             )
         }
+        val adjustedSpeedLimits = leg.speedLimits.map { speedLimit ->
+            speedLimit.copy(
+                beginShapeIndex = speedLimit.beginShapeIndex + shapeOffset,
+                endShapeIndex = speedLimit.endShapeIndex + shapeOffset,
+            )
+        }
         val range = rangeLegs.getOrNull(index)
         navigationLegs += NavigationLeg(
             sequence = index + 1,
@@ -258,6 +299,8 @@ private fun buildNavigationRoute(
             availableRangeAtDepartureKm = range?.availableRangeAtDepartureKm,
             estimatedRemainingRangeAtArrivalKm = range?.estimatedRemainingRangeAtArrivalKm,
             reserveMarginAtArrivalKm = range?.reserveMarginAtArrivalKm,
+            speedLimits = adjustedSpeedLimits,
+            speedLimitSource = leg.speedLimitSource,
         )
         if (index == 0) joinedGeometry += leg.geometry else joinedGeometry += leg.geometry.drop(1)
         shapeOffset += leg.geometry.size - 1
@@ -288,6 +331,9 @@ private fun buildNavigationRoute(
         timing = route.navigation,
         provider = route.provider,
         gasolineFallback = gasolineFallback,
+        speedLimits = navigationLegs.flatMap(NavigationLeg::speedLimits),
+        speedLimitSource = sourceLegs.mapNotNull(RoutePreview::speedLimitSource)
+            .firstOrNull(),
     )
 }
 

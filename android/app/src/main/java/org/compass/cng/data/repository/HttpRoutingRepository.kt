@@ -9,6 +9,7 @@ import org.compass.cng.data.api.ApiOpeningEvaluation
 import org.compass.cng.data.api.ApiCngPrice
 import org.compass.cng.data.api.ApiRankedCandidate
 import org.compass.cng.data.api.ApiRoute
+import org.compass.cng.data.api.ApiRouteSpeedLimit
 import org.compass.cng.data.api.ApiNavigationTiming
 import org.compass.cng.data.api.CompassApiClient
 import org.compass.cng.data.search.NoOpPlaceSearchCache
@@ -46,6 +47,7 @@ import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RankingBreakdown
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.SelectedCngStop
@@ -376,6 +378,8 @@ class HttpRoutingRepository(
                             sequence = leg.sequence,
                             durationSeconds = leg.durationSeconds,
                         ),
+                        speedLimits = leg.speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
+                        speedLimitSource = leg.speedLimitSource,
                     ),
                     availableRangeAtDepartureKm = leg.availableRangeAtDepartureKm,
                     estimatedRemainingRangeAtArrivalKm = (
@@ -416,6 +420,8 @@ class HttpRoutingRepository(
                         sequence = response.legs.indexOf(leg) + 1,
                         durationSeconds = leg.durationSeconds,
                     ),
+                    speedLimits = leg.speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
+                    speedLimitSource = leg.speedLimitSource,
                 ),
             )
         }
@@ -486,6 +492,14 @@ private fun ApiRoute.toRoutePreview(
     maneuvers = maneuvers.map(ApiManeuver::toManeuver),
     provider = provider,
     navigation = navigation.toNavigationTiming(),
+    speedLimits = speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
+    speedLimitSource = speedLimitSource,
+)
+
+private fun ApiRouteSpeedLimit.toRouteSpeedLimit(): RouteSpeedLimit = RouteSpeedLimit(
+    beginShapeIndex = beginShapeIndex,
+    endShapeIndex = endShapeIndex,
+    speedLimitKph = speedLimitKph,
 )
 
 private fun ApiManeuver.toManeuver(): Maneuver = Maneuver(

@@ -39,7 +39,11 @@
           "travel_mode": "drive",
           "travel_type": "car"
         }
-      ]
+      ],
+      "speed_limits": [
+        {"begin_shape_index": 0, "end_shape_index": 1, "speed_limit_kph": 50}
+      ],
+      "speed_limit_source": "valhalla_graph"
     },
     {
       "kind": "cng_station_to_destination",
@@ -68,7 +72,11 @@
           "travel_mode": "drive",
           "travel_type": "car"
         }
-      ]
+      ],
+      "speed_limits": [
+        {"begin_shape_index": 0, "end_shape_index": 1, "speed_limit_kph": 130}
+      ],
+      "speed_limit_source": "valhalla_graph"
     }
   ],
   "provider": "valhalla"
