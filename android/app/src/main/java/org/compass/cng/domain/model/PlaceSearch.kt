@@ -27,6 +27,7 @@ data class PlaceSearchResult(
 data class PlaceSearchResults(
     val query: String,
     val results: List<PlaceSearchResult>,
+    val cacheable: Boolean = true,
     val source: PlaceSearchSource = PlaceSearchSource.LIVE,
     val cachedAtEpochMillis: Long? = null,
 )

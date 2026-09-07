@@ -251,13 +251,16 @@ class NavigationForegroundService : Service(), LocationListener {
                 session.replaceRoute(route, completedAt, snapshot.rawLocation)
                 routeUpdateController.updateSucceeded(completedAt)
                 maneuverController.reset()
+                val durationDeltaSeconds = session.state.value.routeUpdateNotice
+                    ?.durationDeltaSeconds
                 Log.i(
                     LOG_TAG,
                     "route update committed: $reason route=${route.routeId} " +
                         "stops=${route.fuelStopIdsForLog()} " +
                         "traffic_state=${route.timing.trafficState} " +
                         "traffic_aware=${route.timing.trafficAware} " +
-                        "traffic_delay_seconds=${route.timing.trafficDelaySeconds?.toLong()}",
+                        "traffic_delay_seconds=${route.timing.trafficDelaySeconds?.toLong()} " +
+                        "duration_delta_seconds=${durationDeltaSeconds?.toLong() ?: "none"}",
                 )
                 resumeReplayAfterRouteUpdateIfNeeded()
                 processNavigationState(completedAt)

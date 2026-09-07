@@ -25,7 +25,11 @@ import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
+import org.compass.cng.domain.server.InMemoryServerConnectionRepository
+import org.compass.cng.domain.server.ServerConnection
+import org.compass.cng.domain.server.ServerConnectionRepository
 import org.compass.cng.navigation.NavigationSession
+import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.navigation.toNavigationRoute
 import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
 import org.compass.cng.domain.vehicle.VehicleProfile
@@ -33,17 +37,38 @@ import org.compass.cng.domain.vehicle.VehicleProfileRepository
 import org.compass.cng.domain.vehicle.VehicleProfiles
 
 enum class PlannerStage {
+    FOLLOW,
     CONFIGURE_ROUTE,
     DESTINATION_SEARCH,
     PREVIEW,
     CONFIGURE_CNG,
     CONFIGURE_PREDICTIVE,
     VEHICLE_PROFILES,
+    SERVER_CONNECTION,
     CNG_CANDIDATES,
     PREDICTIVE_ITINERARY,
     PREDICTIVE_STATUS,
     SELECTED_ROUTE,
     NAVIGATION_PREVIEW,
+}
+
+enum class RouteEndpoint {
+    ORIGIN,
+    DESTINATION,
+}
+
+enum class RouteLocationMethod {
+    CURRENT_LOCATION,
+    FAVORITES,
+    SEARCH,
+    COORDINATES,
+}
+
+enum class CurrentLocationAcquisitionStatus {
+    IDLE,
+    ACQUIRING,
+    SUCCESS,
+    FAILURE,
 }
 
 enum class PlannerOperation {
@@ -60,16 +85,26 @@ enum class CngWorkflowMode {
 }
 
 data class RoutePlannerUiState(
-    val stage: PlannerStage = PlannerStage.PREVIEW,
-    val operation: PlannerOperation? = PlannerOperation.BASE_ROUTE,
+    val stage: PlannerStage = PlannerStage.FOLLOW,
+    val operation: PlannerOperation? = null,
     val activeOrigin: Coordinate = DEFAULT_ORIGIN,
     val activeDestination: Coordinate = DEFAULT_DESTINATION,
-    val originLatitudeInput: String = DEFAULT_ORIGIN_LATITUDE,
-    val originLongitudeInput: String = DEFAULT_ORIGIN_LONGITUDE,
-    val destinationLatitudeInput: String = DEFAULT_DESTINATION_LATITUDE,
-    val destinationLongitudeInput: String = DEFAULT_DESTINATION_LONGITUDE,
-    val originDisplayName: String = "Milano",
-    val destinationDisplayName: String = "Bologna Centrale",
+    val originLatitudeInput: String = "",
+    val originLongitudeInput: String = "",
+    val destinationLatitudeInput: String = "",
+    val destinationLongitudeInput: String = "",
+    val originDisplayName: String = "Non selezionata",
+    val destinationDisplayName: String = "Non selezionata",
+    val originLocationMethod: RouteLocationMethod? = null,
+    val destinationLocationMethod: RouteLocationMethod? = null,
+    val originCurrentLocationStatus: CurrentLocationAcquisitionStatus =
+        CurrentLocationAcquisitionStatus.IDLE,
+    val destinationCurrentLocationStatus: CurrentLocationAcquisitionStatus =
+        CurrentLocationAcquisitionStatus.IDLE,
+    val routeInputsDirty: Boolean = true,
+    val placeSearchTarget: RouteEndpoint = RouteEndpoint.DESTINATION,
+    val currentLocationTarget: RouteEndpoint? = null,
+    val followLocation: NavigationLocation? = null,
     val placeSearchQuery: String = "",
     val placeSearchResults: List<PlaceSearchResult> = emptyList(),
     val placeSearchSource: PlaceSearchSource = PlaceSearchSource.LIVE,
@@ -96,6 +131,10 @@ data class RoutePlannerUiState(
     val vehicleProfileCngReserveInput: String = "",
     val vehicleProfileGasolineRangeInput: String = "",
     val vehicleProfileGasolineReserveInput: String = "",
+    val serverBaseUrlInput: String = "",
+    val serverUsernameInput: String = "",
+    val serverPasswordInput: String = "",
+    val serverAllowInsecureHttp: Boolean = false,
 ) {
     val isBusy: Boolean get() = operation != null
 
@@ -123,10 +162,26 @@ class RoutePlannerViewModel(
     private val navigationSession: NavigationSession = NavigationSession(),
     private val vehicleProfileRepository: VehicleProfileRepository =
         InMemoryVehicleProfileRepository(),
+    private val serverConnectionRepository: ServerConnectionRepository =
+        InMemoryServerConnectionRepository(),
+    private val startInFollowMode: Boolean = false,
 ) : ViewModel() {
     val navigationState = navigationSession.state
-    private val restoredNavigation = navigationSession.state.value
+    private val restoredNavigation = navigationSession.state.value.let { restored ->
+        if (
+            startInFollowMode &&
+            restored.route != null &&
+            restored.phase == org.compass.cng.navigation.NavigationPhase.ROUTE_PREVIEW &&
+            !navigationSession.restoredNavigationWasActive
+        ) {
+            navigationSession.clear()
+            navigationSession.state.value
+        } else {
+            restored
+        }
+    }
     private val initialVehicleProfiles = vehicleProfileRepository.load()
+    private val initialServerConnection = serverConnectionRepository.load()
     private val mutableUiState = MutableStateFlow(
         restoredNavigation.route?.let { activeRoute ->
             RoutePlannerUiState(
@@ -140,24 +195,56 @@ class RoutePlannerViewModel(
                 destinationLongitudeInput = activeRoute.destination.longitude.toCoordinateInput(),
                 baseRoute = activeRoute.asRoutePreview(),
             ).withVehicleProfiles(initialVehicleProfiles)
-        } ?: RoutePlannerUiState(
-            activeOrigin = initialOrigin,
-            activeDestination = initialDestination,
-            originLatitudeInput = initialOrigin.latitude.toCoordinateInput(),
-            originLongitudeInput = initialOrigin.longitude.toCoordinateInput(),
-            destinationLatitudeInput = initialDestination.latitude.toCoordinateInput(),
-            destinationLongitudeInput = initialDestination.longitude.toCoordinateInput(),
-        ).withVehicleProfiles(initialVehicleProfiles)
+                .withServerConnection(initialServerConnection)
+        } ?: if (startInFollowMode) {
+            RoutePlannerUiState(
+                activeOrigin = initialOrigin,
+                activeDestination = initialDestination,
+            )
+        } else {
+            RoutePlannerUiState(
+                stage = PlannerStage.PREVIEW,
+                operation = PlannerOperation.BASE_ROUTE,
+                activeOrigin = initialOrigin,
+                activeDestination = initialDestination,
+                originLatitudeInput = initialOrigin.latitude.toCoordinateInput(),
+                originLongitudeInput = initialOrigin.longitude.toCoordinateInput(),
+                destinationLatitudeInput = initialDestination.latitude.toCoordinateInput(),
+                destinationLongitudeInput = initialDestination.longitude.toCoordinateInput(),
+            )
+        }.withVehicleProfiles(initialVehicleProfiles)
+            .withServerConnection(initialServerConnection)
+            .let { state ->
+                if (
+                    startInFollowMode &&
+                    restoredNavigation.route == null &&
+                    !initialServerConnection.hasCredentials
+                ) {
+                    state.copy(
+                        stage = PlannerStage.SERVER_CONNECTION,
+                        message = "Configura il server Compass per continuare.",
+                    )
+                } else {
+                    state
+                }
+            }
     )
     val uiState: StateFlow<RoutePlannerUiState> = mutableUiState.asStateFlow()
 
     private var requestJob: Job? = null
+    private var serverReturnStage: PlannerStage = PlannerStage.FOLLOW
 
     init {
-        if (restoredNavigation.route == null) loadBaseRoute()
+        if (restoredNavigation.route == null && !startInFollowMode) loadBaseRoute()
     }
 
-    fun retryBaseRoute() = loadBaseRoute()
+    fun retryBaseRoute() = loadBaseRoute(
+        successStage = if (mutableUiState.value.stage == PlannerStage.CONFIGURE_ROUTE) {
+            PlannerStage.CONFIGURE_ROUTE
+        } else {
+            PlannerStage.PREVIEW
+        },
+    )
 
     fun openRouteConfiguration() {
         if (!mutableUiState.value.isBusy) {
@@ -168,10 +255,44 @@ class RoutePlannerViewModel(
         }
     }
 
-    fun openDestinationSearch() {
+    fun updateFollowLocation(location: NavigationLocation) {
+        mutableUiState.value = mutableUiState.value.copy(followLocation = location)
+    }
+
+    fun selectCoordinateInput(endpoint: RouteEndpoint) {
+        if (mutableUiState.value.isBusy) return
+        mutableUiState.value = when (endpoint) {
+            RouteEndpoint.ORIGIN -> mutableUiState.value.copy(
+                originLocationMethod = RouteLocationMethod.COORDINATES,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> mutableUiState.value.copy(
+                destinationLocationMethod = RouteLocationMethod.COORDINATES,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
+                message = null,
+            )
+        }
+    }
+
+    fun openPlaceSearch(endpoint: RouteEndpoint) {
         if (!mutableUiState.value.isBusy) {
-            mutableUiState.value = mutableUiState.value.copy(
+            val state = mutableUiState.value
+            mutableUiState.value = state.copy(
                 stage = PlannerStage.DESTINATION_SEARCH,
+                placeSearchTarget = endpoint,
+                originCurrentLocationStatus = if (endpoint == RouteEndpoint.ORIGIN) {
+                    CurrentLocationAcquisitionStatus.IDLE
+                } else {
+                    state.originCurrentLocationStatus
+                },
+                destinationCurrentLocationStatus = if (endpoint == RouteEndpoint.DESTINATION) {
+                    CurrentLocationAcquisitionStatus.IDLE
+                } else {
+                    state.destinationCurrentLocationStatus
+                },
                 placeSearchQuery = "",
                 placeSearchResults = emptyList(),
                 placeSearchSource = PlaceSearchSource.LIVE,
@@ -180,6 +301,8 @@ class RoutePlannerViewModel(
             )
         }
     }
+
+    fun openDestinationSearch() = openPlaceSearch(RouteEndpoint.DESTINATION)
 
     fun updatePlaceSearchQuery(value: String) {
         if (value.length <= 200) {
@@ -216,10 +339,17 @@ class RoutePlannerViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
-                mutableUiState.value = mutableUiState.value.copy(
-                    operation = null,
-                    message = error.failure.placeSearchMessage(),
-                )
+                if (error.failure.requiresServerConfiguration()) {
+                    openServerConnectionForFailure(
+                        message = error.failure.placeSearchMessage(),
+                        returnStage = PlannerStage.CONFIGURE_ROUTE,
+                    )
+                } else {
+                    mutableUiState.value = mutableUiState.value.copy(
+                        operation = null,
+                        message = error.failure.placeSearchMessage(),
+                    )
+                }
             } catch (_: Exception) {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -244,28 +374,109 @@ class RoutePlannerViewModel(
         )
     }
 
-    fun currentLocationRequested() {
-        mutableUiState.value = mutableUiState.value.copy(
-            message = "Acquisizione della posizione attuale…",
-        )
+    fun selectPlace(result: PlaceSearchResult) {
+        val state = mutableUiState.value
+        mutableUiState.value = when (state.placeSearchTarget) {
+            RouteEndpoint.ORIGIN -> state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                originLatitudeInput = result.location.latitude.toCoordinateInput(),
+                originLongitudeInput = result.location.longitude.toCoordinateInput(),
+                originDisplayName = result.displayName,
+                originLocationMethod = RouteLocationMethod.SEARCH,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
+                placeSearchResults = emptyList(),
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                destinationLatitudeInput = result.location.latitude.toCoordinateInput(),
+                destinationLongitudeInput = result.location.longitude.toCoordinateInput(),
+                destinationDisplayName = result.displayName,
+                destinationLocationMethod = RouteLocationMethod.SEARCH,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
+                placeSearchResults = emptyList(),
+                message = null,
+            )
+        }
+    }
+
+    fun currentLocationRequested(endpoint: RouteEndpoint = RouteEndpoint.ORIGIN) {
+        val state = mutableUiState.value
+        mutableUiState.value = when (endpoint) {
+            RouteEndpoint.ORIGIN -> state.copy(
+                currentLocationTarget = endpoint,
+                originLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.ACQUIRING,
+                routeInputsDirty = true,
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> state.copy(
+                currentLocationTarget = endpoint,
+                destinationLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.ACQUIRING,
+                routeInputsDirty = true,
+                message = null,
+            )
+        }
+    }
+
+    fun useCurrentLocation(coordinate: Coordinate) {
+        requestJob?.cancel()
+        val state = mutableUiState.value
+        mutableUiState.value = when (state.currentLocationTarget ?: RouteEndpoint.ORIGIN) {
+            RouteEndpoint.ORIGIN -> state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                operation = null,
+                originLatitudeInput = coordinate.latitude.toCoordinateInput(),
+                originLongitudeInput = coordinate.longitude.toCoordinateInput(),
+                originDisplayName = "Posizione attuale",
+                originLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.SUCCESS,
+                routeInputsDirty = true,
+                currentLocationTarget = null,
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                operation = null,
+                destinationLatitudeInput = coordinate.latitude.toCoordinateInput(),
+                destinationLongitudeInput = coordinate.longitude.toCoordinateInput(),
+                destinationDisplayName = "Posizione attuale",
+                destinationLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.SUCCESS,
+                routeInputsDirty = true,
+                currentLocationTarget = null,
+                message = null,
+            )
+        }
     }
 
     fun useCurrentLocationAsOrigin(coordinate: Coordinate) {
-        requestJob?.cancel()
-        mutableUiState.value = mutableUiState.value.copy(
-            stage = PlannerStage.CONFIGURE_ROUTE,
-            operation = null,
-            originLatitudeInput = coordinate.latitude.toCoordinateInput(),
-            originLongitudeInput = coordinate.longitude.toCoordinateInput(),
-            originDisplayName = "Posizione attuale",
-            message = "Posizione acquisita. Tocca Calcola percorso per applicarla.",
-        )
+        currentLocationRequested(RouteEndpoint.ORIGIN)
+        useCurrentLocation(coordinate)
     }
 
     fun currentLocationUnavailable() {
-        mutableUiState.value = mutableUiState.value.copy(
-            message = "Impossibile ottenere la posizione attuale. Verifica GPS e permessi.",
-        )
+        val state = mutableUiState.value
+        mutableUiState.value = when (state.currentLocationTarget) {
+            RouteEndpoint.ORIGIN -> state.copy(
+                originLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.FAILURE,
+                currentLocationTarget = null,
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> state.copy(
+                destinationLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.FAILURE,
+                currentLocationTarget = null,
+                message = null,
+            )
+            null -> state.copy(
+                message = "Impossibile ottenere la posizione attuale. Verifica GPS e permessi.",
+            )
+        }
     }
 
     fun updateOriginLatitude(value: String) {
@@ -273,6 +484,9 @@ class RoutePlannerViewModel(
             mutableUiState.value = mutableUiState.value.copy(
                 originLatitudeInput = value,
                 originDisplayName = "Coordinate personalizzate",
+                originLocationMethod = RouteLocationMethod.COORDINATES,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
                 message = null,
             )
         }
@@ -283,6 +497,9 @@ class RoutePlannerViewModel(
             mutableUiState.value = mutableUiState.value.copy(
                 originLongitudeInput = value,
                 originDisplayName = "Coordinate personalizzate",
+                originLocationMethod = RouteLocationMethod.COORDINATES,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
                 message = null,
             )
         }
@@ -293,6 +510,9 @@ class RoutePlannerViewModel(
             mutableUiState.value = mutableUiState.value.copy(
                 destinationLatitudeInput = value,
                 destinationDisplayName = "Coordinate personalizzate",
+                destinationLocationMethod = RouteLocationMethod.COORDINATES,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
                 message = null,
             )
         }
@@ -303,6 +523,9 @@ class RoutePlannerViewModel(
             mutableUiState.value = mutableUiState.value.copy(
                 destinationLongitudeInput = value,
                 destinationDisplayName = "Coordinate personalizzate",
+                destinationLocationMethod = RouteLocationMethod.COORDINATES,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
                 message = null,
             )
         }
@@ -339,11 +562,16 @@ class RoutePlannerViewModel(
             destination = destination,
             originDisplayName = state.originDisplayName,
             destinationDisplayName = state.destinationDisplayName,
+            successStage = PlannerStage.CONFIGURE_ROUTE,
         )
     }
 
     fun openAddStop() {
-        if (mutableUiState.value.baseRoute != null && !mutableUiState.value.isBusy) {
+        if (
+            mutableUiState.value.baseRoute != null &&
+            !mutableUiState.value.routeInputsDirty &&
+            !mutableUiState.value.isBusy
+        ) {
             mutableUiState.value = mutableUiState.value.copy(
                 stage = PlannerStage.CONFIGURE_CNG,
                 workflowMode = CngWorkflowMode.MANUAL,
@@ -353,7 +581,11 @@ class RoutePlannerViewModel(
     }
 
     fun openPredictiveRange() {
-        if (mutableUiState.value.baseRoute != null && !mutableUiState.value.isBusy) {
+        if (
+            mutableUiState.value.baseRoute != null &&
+            !mutableUiState.value.routeInputsDirty &&
+            !mutableUiState.value.isBusy
+        ) {
             mutableUiState.value = mutableUiState.value.copy(
                 stage = PlannerStage.CONFIGURE_PREDICTIVE,
                 workflowMode = CngWorkflowMode.PREDICTIVE,
@@ -373,6 +605,86 @@ class RoutePlannerViewModel(
                 vehicleProfileGasolineRangeInput = "",
                 vehicleProfileGasolineReserveInput = "",
                 message = null,
+            )
+        }
+    }
+
+    fun openServerConnection() {
+        requestJob?.cancel()
+        if (mutableUiState.value.stage != PlannerStage.SERVER_CONNECTION) {
+            serverReturnStage = mutableUiState.value.stage
+        }
+        val connection = serverConnectionRepository.load()
+        mutableUiState.value = mutableUiState.value
+            .withServerConnection(connection)
+            .copy(
+                stage = PlannerStage.SERVER_CONNECTION,
+                operation = null,
+                message = null,
+            )
+    }
+
+    fun updateServerBaseUrl(value: String) {
+        if (value.length <= 500) {
+            mutableUiState.value = mutableUiState.value.copy(
+                serverBaseUrlInput = value,
+                serverAllowInsecureHttp = if (value == mutableUiState.value.serverBaseUrlInput) {
+                    mutableUiState.value.serverAllowInsecureHttp
+                } else {
+                    false
+                },
+                message = null,
+            )
+        }
+    }
+
+    fun updateServerUsername(value: String) {
+        if (value.length <= 200 && '\n' !in value && '\r' !in value) {
+            mutableUiState.value = mutableUiState.value.copy(
+                serverUsernameInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateServerPassword(value: String) {
+        if (value.length <= 500 && '\n' !in value && '\r' !in value) {
+            mutableUiState.value = mutableUiState.value.copy(
+                serverPasswordInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun updateServerAllowInsecureHttp(value: Boolean) {
+        mutableUiState.value = mutableUiState.value.copy(
+            serverAllowInsecureHttp = value,
+            message = null,
+        )
+    }
+
+    fun saveServerConnection() {
+        val state = mutableUiState.value
+        try {
+            val connection = ServerConnection.create(
+                baseUrl = state.serverBaseUrlInput,
+                username = state.serverUsernameInput,
+                password = state.serverPasswordInput,
+                allowInsecureHttp = state.serverAllowInsecureHttp,
+                requireCredentials = true,
+            )
+            serverConnectionRepository.save(connection)
+            mutableUiState.value = state.withServerConnection(connection).copy(
+                stage = serverReturnStage,
+                message = null,
+            )
+        } catch (error: IllegalArgumentException) {
+            mutableUiState.value = state.copy(
+                message = error.message ?: "Configurazione server non valida.",
+            )
+        } catch (_: Exception) {
+            mutableUiState.value = state.copy(
+                message = "Impossibile salvare la configurazione server.",
             )
         }
     }
@@ -471,6 +783,18 @@ class RoutePlannerViewModel(
                 .copy(message = null)
         } catch (_: Exception) {
             mutableUiState.value = mutableUiState.value.copy(message = "Profilo mezzo non valido.")
+        }
+    }
+
+    fun clearVehicleProfileSelection() {
+        try {
+            mutableUiState.value = mutableUiState.value
+                .withVehicleProfiles(vehicleProfileRepository.clearSelection())
+                .copy(message = null)
+        } catch (_: Exception) {
+            mutableUiState.value = mutableUiState.value.copy(
+                message = "Impossibile usare valori personalizzati.",
+            )
         }
     }
 
@@ -586,10 +910,17 @@ class RoutePlannerViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
-                mutableUiState.value = mutableUiState.value.copy(
-                    operation = null,
-                    message = error.failure.candidateMessage(),
-                )
+                if (error.failure.requiresServerConfiguration()) {
+                    openServerConnectionForFailure(
+                        message = error.failure.candidateMessage(),
+                        returnStage = PlannerStage.CONFIGURE_CNG,
+                    )
+                } else {
+                    mutableUiState.value = mutableUiState.value.copy(
+                        operation = null,
+                        message = error.failure.candidateMessage(),
+                    )
+                }
             } catch (_: Exception) {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -697,10 +1028,17 @@ class RoutePlannerViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
-                mutableUiState.value = mutableUiState.value.copy(
-                    operation = null,
-                    message = error.failure.predictiveMessage(),
-                )
+                if (error.failure.requiresServerConfiguration()) {
+                    openServerConnectionForFailure(
+                        message = error.failure.predictiveMessage(),
+                        returnStage = PlannerStage.CONFIGURE_PREDICTIVE,
+                    )
+                } else {
+                    mutableUiState.value = mutableUiState.value.copy(
+                        operation = null,
+                        message = error.failure.predictiveMessage(),
+                    )
+                }
             } catch (_: Exception) {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -744,11 +1082,19 @@ class RoutePlannerViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
-                mutableUiState.value = mutableUiState.value.copy(
-                    operation = null,
-                    pendingStation = null,
-                    message = error.failure.selectedRouteMessage(),
-                )
+                if (error.failure.requiresServerConfiguration()) {
+                    mutableUiState.value = mutableUiState.value.copy(pendingStation = null)
+                    openServerConnectionForFailure(
+                        message = error.failure.selectedRouteMessage(),
+                        returnStage = PlannerStage.CNG_CANDIDATES,
+                    )
+                } else {
+                    mutableUiState.value = mutableUiState.value.copy(
+                        operation = null,
+                        pendingStation = null,
+                        message = error.failure.selectedRouteMessage(),
+                    )
+                }
             } catch (_: Exception) {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -800,10 +1146,17 @@ class RoutePlannerViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
-                mutableUiState.value = mutableUiState.value.copy(
-                    operation = null,
-                    message = error.failure.selectedItineraryRouteMessage(),
-                )
+                if (error.failure.requiresServerConfiguration()) {
+                    openServerConnectionForFailure(
+                        message = error.failure.selectedItineraryRouteMessage(),
+                        returnStage = PlannerStage.PREDICTIVE_ITINERARY,
+                    )
+                } else {
+                    mutableUiState.value = mutableUiState.value.copy(
+                        operation = null,
+                        message = error.failure.selectedItineraryRouteMessage(),
+                    )
+                }
             } catch (_: Exception) {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -816,9 +1169,14 @@ class RoutePlannerViewModel(
     fun navigateBack() {
         if (mutableUiState.value.isBusy) return
         mutableUiState.value = when (mutableUiState.value.stage) {
+            PlannerStage.FOLLOW -> mutableUiState.value
             PlannerStage.PREVIEW -> mutableUiState.value
             PlannerStage.CONFIGURE_ROUTE -> mutableUiState.value.copy(
-                stage = PlannerStage.PREVIEW,
+                stage = if (mutableUiState.value.baseRoute == null) {
+                    PlannerStage.FOLLOW
+                } else {
+                    PlannerStage.PREVIEW
+                },
                 message = null,
             )
             PlannerStage.DESTINATION_SEARCH -> mutableUiState.value.copy(
@@ -835,6 +1193,10 @@ class RoutePlannerViewModel(
             )
             PlannerStage.VEHICLE_PROFILES -> mutableUiState.value.copy(
                 stage = PlannerStage.PREVIEW,
+                message = null,
+            )
+            PlannerStage.SERVER_CONNECTION -> mutableUiState.value.copy(
+                stage = serverReturnStage,
                 message = null,
             )
             PlannerStage.CNG_CANDIDATES -> mutableUiState.value.copy(
@@ -877,7 +1239,11 @@ class RoutePlannerViewModel(
     }
 
     fun openNavigationPreview() {
-        if (mutableUiState.value.isBusy) return
+        if (
+            mutableUiState.value.isBusy ||
+            mutableUiState.value.stage == PlannerStage.CONFIGURE_ROUTE &&
+            mutableUiState.value.routeInputsDirty
+        ) return
         val predictive = mutableUiState.value.predictiveSuggestion
         val route = mutableUiState.value.selectedItineraryRoute?.toNavigationRoute(
             maximumDetourMinutes = predictive?.maximumDetourMinutes,
@@ -912,7 +1278,19 @@ class RoutePlannerViewModel(
     }
 
     fun stopNavigation() {
-        navigationSession.stopToPreview()
+        navigationSession.clear()
+        mutableUiState.value = mutableUiState.value.copy(
+            stage = PlannerStage.FOLLOW,
+            operation = null,
+            baseRoute = null,
+            rankedStations = null,
+            predictiveSuggestion = null,
+            workflowMode = null,
+            pendingStation = null,
+            selectedRoute = null,
+            selectedItineraryRoute = null,
+            message = null,
+        )
     }
 
     fun navigationPermissionDenied(
@@ -951,12 +1329,13 @@ class RoutePlannerViewModel(
         destination: Coordinate = mutableUiState.value.activeDestination,
         originDisplayName: String = mutableUiState.value.originDisplayName,
         destinationDisplayName: String = mutableUiState.value.destinationDisplayName,
+        successStage: PlannerStage = PlannerStage.PREVIEW,
     ) {
         requestJob?.cancel()
         navigationSession.clear()
         requestJob = viewModelScope.launch {
             mutableUiState.value = mutableUiState.value.copy(
-                stage = PlannerStage.PREVIEW,
+                stage = successStage,
                 operation = PlannerOperation.BASE_ROUTE,
                 activeOrigin = origin,
                 activeDestination = destination,
@@ -966,6 +1345,8 @@ class RoutePlannerViewModel(
                 destinationLongitudeInput = destination.longitude.toCoordinateInput(),
                 originDisplayName = originDisplayName,
                 destinationDisplayName = destinationDisplayName,
+                originLocationMethod = mutableUiState.value.originLocationMethod,
+                destinationLocationMethod = mutableUiState.value.destinationLocationMethod,
                 placeSearchQuery = "",
                 placeSearchResults = emptyList(),
                 baseRoute = null,
@@ -975,20 +1356,29 @@ class RoutePlannerViewModel(
                 pendingStation = null,
                 selectedRoute = null,
                 selectedItineraryRoute = null,
+                routeInputsDirty = true,
                 message = null,
             )
             try {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
                     baseRoute = routingRepository.previewRoute(origin, destination),
+                    routeInputsDirty = false,
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
-                mutableUiState.value = mutableUiState.value.copy(
-                    operation = null,
-                    message = error.failure.baseRouteMessage(),
-                )
+                if (error.failure.requiresServerConfiguration()) {
+                    openServerConnectionForFailure(
+                        message = error.failure.baseRouteMessage(),
+                        returnStage = successStage,
+                    )
+                } else {
+                    mutableUiState.value = mutableUiState.value.copy(
+                        operation = null,
+                        message = error.failure.baseRouteMessage(),
+                    )
+                }
             } catch (_: Exception) {
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
@@ -998,10 +1388,22 @@ class RoutePlannerViewModel(
         }
     }
 
+    private fun openServerConnectionForFailure(message: String, returnStage: PlannerStage) {
+        serverReturnStage = returnStage
+        mutableUiState.value = mutableUiState.value
+            .withServerConnection(serverConnectionRepository.load())
+            .copy(
+                stage = PlannerStage.SERVER_CONNECTION,
+                operation = null,
+                message = message,
+            )
+    }
+
     class Factory(
         private val routingRepository: RoutingRepository,
         private val navigationSession: NavigationSession,
         private val vehicleProfileRepository: VehicleProfileRepository,
+        private val serverConnectionRepository: ServerConnectionRepository,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -1012,6 +1414,8 @@ class RoutePlannerViewModel(
                 routingRepository = routingRepository,
                 navigationSession = navigationSession,
                 vehicleProfileRepository = vehicleProfileRepository,
+                serverConnectionRepository = serverConnectionRepository,
+                startInFollowMode = true,
             ) as T
         }
     }
@@ -1024,9 +1428,13 @@ class RoutePlannerViewModel(
 
 private fun RoutePreviewFailure.placeSearchMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Ricerca non disponibile: controlla la connessione."
+    RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.SERVER -> "Il servizio di ricerca non è disponibile."
     else -> "La risposta del servizio di ricerca non è valida."
 }
+
+private fun RoutePreviewFailure.requiresServerConfiguration(): Boolean =
+    this == RoutePreviewFailure.NETWORK || this == RoutePreviewFailure.AUTHENTICATION
 
 private data class ParsedCoordinate(
     val coordinate: Coordinate?,
@@ -1081,8 +1489,18 @@ private fun RoutePlannerUiState.withVehicleProfiles(
     )
 }
 
+private fun RoutePlannerUiState.withServerConnection(
+    connection: ServerConnection,
+): RoutePlannerUiState = copy(
+    serverBaseUrlInput = connection.baseUrl,
+    serverUsernameInput = connection.username,
+    serverPasswordInput = connection.password,
+    serverAllowInsecureHttp = connection.allowInsecureHttp,
+)
+
 private fun RoutePreviewFailure.baseRouteMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile contattare il server Compass."
+    RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile tra le coordinate impostate."
     RoutePreviewFailure.SERVER -> "Il servizio di routing non è disponibile."
     RoutePreviewFailure.INVALID_RESPONSE -> "Il server ha restituito un percorso non valido."
@@ -1094,6 +1512,7 @@ private fun RoutePreviewFailure.baseRouteMessage(): String = when (this) {
 
 private fun RoutePreviewFailure.candidateMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile cercare le stazioni: server non raggiungibile."
+    RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile per la ricerca delle stazioni."
     RoutePreviewFailure.SERVER -> "La ricerca delle stazioni non è disponibile."
     RoutePreviewFailure.INVALID_RESPONSE -> "Il server ha restituito stazioni non valide."
@@ -1105,6 +1524,7 @@ private fun RoutePreviewFailure.candidateMessage(): String = when (this) {
 
 private fun RoutePreviewFailure.selectedRouteMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile ricalcolare il percorso: server non raggiungibile."
+    RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile attraverso questa stazione."
     RoutePreviewFailure.STATION_NOT_FOUND -> "La stazione selezionata non esiste più."
     RoutePreviewFailure.STATION_UNAVAILABLE -> "La stazione selezionata non è raggiungibile."
@@ -1117,6 +1537,7 @@ private fun RoutePreviewFailure.selectedRouteMessage(): String = when (this) {
 
 private fun RoutePreviewFailure.predictiveMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile valutare l'autonomia: server non raggiungibile."
+    RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile per valutare l'autonomia."
     RoutePreviewFailure.SERVER -> "La valutazione predittiva non è disponibile."
     RoutePreviewFailure.INVALID_RESPONSE -> "Il server ha restituito una previsione non valida."
@@ -1128,6 +1549,7 @@ private fun RoutePreviewFailure.predictiveMessage(): String = when (this) {
 
 private fun RoutePreviewFailure.selectedItineraryRouteMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Impossibile calcolare l'itinerario: server non raggiungibile."
+    RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.NO_ROUTE -> "Nessun percorso disponibile attraverso tutte le stazioni."
     RoutePreviewFailure.STATION_NOT_FOUND -> "Una stazione del piano non esiste più."
     RoutePreviewFailure.STATION_UNAVAILABLE -> "Una stazione del piano non è raggiungibile."

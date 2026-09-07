@@ -63,6 +63,15 @@ def _get(path: str) -> httpx.Response:
     return asyncio.run(request())
 
 
+def _get_with_auth(path: str, username: str, password: str) -> httpx.Response:
+    async def request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(path, auth=(username, password))
+
+    return asyncio.run(request())
+
+
 def _post(path: str, payload: dict[str, object]) -> httpx.Response:
     async def request() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
@@ -119,6 +128,108 @@ def test_liveness_does_not_claim_dependency_readiness() -> None:
     assert response.status_code == 200
     assert response.json()["database"] == "not_checked"
     assert response.json()["routing"] == "not_checked"
+
+
+def test_api_authentication_check_reports_disabled_default() -> None:
+    response = _get("/api/v1/auth/check")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "authenticated": True,
+        "auth_enabled": False,
+    }
+
+
+def test_enabled_api_authentication_rejects_missing_and_wrong_credentials() -> None:
+    async def override_settings() -> Settings:
+        return Settings(
+            _env_file=None,
+            api_auth_enabled=True,
+            api_auth_username="mobile-user",
+            api_auth_password="test-password",
+        )
+
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        missing = _get("/api/v1/auth/check")
+        wrong = _get_with_auth("/api/v1/auth/check", "mobile-user", "wrong")
+    finally:
+        app.dependency_overrides.clear()
+
+    for response in (missing, wrong):
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"].startswith("Basic")
+        assert response.json()["code"] == "invalid_credentials"
+
+
+def test_enabled_api_authentication_returns_stable_error_for_malformed_basic_header() -> None:
+    async def override_settings() -> Settings:
+        return Settings(
+            _env_file=None,
+            api_auth_enabled=True,
+            api_auth_username="mobile-user",
+            api_auth_password="test-password",
+        )
+
+    async def request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(
+                "/api/v1/auth/check",
+                headers={"Authorization": "Basic not-base64"},
+            )
+
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        response = asyncio.run(request())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "invalid_credentials"
+
+
+def test_enabled_api_authentication_accepts_credentials_and_protects_api_routers() -> None:
+    async def override_settings() -> Settings:
+        return Settings(
+            _env_file=None,
+            api_auth_enabled=True,
+            api_auth_username="mobile-user",
+            api_auth_password="test-password",
+        )
+
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        unauthenticated = _get("/api/v1/places/search?q=Milano")
+        authenticated = _get_with_auth(
+            "/api/v1/auth/check",
+            "mobile-user",
+            "test-password",
+        )
+        public_health = _get("/health/live")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert unauthenticated.status_code == 401
+    assert authenticated.status_code == 200
+    assert authenticated.json() == {
+        "authenticated": True,
+        "auth_enabled": True,
+    }
+    assert public_health.status_code == 200
+
+
+def test_openapi_documents_basic_authentication_without_protecting_health() -> None:
+    schema = app.openapi()
+
+    assert schema["components"]["securitySchemes"]["OptionalHTTPBasic"] == {
+        "type": "http",
+        "scheme": "basic",
+    }
+    route_operation = schema["paths"]["/api/v1/routes"]["post"]
+    assert route_operation["security"] == [{"OptionalHTTPBasic": []}]
+    assert "401" in route_operation["responses"]
+    assert "security" not in schema["paths"]["/health/live"]["get"]
 
 
 def _freshness_report(state: str = "ready") -> DataFreshnessReport:

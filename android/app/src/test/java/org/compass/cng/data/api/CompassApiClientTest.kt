@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.server.ServerConnection
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -87,6 +88,7 @@ class CompassApiClientTest {
                 """
                 {
                   "query":"Duomo di Milano",
+                  "cacheable":false,
                   "results":[{
                     "result_id":"nominatim:node:123",
                     "display_name":"Duomo di Milano, Milano, Italia",
@@ -106,12 +108,59 @@ class CompassApiClientTest {
         val result = client().searchPlaces("Duomo di Milano")
 
         assertEquals("Duomo di Milano", result.query)
+        assertFalse(result.cacheable)
         assertEquals("poi", result.results.single().kind)
         assertEquals(45.4641, result.results.single().latitude, 0.0)
         val recorded = server.takeRequest()
         assertEquals("GET", recorded.method)
         assertEquals("Duomo di Milano", recorded.requestUrl?.queryParameter("q"))
         assertEquals("it", recorded.requestUrl?.queryParameter("language"))
+    }
+
+    @Test
+    fun readsEndpointAndBasicCredentialsForEveryRequest() = runTest {
+        val secondServer = MockWebServer()
+        secondServer.start()
+        try {
+            server.enqueue(successResponse(SUCCESS_RESPONSE))
+            secondServer.enqueue(successResponse(SUCCESS_RESPONSE))
+            var connection = ServerConnection.create(
+                baseUrl = server.url("/").toString(),
+                username = "first-user",
+                password = "first-password",
+                allowInsecureHttp = true,
+                requireCredentials = true,
+            )
+            val client = CompassApiClient(
+                connectionProvider = { connection },
+                httpClient = OkHttpClient(),
+                json = json,
+            )
+
+            client.getRoute(Coordinate(45.4642, 9.19), Coordinate(44.4949, 11.3426))
+            val firstRequest = server.takeRequest()
+            assertEquals(
+                okhttp3.Credentials.basic("first-user", "first-password", Charsets.UTF_8),
+                firstRequest.headers["Authorization"],
+            )
+
+            connection = ServerConnection.create(
+                baseUrl = secondServer.url("proxy/").toString(),
+                username = "second-user",
+                password = "second-password",
+                allowInsecureHttp = true,
+                requireCredentials = true,
+            )
+            client.getRoute(Coordinate(45.4642, 9.19), Coordinate(44.4949, 11.3426))
+            val secondRequest = secondServer.takeRequest()
+            assertEquals("/proxy/api/v1/routes", secondRequest.path)
+            assertEquals(
+                okhttp3.Credentials.basic("second-user", "second-password", Charsets.UTF_8),
+                secondRequest.headers["Authorization"],
+            )
+        } finally {
+            secondServer.shutdown()
+        }
     }
 
     @Test

@@ -40,7 +40,11 @@ class SharedPreferencesPlaceSearchCache internal constructor(
     )
 
     override fun put(results: PlaceSearchResults) {
-        if (results.source != PlaceSearchSource.LIVE || results.results.isEmpty()) return
+        if (
+            results.source != PlaceSearchSource.LIVE ||
+            results.results.isEmpty() ||
+            !results.cacheable
+        ) return
         val updated = codec.put(
             document = preferences.getString(DOCUMENT_KEY, null),
             results = results,
@@ -119,6 +123,7 @@ private data class StoredSearchEntry(
     fun toDomain() = PlaceSearchResults(
         query = query,
         results = results.map(StoredSearchResult::toDomain),
+        cacheable = false,
         source = PlaceSearchSource.CACHE,
         cachedAtEpochMillis = cachedAtEpochMillis,
     )

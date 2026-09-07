@@ -5,9 +5,12 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.location.Location
+import android.location.LocationListener
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,12 +18,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.navigation.NavigationForegroundService
+import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.ui.route.PlannerStage
 import org.compass.cng.ui.route.RoutePlannerScreen
 import org.compass.cng.ui.route.RoutePlannerViewModel
 import org.compass.cng.ui.theme.CompassTheme
@@ -32,7 +38,14 @@ class MainActivity : ComponentActivity() {
             routingRepository = application.container.routingRepository,
             navigationSession = application.container.navigationSession,
             vehicleProfileRepository = application.container.vehicleProfileRepository,
+            serverConnectionRepository = application.container.serverConnectionRepository,
         )
+    }
+
+    private val followLocationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            routePlannerViewModel.updateFollowLocation(location.toNavigationLocation())
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,8 +86,25 @@ class MainActivity : ComponentActivity() {
             ) { grants ->
                 val locationGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                     grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-                if (locationGranted) useCurrentLocationAsOrigin()
+                if (locationGranted) {
+                    startFollowLocationUpdates()
+                    useCurrentLocation()
+                }
                 else routePlannerViewModel.currentLocationUnavailable()
+            }
+            val followPermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions(),
+            ) { grants ->
+                val locationGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                    grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                if (locationGranted) startFollowLocationUpdates()
+                else routePlannerViewModel.currentLocationUnavailable()
+            }
+            LaunchedEffect(Unit) {
+                if (routePlannerViewModel.uiState.value.stage == PlannerStage.FOLLOW) {
+                    if (hasLocationPermission()) startFollowLocationUpdates()
+                    else followPermissionLauncher.launch(locationPermissions)
+                }
             }
             CompassTheme {
                 RoutePlannerScreen(
@@ -120,10 +150,10 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     },
-                    onUseCurrentLocation = {
-                        routePlannerViewModel.currentLocationRequested()
+                    onUseCurrentLocation = { endpoint ->
+                        routePlannerViewModel.currentLocationRequested(endpoint)
                         if (hasLocationPermission()) {
-                            useCurrentLocationAsOrigin()
+                            useCurrentLocation()
                         } else {
                             locationPermissionLauncher.launch(locationPermissions)
                         }
@@ -132,6 +162,21 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (
+            hasLocationPermission() &&
+            routePlannerViewModel.uiState.value.stage == PlannerStage.FOLLOW
+        ) {
+            startFollowLocationUpdates()
+        }
+    }
+
+    override fun onStop() {
+        stopFollowLocationUpdates()
+        super.onStop()
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -151,7 +196,7 @@ class MainActivity : ComponentActivity() {
     private var pendingStartAction: String = NavigationForegroundService.ACTION_START
 
     @SuppressLint("MissingPermission")
-    private fun useCurrentLocationAsOrigin() {
+    private fun useCurrentLocation() {
         if (!hasLocationPermission()) {
             routePlannerViewModel.currentLocationUnavailable()
             return
@@ -178,7 +223,7 @@ class MainActivity : ComponentActivity() {
                 ) { location ->
                     if (location != null && delivered.compareAndSet(false, true)) {
                         cancellationSignals.values.forEach(CancellationSignal::cancel)
-                        routePlannerViewModel.useCurrentLocationAsOrigin(
+                        routePlannerViewModel.useCurrentLocation(
                             Coordinate(location.latitude, location.longitude),
                         )
                     } else if (pending.decrementAndGet() == 0 && !delivered.get()) {
@@ -194,6 +239,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startNavigationService(action: String = pendingStartAction) {
         pendingStartAction = NavigationForegroundService.ACTION_START
+        stopFollowLocationUpdates()
         routePlannerViewModel.startNavigation()
         ContextCompat.startForegroundService(
             this,
@@ -206,5 +252,52 @@ class MainActivity : ComponentActivity() {
     private fun stopNavigationService() {
         routePlannerViewModel.stopNavigation()
         stopService(Intent(this, NavigationForegroundService::class.java))
+        startFollowLocationUpdates()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startFollowLocationUpdates() {
+        if (!hasLocationPermission()) return
+        val manager = getSystemService(LocationManager::class.java)
+        val provider = when {
+            manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> {
+                LocationManager.NETWORK_PROVIDER
+            }
+            else -> return
+        }
+        try {
+            manager.removeUpdates(followLocationListener)
+            manager.getLastKnownLocation(provider)?.let {
+                routePlannerViewModel.updateFollowLocation(it.toNavigationLocation())
+            }
+            manager.requestLocationUpdates(
+                provider,
+                FOLLOW_LOCATION_INTERVAL_MILLIS,
+                FOLLOW_LOCATION_MINIMUM_DISTANCE_METERS,
+                followLocationListener,
+                Looper.getMainLooper(),
+            )
+        } catch (_: SecurityException) {
+            routePlannerViewModel.currentLocationUnavailable()
+        }
+    }
+
+    private fun stopFollowLocationUpdates() {
+        getSystemService(LocationManager::class.java).removeUpdates(followLocationListener)
+    }
+
+    private fun Location.toNavigationLocation() = NavigationLocation(
+        coordinate = Coordinate(latitude, longitude),
+        accuracyMeters = accuracy.toDouble(),
+        speedMetersPerSecond = speed.takeIf { hasSpeed() }?.toDouble(),
+        bearingDegrees = bearing.takeIf { hasBearing() }?.toDouble(),
+        timestampEpochMillis = time,
+        receivedAtEpochMillis = System.currentTimeMillis(),
+    )
+
+    private companion object {
+        const val FOLLOW_LOCATION_INTERVAL_MILLIS = 1_000L
+        const val FOLLOW_LOCATION_MINIMUM_DISTANCE_METERS = 0f
     }
 }

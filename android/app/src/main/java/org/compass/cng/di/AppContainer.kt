@@ -10,8 +10,10 @@ import org.compass.cng.data.api.CompassApiClient
 import org.compass.cng.data.repository.HttpRoutingRepository
 import org.compass.cng.data.navigation.SharedPreferencesNavigationRouteStore
 import org.compass.cng.data.search.SharedPreferencesPlaceSearchCache
+import org.compass.cng.data.server.SharedPreferencesServerConnectionRepository
 import org.compass.cng.data.vehicle.SharedPreferencesVehicleProfileRepository
 import org.compass.cng.domain.RoutingRepository
+import org.compass.cng.domain.server.ServerConnection
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.CompassNavigationRouteRecalculator
 import org.compass.cng.navigation.NavigationRouteRecalculator
@@ -29,9 +31,20 @@ class AppContainer(context: Context) {
         explicitNulls = true
     }
 
+    val serverConnectionRepository = SharedPreferencesServerConnectionRepository(
+        context = context,
+        defaultConnection = ServerConnection.create(
+            baseUrl = BuildConfig.COMPASS_API_BASE_URL,
+            allowInsecureHttp = BuildConfig.COMPASS_API_BASE_URL.startsWith(
+                "http://",
+                ignoreCase = true,
+            ),
+        ),
+    )
+
     val routingRepository: RoutingRepository = HttpRoutingRepository(
         CompassApiClient(
-            baseUrl = BuildConfig.COMPASS_API_BASE_URL,
+            connectionProvider = serverConnectionRepository::load,
             httpClient = httpClient,
             json = json,
             eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },

@@ -2,6 +2,9 @@
 
 Status: Accepted on 2026-08-31 after operator-run live/device validation.
 
+The startup-default portion of this decision is superseded by
+[ADR 0019](0019-android-route-free-follow-startup.md); Milan and Bologna remain fixtures only.
+
 ## Context
 
 Phases 8–10 intentionally used the accepted Milan-to-Bologna route as the deterministic Android

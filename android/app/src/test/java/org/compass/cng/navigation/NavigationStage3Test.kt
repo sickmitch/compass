@@ -123,6 +123,7 @@ class NavigationStage3Test {
         assertEquals(ReroutingStatus.IDLE, engine.state.value.reroutingStatus)
         assertTrue(engine.state.value.phase != NavigationPhase.ROUTE_PREVIEW)
         assertEquals(3_000L, engine.state.value.lastSuccessfulRouteRefreshEpochMillis)
+        assertNull(engine.state.value.routeUpdateNotice)
     }
 
     @Test

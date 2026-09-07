@@ -36,6 +36,25 @@ The default public Overpass instance is configurable. Operators must respect ins
 usage policies, use an identifying `HTTP_USER_AGENT`, and may point `OVERPASS_URL` to a self-hosted or
 alternate compliant instance. A failed OSM import does not delete or invalidate MIMIT data.
 
+## Google Places API (New) search corroboration
+
+Google Places is an optional, runtime-only corroboration source for place search. It is disabled by
+default and configured with `GEOCODING_PROVIDER=nominatim_google`. Compass requests Text Search
+(New) structured address components, name and location, then compares them with Nominatim
+candidates. It never publishes, persists or logs Google content, coordinates, identifiers or the
+API key. Mobile-visible search results remain attributable Nominatim records and hybrid ordering is
+explicitly non-cacheable.
+
+This boundary exists because Compass renders MapLibre, while Google requires Places results shown
+on a map to be shown on a Google Map and restricts caching of Places content. Operators must enable
+and bill the Places API (New), restrict the server key to the API and the required Google service,
+and review current Google terms before deployment. Requesting `addressComponents` affects the Text
+Search field tier and therefore cost.
+
+- Places API policies: <https://developers.google.com/maps/documentation/places/web-service/policies>
+- Text Search (New): <https://developers.google.com/maps/documentation/places/web-service/text-search>
+- Place data fields: <https://developers.google.com/maps/documentation/places/web-service/data-fields>
+
 ## Reconciliation boundary
 
 There is no universal cross-source identifier. Compass keeps MIMIT and OSM identities and fields

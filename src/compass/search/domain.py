@@ -31,6 +31,9 @@ class PlaceSearchResult:
     poi_name: str | None = None
     provider: str = "coordinate"
     provider_place_id: str | None = None
+    street_name: str | None = None
+    house_number: str | None = None
+    locality: str | None = None
 
 
 class PlaceSearchError(Exception):

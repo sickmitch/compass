@@ -59,6 +59,7 @@ interface RoutingRepository {
 
 enum class RoutePreviewFailure {
     NETWORK,
+    AUTHENTICATION,
     NO_ROUTE,
     STATION_NOT_FOUND,
     STATION_UNAVAILABLE,

@@ -1,6 +1,24 @@
 {
   "components": {
     "schemas": {
+      "AuthenticationCheckResponse": {
+        "properties": {
+          "auth_enabled": {
+            "title": "Auth Enabled",
+            "type": "boolean"
+          },
+          "authenticated": {
+            "default": true,
+            "title": "Authenticated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auth_enabled"
+        ],
+        "title": "AuthenticationCheckResponse",
+        "type": "object"
+      },
       "BaseRouteRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1685,6 +1703,10 @@
       "PlaceSearchResponse": {
         "additionalProperties": false,
         "properties": {
+          "cacheable": {
+            "title": "Cacheable",
+            "type": "boolean"
+          },
           "query": {
             "title": "Query",
             "type": "string"
@@ -1699,6 +1721,7 @@
         },
         "required": [
           "query",
+          "cacheable",
           "results"
         ],
         "title": "PlaceSearchResponse",
@@ -4336,6 +4359,12 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "OptionalHTTPBasic": {
+        "scheme": "basic",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -4345,6 +4374,42 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/auth/check": {
+      "get": {
+        "operationId": "check_authentication_api_v1_auth_check_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid API credentials."
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Check Authentication",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
     "/api/v1/cng/corridor-candidates": {
       "post": {
         "operationId": "corridor_candidates_api_v1_cng_corridor_candidates_post",
@@ -4368,6 +4433,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           },
           "422": {
             "content": {
@@ -4400,6 +4475,11 @@
             "description": "Database or routing unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Corridor Candidates",
         "tags": [
           "routing"
@@ -4430,6 +4510,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4461,6 +4551,11 @@
             "description": "Database or routing unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Detour Candidates",
         "tags": [
           "routing"
@@ -4490,6 +4585,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           },
           "422": {
             "content": {
@@ -4522,6 +4627,11 @@
             "description": "Database or routing unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Predictive Candidates",
         "tags": [
           "predictive-refuelling"
@@ -4551,6 +4661,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           },
           "422": {
             "content": {
@@ -4583,6 +4703,11 @@
             "description": "Database or routing unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Ranked Candidates",
         "tags": [
           "ranking"
@@ -4634,6 +4759,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
           "404": {
             "content": {
               "application/json": {
@@ -4665,6 +4800,11 @@
             "description": "Station database unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Station Detail",
         "tags": [
           "stations"
@@ -4685,6 +4825,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
           "503": {
             "content": {
               "application/json": {
@@ -4696,6 +4846,11 @@
             "description": "Freshness data unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Data Freshness",
         "tags": [
           "operations"
@@ -4758,6 +4913,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4789,6 +4954,11 @@
             "description": "Search provider unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Place Search",
         "tags": [
           "place-search"
@@ -4818,6 +4988,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           },
           "422": {
             "content": {
@@ -4850,6 +5030,11 @@
             "description": "Routing provider unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Base Route",
         "tags": [
           "routing"
@@ -4879,6 +5064,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           },
           "404": {
             "content": {
@@ -4931,6 +5126,11 @@
             "description": "Database or routing unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Route With Cng Itinerary",
         "tags": [
           "stations"
@@ -4960,6 +5160,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           },
           "404": {
             "content": {
@@ -5012,6 +5222,11 @@
             "description": "Database or routing unavailable."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Route With Cng Stop",
         "tags": [
           "stations"
@@ -5031,8 +5246,23 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
           }
         },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
         "summary": "Traffic Health",
         "tags": [
           "traffic"

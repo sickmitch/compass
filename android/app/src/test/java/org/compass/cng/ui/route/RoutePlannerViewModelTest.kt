@@ -38,7 +38,10 @@ import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.SelectedCngStop
+import org.compass.cng.domain.server.InMemoryServerConnectionRepository
+import org.compass.cng.domain.server.ServerConnection
 import org.compass.cng.navigation.NavigationPhase
+import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.toNavigationRoute
 import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
@@ -57,13 +60,215 @@ class RoutePlannerViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
-    fun defaultPreviewEndsAtDriveReachableBolognaCentrale() {
+    fun productionStartModeFollowsGpsWithoutLoadingADefaultRoute() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        val location = NavigationLocation(
+            coordinate = Coordinate(45.4642, 9.19),
+            accuracyMeters = 4.0,
+            speedMetersPerSecond = 8.0,
+            bearingDegrees = 25.0,
+            timestampEpochMillis = 1_000L,
+        )
+
+        assertEquals(PlannerStage.FOLLOW, viewModel.uiState.value.stage)
+        assertNull(viewModel.uiState.value.baseRoute)
+        assertEquals("", viewModel.uiState.value.originLatitudeInput)
+        assertEquals("", viewModel.uiState.value.destinationLatitudeInput)
+        assertEquals(0, repository.previewCalls)
+
+        viewModel.updateFollowLocation(location)
+
+        assertEquals(location, viewModel.uiState.value.followLocation)
+        assertEquals(0, repository.previewCalls)
+    }
+
+    @Test
+    fun applicationFactoryEnablesRouteFreeFollowAtStartup() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel.Factory(
+            routingRepository = repository,
+            navigationSession = NavigationSession(),
+            vehicleProfileRepository = InMemoryVehicleProfileRepository(),
+            serverConnectionRepository = configuredServerRepository(),
+        ).create(RoutePlannerViewModel::class.java)
+
+        assertEquals(PlannerStage.FOLLOW, viewModel.uiState.value.stage)
+        assertNull(viewModel.uiState.value.baseRoute)
+        assertEquals(0, repository.previewCalls)
+    }
+
+    @Test
+    fun productionStartupOpensServerConfigurationWhenCredentialsAreMissing() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = InMemoryServerConnectionRepository(),
+            startInFollowMode = true,
+        )
+
+        assertEquals(PlannerStage.SERVER_CONNECTION, viewModel.uiState.value.stage)
+        assertEquals("Configura il server Compass per continuare.", viewModel.uiState.value.message)
+        assertNull(viewModel.uiState.value.baseRoute)
+        assertEquals(0, repository.previewCalls)
+    }
+
+    @Test
+    fun productionStartupDiscardsAnInactiveCachedPreview() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val session = NavigationSession().apply { preview(sampleRoute().toNavigationRoute()) }
+
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            navigationSession = session,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+
+        assertEquals(PlannerStage.FOLLOW, viewModel.uiState.value.stage)
+        assertNull(viewModel.navigationState.value.route)
+        assertEquals(0, repository.previewCalls)
+    }
+
+    @Test
+    fun savingServerProfileInFollowModeDoesNotCreateATrip() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            startInFollowMode = true,
+        )
+
+        viewModel.updateServerBaseUrl("https://compass.example.test/")
+        viewModel.updateServerUsername("driver")
+        viewModel.updateServerPassword("secret")
+        viewModel.saveServerConnection()
+
+        assertEquals(PlannerStage.FOLLOW, viewModel.uiState.value.stage)
+        assertNull(viewModel.uiState.value.baseRoute)
+        assertEquals(0, repository.previewCalls)
+    }
+
+    @Test
+    fun tripSelectorSupportsSearchAndCurrentLocationForEitherEndpoint() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        val searchedOrigin = PlaceSearchResult(
+            id = "origin",
+            displayName = "Verona Porta Nuova",
+            address = "Verona",
+            location = Coordinate(45.429, 10.982),
+            kind = PlaceKind.POI,
+            category = "railway_station",
+            poiName = "Verona Porta Nuova",
+            provider = "fixture",
+        )
+        val currentDestination = Coordinate(45.0703, 7.6869)
+
+        viewModel.openRouteConfiguration()
+        viewModel.openPlaceSearch(RouteEndpoint.ORIGIN)
+        viewModel.selectPlace(searchedOrigin)
+        viewModel.currentLocationRequested(RouteEndpoint.DESTINATION)
+        assertEquals(
+            CurrentLocationAcquisitionStatus.ACQUIRING,
+            viewModel.uiState.value.destinationCurrentLocationStatus,
+        )
+        viewModel.useCurrentLocation(currentDestination)
+
+        val configured = viewModel.uiState.value
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, configured.stage)
+        assertEquals(RouteLocationMethod.SEARCH, configured.originLocationMethod)
+        assertEquals("Verona Porta Nuova", configured.originDisplayName)
+        assertEquals(
+            RouteLocationMethod.CURRENT_LOCATION,
+            configured.destinationLocationMethod,
+        )
+        assertEquals("Posizione attuale", configured.destinationDisplayName)
+        assertEquals(
+            CurrentLocationAcquisitionStatus.SUCCESS,
+            configured.destinationCurrentLocationStatus,
+        )
+        assertNull(configured.message)
+        assertEquals(0, repository.previewCalls)
+
+        viewModel.applyRouteInputs()
+
+        assertEquals(1, repository.previewCalls)
+        assertEquals(searchedOrigin.location, repository.lastPreviewOrigin)
+        assertEquals(currentDestination, repository.lastPreviewDestination)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertFalse(viewModel.uiState.value.routeInputsDirty)
+    }
+
+    @Test
+    fun tripActionsStayLockedUntilEditedInputsAreRecalculated() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openRouteConfiguration()
+
+        viewModel.updateDestinationLongitude("12.5")
+        assertTrue(viewModel.uiState.value.routeInputsDirty)
+
+        viewModel.openAddStop()
+        viewModel.openPredictiveRange()
+        viewModel.openNavigationPreview()
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+
+        viewModel.applyRouteInputs()
+        assertFalse(viewModel.uiState.value.routeInputsDirty)
+
+        viewModel.openPredictiveRange()
+        assertEquals(PlannerStage.CONFIGURE_PREDICTIVE, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun backingOutOfANewTripReturnsToRouteFreeFollow() = runTest {
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+
+        viewModel.openRouteConfiguration()
+        viewModel.navigateBack()
+
+        assertEquals(PlannerStage.FOLLOW, viewModel.uiState.value.stage)
+        assertNull(viewModel.uiState.value.baseRoute)
+    }
+
+    @Test
+    fun terminatingNavigationReturnsToRouteFreeFollow() = runTest {
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+        )
+        viewModel.openNavigationPreview()
+        viewModel.startNavigation()
+
+        viewModel.stopNavigation()
+
+        assertEquals(PlannerStage.FOLLOW, viewModel.uiState.value.stage)
+        assertNull(viewModel.uiState.value.baseRoute)
+        assertEquals(NavigationPhase.IDLE, viewModel.navigationState.value.phase)
+        assertNull(viewModel.navigationState.value.route)
+    }
+
+    @Test
+    fun defaultUiStateIsRouteFreeAndHasNoPreselectedEndpoints() {
         val state = RoutePlannerUiState()
 
-        assertEquals(Coordinate(44.5057, 11.3424), state.activeDestination)
-        assertEquals("44.5057", state.destinationLatitudeInput)
-        assertEquals("11.3424", state.destinationLongitudeInput)
-        assertEquals("Bologna Centrale", state.destinationDisplayName)
+        assertEquals(PlannerStage.FOLLOW, state.stage)
+        assertNull(state.operation)
+        assertEquals("", state.originLatitudeInput)
+        assertEquals("", state.destinationLatitudeInput)
+        assertEquals("Non selezionata", state.originDisplayName)
+        assertEquals("Non selezionata", state.destinationDisplayName)
     }
 
     @Test
@@ -128,6 +333,55 @@ class RoutePlannerViewModelTest {
 
         assertEquals("Impossibile contattare il server Compass.", viewModel.uiState.value.message)
         assertNull(viewModel.uiState.value.baseRoute)
+        assertEquals(PlannerStage.SERVER_CONNECTION, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun savesPersistentServerConnectionAndReturnsWithoutInventingAReroute() = runTest {
+        val routing = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val connections = InMemoryServerConnectionRepository(
+            ServerConnection.create(
+                baseUrl = "https://old.example.it/",
+                username = "old-user",
+                password = "old-password",
+            ),
+        )
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = routing,
+            serverConnectionRepository = connections,
+        )
+
+        viewModel.openServerConnection()
+        assertEquals(PlannerStage.SERVER_CONNECTION, viewModel.uiState.value.stage)
+        assertEquals("https://old.example.it/", viewModel.uiState.value.serverBaseUrlInput)
+        viewModel.updateServerBaseUrl("https://new.example.it/compass")
+        viewModel.updateServerUsername("road-user")
+        viewModel.updateServerPassword("road-password")
+        viewModel.saveServerConnection()
+
+        assertEquals("https://new.example.it/compass/", connections.load().baseUrl)
+        assertEquals("road-user", connections.load().username)
+        assertEquals("road-password", connections.load().password)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(1, routing.previewCalls)
+    }
+
+    @Test
+    fun refusesInsecureServerUntilHttpFallbackIsAccepted() = runTest {
+        val connections = InMemoryServerConnectionRepository()
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+            serverConnectionRepository = connections,
+        )
+        viewModel.openServerConnection()
+        viewModel.updateServerBaseUrl("http://192.0.2.1:8000/")
+        viewModel.updateServerUsername("road-user")
+        viewModel.updateServerPassword("road-password")
+
+        viewModel.saveServerConnection()
+
+        assertEquals(PlannerStage.SERVER_CONNECTION, viewModel.uiState.value.stage)
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("accettare esplicitamente"))
     }
 
     @Test
@@ -170,7 +424,8 @@ class RoutePlannerViewModelTest {
         assertEquals(florence, viewModel.uiState.value.baseRoute?.destination)
         assertEquals("41.902800", viewModel.uiState.value.originLatitudeInput)
         assertEquals("11.255800", viewModel.uiState.value.destinationLongitudeInput)
-        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertFalse(viewModel.uiState.value.routeInputsDirty)
         assertNull(viewModel.uiState.value.rankedStations)
         assertNull(viewModel.uiState.value.selectedRoute)
         assertNull(viewModel.uiState.value.predictiveSuggestion)
@@ -204,6 +459,7 @@ class RoutePlannerViewModelTest {
         assertEquals(poi.location, repository.lastPreviewDestination)
         assertEquals("Duomo di Milano", viewModel.uiState.value.destinationDisplayName)
         assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertFalse(viewModel.uiState.value.routeInputsDirty)
     }
 
     @Test
@@ -236,7 +492,11 @@ class RoutePlannerViewModelTest {
         val current = Coordinate(45.5, 9.2)
 
         viewModel.currentLocationRequested()
-        assertEquals("Acquisizione della posizione attuale…", viewModel.uiState.value.message)
+        assertEquals(
+            CurrentLocationAcquisitionStatus.ACQUIRING,
+            viewModel.uiState.value.originCurrentLocationStatus,
+        )
+        assertNull(viewModel.uiState.value.message)
         viewModel.useCurrentLocationAsOrigin(current)
 
         assertEquals(1, repository.previewCalls)
@@ -245,6 +505,11 @@ class RoutePlannerViewModelTest {
         assertEquals("9.200000", viewModel.uiState.value.originLongitudeInput)
         assertEquals(RoutePlannerViewModel.MILAN, repository.lastPreviewOrigin)
         assertEquals("Posizione attuale", viewModel.uiState.value.originDisplayName)
+        assertEquals(
+            CurrentLocationAcquisitionStatus.SUCCESS,
+            viewModel.uiState.value.originCurrentLocationStatus,
+        )
+        assertNull(viewModel.uiState.value.message)
         assertEquals(RoutePlannerViewModel.MILAN, viewModel.uiState.value.baseRoute?.origin)
 
         viewModel.applyRouteInputs()
@@ -253,7 +518,31 @@ class RoutePlannerViewModelTest {
         assertEquals(current, repository.lastPreviewOrigin)
         assertEquals(current, viewModel.uiState.value.baseRoute?.origin)
         assertEquals("Posizione attuale", viewModel.uiState.value.originDisplayName)
-        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertFalse(viewModel.uiState.value.routeInputsDirty)
+    }
+
+    @Test
+    fun currentLocationFailureIsScopedToTheSelectedEndpointWithoutErrorMessage() = runTest {
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+        )
+        viewModel.openRouteConfiguration()
+
+        viewModel.currentLocationRequested(RouteEndpoint.DESTINATION)
+        viewModel.currentLocationUnavailable()
+
+        val state = viewModel.uiState.value
+        assertEquals(
+            CurrentLocationAcquisitionStatus.FAILURE,
+            state.destinationCurrentLocationStatus,
+        )
+        assertEquals(
+            CurrentLocationAcquisitionStatus.IDLE,
+            state.originCurrentLocationStatus,
+        )
+        assertEquals(RouteLocationMethod.CURRENT_LOCATION, state.destinationLocationMethod)
+        assertNull(state.message)
     }
 
     @Test
@@ -338,6 +627,27 @@ class RoutePlannerViewModelTest {
         assertEquals("Panda Natural Power", recreated.uiState.value.vehicleProfiles.selectedProfile?.name)
         assertEquals("240", recreated.uiState.value.effectiveRangeKmInput)
         assertEquals("50", recreated.uiState.value.gasolineReserveRangeKmInput)
+    }
+
+    @Test
+    fun extendedPlanningCanClearASelectedVehicleAndKeepEditableValues() = runTest {
+        val profiles = InMemoryVehicleProfileRepository().apply {
+            save(VehicleProfile("panda", "Panda", 240.0, 25.0, 520.0, 50.0))
+        }
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(Result.success(sampleRoute())),
+            vehicleProfileRepository = profiles,
+        )
+
+        viewModel.openPredictiveRange()
+        viewModel.clearVehicleProfileSelection()
+
+        assertNull(viewModel.uiState.value.vehicleProfiles.selectedProfile)
+        assertNull(profiles.load().selectedProfileId)
+        assertEquals("240", viewModel.uiState.value.effectiveRangeKmInput)
+        assertEquals("25", viewModel.uiState.value.reserveRangeKmInput)
+        assertEquals("", viewModel.uiState.value.estimatedRemainingRangeKmInput)
+        assertEquals("10", viewModel.uiState.value.maximumDetourMinutesInput)
     }
 
     @Test
@@ -629,6 +939,14 @@ class RoutePlannerViewModelTest {
         assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
         assertNull(viewModel.uiState.value.rankedStations)
     }
+
+    private fun configuredServerRepository() = InMemoryServerConnectionRepository(
+        ServerConnection.create(
+            baseUrl = "https://compass.example.test/",
+            username = "driver",
+            password = "secret",
+        ),
+    )
 
     private class FakeRoutingRepository(
         private val baseResult: Result<RoutePreview>,

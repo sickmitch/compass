@@ -55,8 +55,9 @@ This repository implements the accepted **Phases 0–13** foundation:
 - an independently range-validated multi-waypoint route through ordered official MIMIT IDs;
 - an Android predictive form whose remaining-range input starts empty, ordered stop/leg reserve
   margins and an executable Phase 10 API/device gate.
-- editable Android route coordinates for preview, manual Metano search and predictive CNG planning,
-  with the Milan-to-Bologna pair retained only as the startup default;
+- route-free Android startup that follows the live GPS position without inventing a destination,
+  plus a wrapping origin/destination selector for current position, search, future favourites and
+  explicit coordinates;
 - a provider-independent live-traffic subsystem with mock fixtures, a TomTom base Traffic Flow API
   adapter, OpenLR direction verification, Valhalla directed-edge matching and time-dependent route
   requests;
@@ -215,6 +216,10 @@ Phase 7 makes the completed routing/ranking domain usable through stable mobile-
 The canonical machine-readable contract is [docs/openapi.json](docs/openapi.json), with compact
 [request/response examples](docs/api.md). Regenerate or
 verify it with `python scripts/export-openapi.py` and `python scripts/export-openapi.py --check`.
+For external mobile access, enable environment-backed Basic Auth and terminate HTTPS at the
+operator-managed ingress; Android persists the endpoint, username and a Keystore-encrypted password
+without rebuilding the APK. See
+[external API deployment](docs/deployment.md#external-api-access-and-authentication).
 See the [Phase 7 live gate](docs/deployment.md#phase-7-public-api-contract-validation). After the
 image and services are restarted, the checked-in `scripts/run-phase7-live.sh` runner executes the
 complete gate without requiring inline JSON or chained shell commands.
@@ -302,6 +307,12 @@ configured geocoder. The acquired GPS/network origin is shown in the coordinate 
 user applies it. Selecting a normalized result requests the final route through the existing
 backend contract and hands its geometry and Valhalla maneuvers to the established foreground
 navigation session; zero-cost provider results are rejected as non-navigable.
+
+`GEOCODING_PROVIDER=nominatim_google` optionally compares Nominatim candidates with ephemeral
+Google Places API (New) candidates. Query-token coherence orders POIs; address comparison uses
+structured street, locality, exact civic and a configurable 75 m proximity bound. The Android hint
+defines the unambiguous Italian civic syntax as `Via Cappafredda, 12, Roverchiara`. Google payloads
+are discarded before the API boundary and the resulting order is marked non-cacheable.
 
 Route timing now separates driving duration, an explicit nullable traffic-delay component,
 refuelling dwell and total journey duration. `CNG_REFUEL_DWELL_SECONDS` defaults to 1,200 seconds.
@@ -420,6 +431,36 @@ number and Italian accessibility description while over limit. Missing inputs re
 unavailable, and no sound or vibration is emitted. Android version is `0.19.0` (`versionCode=20`).
 See `docs/phases/navigation-ui-phase-9-acceptance.md`.
 
+Android patch `0.19.1` (`versionCode=21`) incorporates the first post-Phase-9 road-test correction:
+when a structured junction sign already names the maneuver road, Compass suppresses the redundant
+road subtitle while preserving the instruction and sign. The green sign is centered and sizes to
+its content plus padding instead of always spanning the maneuver card.
+
+Android patch `0.19.2` (`versionCode=22`), accepted in the operator's physical-device road test
+on 2026-09-06, aligns guidance with Valhalla's maneuver-begin semantics. After a transition is
+crossed, the card, voice controller, approach state and camera now advance to the next maneuver
+instead of retaining the completed maneuver while displaying distance to its end. See the
+[`0.19.2` road-test acceptance record](docs/phases/android-0.19.2-road-test-acceptance.md).
+
+Android `0.19.3` (`versionCode=23`) strengthens automatic off-route recovery without rendering raw
+GPS as on-route truth. Three consecutive accepted fixes are still required, but lateral deviation
+and a moving heading conflict now use tighter accuracy-aware thresholds. A confirmed episode
+re-enters Compass from the raw GPS coordinate; after success, a ten-second bottom overlay shows the
+remaining duration before and after the alternative plus the signed difference. This server-backed
+operation requires an API URL reachable by the phone after it is disconnected from ADB. See the
+[`0.19.3` acceptance record](docs/phases/android-0.19.3-off-route-rerouting-acceptance.md).
+
+The final `0.19.3` startup increment removes the automatic Milan-to-Bologna request. A fresh app
+session opens on a route-free GPS-follow map: there is no `Panoramica` action because no route
+exists, and `Crea viaggio` opens the origin/destination selector. Each endpoint offers adaptive,
+wrapping choices for current position, a disabled saved-positions placeholder, the existing place
+search and manual coordinates; current position is first for departure and last for destination.
+The selector now opens without a redundant header/card and unlocks direct routing, one-stop or
+extended planning only after a successful calculation. Extended planning supports saved vehicle
+profiles or custom values while always asking for remaining range and maximum detour. Server setup
+opens automatically when credentials are absent or routing/search reports connection/auth failure.
+See the [route-free follow acceptance gate](docs/phases/android-0.19.3-route-free-follow-acceptance.md).
+
 ## Repository layout
 
 ```text
@@ -433,7 +474,7 @@ src/compass/detours/  batched network-cost evaluation and deterministic detour m
 src/compass/ranking/  arrival-time opening evaluation, price freshness and explainable ranking
 src/compass/predictive/ reserve-aware road reachability and predictive suggestion states
 src/compass/stations/ public station detail reads and provenance
-src/compass/search/   provider-neutral place search and Nominatim adapter
+src/compass/search/   provider-neutral search, Nominatim output and optional Google corroboration
 src/compass/freshness/ ingestion/reconciliation freshness policy
 android/               native Kotlin/Compose/MapLibre device client
 migrations/            Alembic schema history

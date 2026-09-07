@@ -7,11 +7,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.compass.cng.domain.model.Maneuver
 
 data class NavigationEnginePolicy(
-    val offRouteMinimumDistanceMeters: Double = 35.0,
+    val offRouteMinimumDistanceMeters: Double = 20.0,
     val offRouteAccuracyMultiplier: Double = 1.5,
     val offRouteConsecutiveFixes: Int = 3,
-    val offRouteHeadingMismatchDegrees: Double = 110.0,
+    val offRouteHeadingMismatchDegrees: Double = 65.0,
     val offRouteHeadingMinimumSpeedMetersPerSecond: Double = 4.0,
+    val offRouteHeadingMinimumDistanceMeters: Double = 10.0,
+    val offRouteHeadingAccuracyMultiplier: Double = 1.0,
     val offRouteBackwardsProgressMeters: Double = 60.0,
     val gpsLostAfterMillis: Long = 15_000,
     val arrivalDistanceMeters: Double = 20.0,
@@ -19,7 +21,18 @@ data class NavigationEnginePolicy(
     val atFuelStopDistanceMeters: Double = 30.0,
     val minimumManeuverApproachMeters: Double = 80.0,
     val maneuverApproachSeconds: Double = 8.0,
-)
+) {
+    init {
+        require(offRouteMinimumDistanceMeters > 0.0)
+        require(offRouteAccuracyMultiplier > 0.0)
+        require(offRouteConsecutiveFixes > 0)
+        require(offRouteHeadingMismatchDegrees in 0.0..180.0)
+        require(offRouteHeadingMinimumSpeedMetersPerSecond >= 0.0)
+        require(offRouteHeadingMinimumDistanceMeters >= 0.0)
+        require(offRouteHeadingAccuracyMultiplier > 0.0)
+        require(offRouteBackwardsProgressMeters >= 0.0)
+    }
+}
 
 /** Pure client-side navigation state machine; it performs no Android or network work. */
 class NavigationEngine(
@@ -113,9 +126,13 @@ class NavigationEngine(
         val headingConflict = filtered.speedMetersPerSecond
             ?.let { it >= policy.offRouteHeadingMinimumSpeedMetersPerSecond } == true &&
             (match.headingDifferenceDegrees ?: 0.0) >= policy.offRouteHeadingMismatchDegrees
+        val headingConflictDistanceThreshold = maxOf(
+            policy.offRouteHeadingMinimumDistanceMeters,
+            filtered.accuracyMeters * policy.offRouteHeadingAccuracyMultiplier,
+        )
         val backwardsConflict = match.progressDeltaMeters < -policy.offRouteBackwardsProgressMeters
         val poorFix = match.distanceFromRouteMeters > offRouteThreshold ||
-            (headingConflict && match.distanceFromRouteMeters > offRouteThreshold * 0.6) ||
+            (headingConflict && match.distanceFromRouteMeters > headingConflictDistanceThreshold) ||
             backwardsConflict
         if (poorFix) {
             consecutiveOffRouteFixes += 1
@@ -146,11 +163,15 @@ class NavigationEngine(
         val remainingDwell = fuelStopDistances.count { (_, routeDistance) ->
             routeDistance + policy.atFuelStopDistanceMeters >= match.distanceAlongGeometryMeters
         } * route.timing.dwellSecondsPerRefuelingStop.toDouble()
-        val maneuverIndex = activeManeuverIndex(route, match.segmentIndex)
+        val maneuverIndex = upcomingManeuverIndex(route, match.segmentIndex)
         val currentManeuver = route.maneuvers.getOrNull(maneuverIndex)
         val nextManeuver = route.maneuvers.getOrNull(maneuverIndex + 1)
         val distanceToManeuver = currentManeuver?.let {
-            maxOf(0.0, routeMatcher.distanceAtShapeIndex(it.endShapeIndex) - match.distanceAlongGeometryMeters)
+            maxOf(
+                0.0,
+                routeMatcher.distanceAtShapeIndex(it.beginShapeIndex) -
+                    match.distanceAlongGeometryMeters,
+            )
         }
         val speed = filtered.speedMetersPerSecond ?: 0.0
         val navigationBearing = headingController.update(match.segmentBearingDegrees, speed)
@@ -212,6 +233,19 @@ class NavigationEngine(
         refreshedAtEpochMillis: Long,
         currentLocation: NavigationLocation?,
     ) {
+        val previousState = mutableState.value
+        val updateNotice = if (previousState.routeUpdateReason == RouteUpdateReason.OFF_ROUTE) {
+            previousState.totalDurationRemainingSeconds?.let { previousDuration ->
+                NavigationRouteUpdateNotice(
+                    routeId = route.routeId,
+                    previousDurationSeconds = previousDuration,
+                    updatedDurationSeconds = route.totalTripDurationSeconds,
+                    createdAtEpochMillis = refreshedAtEpochMillis,
+                )
+            }
+        } else {
+            null
+        }
         resetTracking(route)
         trackingStartedAtMillis = refreshedAtEpochMillis
         mutableState.value = NavigationState(
@@ -224,6 +258,7 @@ class NavigationEngine(
             nextManeuver = route.maneuvers.getOrNull(1),
             gpsStatus = GpsStatus.ACQUIRING,
             lastSuccessfulRouteRefreshEpochMillis = refreshedAtEpochMillis,
+            routeUpdateNotice = updateNotice,
             routeSource = NavigationRouteSource.LIVE,
             connectivity = NavigationConnectivity.ONLINE,
         )
@@ -303,8 +338,12 @@ class NavigationEngine(
         return NavigationPhase.NAVIGATING
     }
 
-    private fun activeManeuverIndex(route: NavigationRoute, segmentIndex: Int): Int {
-        val index = route.maneuvers.indexOfFirst { it.endShapeIndex > segmentIndex }
+    private fun upcomingManeuverIndex(route: NavigationRoute, segmentIndex: Int): Int {
+        // A Valhalla instruction describes the transition at begin_shape_index. Once matching has
+        // entered that outgoing segment, the transition is complete and guidance must advance to
+        // the next begin index. end_shape_index describes the travelled span after the transition;
+        // using it here pairs the next transition's distance with the previous instruction.
+        val index = route.maneuvers.indexOfFirst { it.beginShapeIndex > segmentIndex }
         return if (index >= 0) index else maxOf(0, route.maneuvers.lastIndex)
     }
 }

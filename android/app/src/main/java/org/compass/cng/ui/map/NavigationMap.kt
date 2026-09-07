@@ -530,7 +530,7 @@ private fun configureVehicleLayer(
 private fun vehicleAlignment(cameraMode: NavigationCameraMode): String =
     if (cameraMode == NavigationCameraMode.FOLLOW) "viewport" else "map"
 
-private fun localizeMapLabelsInItalian(style: Style): Int {
+internal fun localizeMapLabelsInItalian(style: Style): Int {
     var localized = 0
     style.layers.filterIsInstance<SymbolLayer>().forEach { layer ->
         if (shouldPreferItalianLabels(layer.id, layer.sourceLayer) && !layer.textField.isNull) {
@@ -541,7 +541,7 @@ private fun localizeMapLabelsInItalian(style: Style): Int {
     return localized
 }
 
-private fun filterMapPoisForNavigation(style: Style): Int {
+internal fun filterMapPoisForNavigation(style: Style): Int {
     var filtered = 0
     style.layers.filterIsInstance<SymbolLayer>().forEach { layer ->
         if (isMapPoiLayer(layer.sourceLayer)) {

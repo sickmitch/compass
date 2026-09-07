@@ -15,6 +15,7 @@ from compass.search.domain import (
 
 class NominatimPlaceSearchProvider:
     provider_name = "nominatim"
+    cacheable = True
 
     def __init__(
         self,
@@ -90,6 +91,11 @@ def _normalize_result(raw: Any) -> PlaceSearchResult:
     result_type = _optional_text(raw.get("type"))
     address = raw.get("address")
     address_text = _format_address(address) if isinstance(address, Mapping) else None
+    street_name = _address_street(address) if isinstance(address, Mapping) else None
+    house_number = (
+        _optional_text(address.get("house_number")) if isinstance(address, Mapping) else None
+    )
+    locality = _address_locality(address) if isinstance(address, Mapping) else None
     osm_type = _optional_text(raw.get("osm_type")) or "place"
     osm_id = _optional_text(raw.get("osm_id")) or str(raw.get("place_id", "unknown"))
     provider_id = f"{osm_type}:{osm_id}"
@@ -103,6 +109,9 @@ def _normalize_result(raw: Any) -> PlaceSearchResult:
         poi_name=_result_name(raw),
         provider="nominatim",
         provider_place_id=provider_id,
+        street_name=street_name,
+        house_number=house_number,
+        locality=locality,
     )
 
 
@@ -132,22 +141,37 @@ def _result_name(raw: Mapping[str, Any]) -> str | None:
 
 def _format_address(address: Mapping[str, Any]) -> str | None:
     parts: list[str] = []
-    road = _optional_text(address.get("road") or address.get("pedestrian"))
+    road = _address_street(address)
     house_number = _optional_text(address.get("house_number"))
     if road:
         parts.append(f"{road} {house_number}".strip() if house_number else road)
-    locality = _optional_text(
-        address.get("city")
-        or address.get("town")
-        or address.get("village")
-        or address.get("municipality")
-    )
+    locality = _address_locality(address)
     if locality:
         parts.append(locality)
     province = _optional_text(address.get("state") or address.get("province"))
     if province and province not in parts:
         parts.append(province)
     return ", ".join(parts) or None
+
+
+def _address_street(address: Mapping[str, Any]) -> str | None:
+    return _optional_text(
+        address.get("road")
+        or address.get("pedestrian")
+        or address.get("residential")
+        or address.get("footway")
+        or address.get("square")
+    )
+
+
+def _address_locality(address: Mapping[str, Any]) -> str | None:
+    return _optional_text(
+        address.get("city")
+        or address.get("town")
+        or address.get("village")
+        or address.get("municipality")
+        or address.get("hamlet")
+    )
 
 
 def _optional_text(value: Any) -> str | None:

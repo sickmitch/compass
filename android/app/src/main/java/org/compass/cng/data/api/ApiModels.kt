@@ -3,6 +3,7 @@ package org.compass.cng.data.api
 data class ApiPlaceSearchResults(
     val query: String,
     val results: List<ApiPlaceSearchResult>,
+    val cacheable: Boolean = true,
 )
 
 data class ApiPlaceSearchResult(

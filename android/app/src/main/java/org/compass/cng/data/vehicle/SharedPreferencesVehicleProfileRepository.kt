@@ -40,6 +40,8 @@ class SharedPreferencesVehicleProfileRepository internal constructor(
         return persist(current.copy(selectedProfileId = profileId))
     }
 
+    override fun clearSelection(): VehicleProfiles = persist(load().copy(selectedProfileId = null))
+
     override fun delete(profileId: String): VehicleProfiles {
         val current = load()
         val updatedProfiles = current.profiles.filterNot { it.id == profileId }

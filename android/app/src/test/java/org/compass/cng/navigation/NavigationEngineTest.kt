@@ -82,6 +82,48 @@ class NavigationEngineTest {
     }
 
     @Test
+    fun guidanceAdvancesAtTheManeuverBeginShapeInsteadOfItsEnd() {
+        val base = route()
+        val departure = requireNotNull(base.maneuvers.firstOrNull()).copy(
+            instruction = "Parti verso est.",
+            beginShapeIndex = 0,
+            endShapeIndex = 2,
+        )
+        val exit = departure.copy(
+            type = 20,
+            instruction = "Prendi l'uscita Roverchiara Nord.",
+            beginShapeIndex = 2,
+            endShapeIndex = 3,
+            streetNames = listOf("Roverchiara Nord"),
+        )
+        val turn = departure.copy(
+            type = 15,
+            instruction = "Svolta a sinistra su Via Cappafredda.",
+            beginShapeIndex = 3,
+            endShapeIndex = 4,
+            streetNames = listOf("Via Cappafredda"),
+        )
+        val destination = requireNotNull(base.maneuvers.lastOrNull()).copy(
+            beginShapeIndex = 4,
+            endShapeIndex = 4,
+        )
+        val engine = testEngine()
+        engine.preview(
+            base.copy(maneuvers = listOf(departure, exit, turn, destination)),
+        )
+        engine.start()
+
+        engine.updateLocation(fix(45.0, 9.0015, 1_000, 90.0))
+        assertEquals("Prendi l'uscita Roverchiara Nord.", engine.state.value.currentManeuver?.instruction)
+
+        engine.updateLocation(fix(45.0, 9.0025, 2_000, 90.0))
+        val afterExit = engine.state.value
+        assertEquals("Svolta a sinistra su Via Cappafredda.", afterExit.currentManeuver?.instruction)
+        assertEquals("Arrivo a destinazione.", afterExit.nextManeuver?.instruction)
+        assertTrue(requireNotNull(afterExit.distanceToNextManeuverMeters) in 35.0..45.0)
+    }
+
+    @Test
     fun temporaryDriftDoesNotConfirmOffRouteAndRecoveryClearsSuspicion() {
         val engine = testEngine()
         engine.preview(route())
@@ -106,6 +148,21 @@ class NavigationEngineTest {
         engine.updateLocation(fix(45.0007, 9.0015, 2_000, 90.0))
         engine.updateLocation(fix(45.0007, 9.0016, 3_000, 90.0))
         engine.updateLocation(fix(45.0007, 9.0017, 4_000, 90.0))
+
+        assertEquals(OffRouteStatus.OFF_ROUTE, engine.state.value.offRouteStatus)
+    }
+
+    @Test
+    fun nearbyWrongTurnConfirmsOffRouteFromHeadingAndRawRouteDistance() {
+        val engine = testEngine()
+        engine.preview(route())
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0010, 1_000, bearing = 90.0))
+
+        engine.updateLocation(fix(45.00011, 9.0011, 2_000, bearing = 0.0))
+        assertEquals(OffRouteStatus.SUSPECTED, engine.state.value.offRouteStatus)
+        engine.updateLocation(fix(45.00015, 9.0011, 3_000, bearing = 0.0))
+        engine.updateLocation(fix(45.00020, 9.0011, 4_000, bearing = 0.0))
 
         assertEquals(OffRouteStatus.OFF_ROUTE, engine.state.value.offRouteStatus)
     }
@@ -177,6 +234,37 @@ class NavigationEngineTest {
         engine.updateLocation(fix(45.0, 9.0030, 3_000, 90.0))
         assertEquals(null, engine.state.value.nextFuelStop)
         assertTrue(requireNotNull(engine.state.value.totalDurationRemainingSeconds) < 20.0)
+    }
+
+    @Test
+    fun successfulOffRouteReplacementRecordsTheRemainingDurationDifference() {
+        val original = route()
+        val engine = testEngine()
+        engine.preview(original)
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0010, 1_000, bearing = 90.0))
+        val previousDuration = requireNotNull(engine.state.value.totalDurationRemainingSeconds)
+        val replacement = original.copy(
+            routeId = "off-route-replacement",
+            drivingDurationSeconds = previousDuration + 300.0,
+            totalTripDurationSeconds = previousDuration + 300.0,
+            timing = original.timing.copy(
+                routeId = "off-route-replacement",
+                drivingDurationSeconds = previousDuration + 300.0,
+                remainingDrivingDurationSeconds = previousDuration + 300.0,
+                totalTripDurationSeconds = previousDuration + 300.0,
+            ),
+        )
+
+        engine.beginRouteUpdate(RouteUpdateReason.OFF_ROUTE)
+        engine.replaceRoute(replacement, refreshedAtEpochMillis = 5_000, currentLocation = null)
+
+        val notice = requireNotNull(engine.state.value.routeUpdateNotice)
+        assertEquals("off-route-replacement", notice.routeId)
+        assertEquals(previousDuration, notice.previousDurationSeconds, 0.0)
+        assertEquals(previousDuration + 300.0, notice.updatedDurationSeconds, 0.0)
+        assertEquals(300.0, notice.durationDeltaSeconds, 0.0)
+        assertEquals(5_000L, notice.createdAtEpochMillis)
     }
 
     private fun testEngine() = NavigationEngine(

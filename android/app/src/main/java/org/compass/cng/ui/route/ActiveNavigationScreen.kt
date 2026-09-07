@@ -1,6 +1,11 @@
 package org.compass.cng.ui.route
 
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +61,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -65,8 +71,93 @@ import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.NavigationState
+import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.ui.map.NavigationMap
+import org.compass.cng.ui.map.FollowMap
+
+/** GPS-follow surface shown when no destination or route exists. */
+@Composable
+internal fun RouteFreeFollowScreen(
+    location: NavigationLocation?,
+    statusMessage: String? = null,
+    onCreateTrip: () -> Unit,
+) {
+    val cameraConfig = remember { NavigationCameraConfig() }
+    var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
+    var cameraGestureRevision by rememberSaveable { mutableStateOf(0L) }
+    LaunchedEffect(cameraMode, cameraGestureRevision) {
+        if (cameraMode == NavigationCameraMode.FREE) {
+            delay(cameraConfig.freeModeAutoRecenterMillis)
+            if (cameraMode == NavigationCameraMode.FREE) {
+                cameraMode = NavigationCameraMode.FOLLOW
+            }
+        }
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        FollowMap(
+            location = location,
+            cameraMode = cameraMode,
+            cameraConfig = cameraConfig,
+            onCameraModeChange = { mode ->
+                if (mode == NavigationCameraMode.FREE) cameraGestureRevision += 1
+                cameraMode = mode
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (location == null) {
+            Card(
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .align(Alignment.TopCenter)
+                    .padding(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                ),
+            ) {
+                Text(
+                    statusMessage ?: "Ricerca del segnale GPS…",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .align(Alignment.BottomEnd)
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Surface(
+                shape = CircleShape,
+                tonalElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            ) {
+                TextButton(
+                    onClick = onCreateTrip,
+                    modifier = Modifier.testTag("follow_create_trip"),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) { Text("Crea viaggio") }
+            }
+            if (cameraMode != NavigationCameraMode.FOLLOW) {
+                Surface(
+                    shape = CircleShape,
+                    tonalElevation = 6.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                ) {
+                    TextButton(
+                        onClick = { cameraMode = NavigationCameraMode.FOLLOW },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) { Text("Ricentra") }
+                }
+            }
+        }
+    }
+}
 
 /** Automotive navigation surface. Routing and progress remain authoritative in NavigationState. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,20 +189,48 @@ internal fun ActiveNavigationScreen(
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
     var tripSummaryHeightPixels by remember { mutableIntStateOf(0) }
+    var routeUpdateNoticeHeightPixels by remember { mutableIntStateOf(0) }
+    var routeUpdateNoticeVisible by remember { mutableStateOf(false) }
     var speedCompliance by remember(activeRoute.routeId) {
         mutableStateOf(SpeedLimitComplianceStatus.UNAVAILABLE)
     }
+    val routeUpdateNotice = state.routeUpdateNotice
+    val routeUpdateNoticeUi = routeUpdateNotice?.toUiModel()
+    LaunchedEffect(routeUpdateNotice) {
+        routeUpdateNoticeVisible = false
+        routeUpdateNotice?.let { notice ->
+            val remainingMillis = routeUpdateNoticeRemainingMillis(
+                notice = notice,
+                nowEpochMillis = System.currentTimeMillis(),
+            )
+            if (remainingMillis > 0L) {
+                routeUpdateNoticeVisible = true
+                Log.i(
+                    NAVIGATION_UI_LOG_TAG,
+                    "route_update_notice visible=true route=${notice.routeId} " +
+                        "duration_delta_seconds=${notice.durationDeltaSeconds.toLong()}",
+                )
+                delay(remainingMillis)
+                routeUpdateNoticeVisible = false
+                Log.i(NAVIGATION_UI_LOG_TAG, "route_update_notice visible=false reason=timeout")
+            }
+        }
+    }
     val density = LocalDensity.current
-    val tripSummaryObstructionPixels = if (showTripSummary) {
-        tripSummaryHeightPixels + WindowInsets.safeDrawing.getBottom(density)
+    val bottomPanelHeightPixels =
+        (if (showTripSummary) tripSummaryHeightPixels else 0) +
+            (if (routeUpdateNoticeVisible) routeUpdateNoticeHeightPixels else 0)
+    val bottomObstructionPixels = if (bottomPanelHeightPixels > 0) {
+        bottomPanelHeightPixels + WindowInsets.safeDrawing.getBottom(density)
     } else {
         0
     }
-    LaunchedEffect(showTripSummary, tripSummaryObstructionPixels) {
-        if (showTripSummary && tripSummaryObstructionPixels > 0) {
+    LaunchedEffect(showTripSummary, routeUpdateNoticeVisible, bottomObstructionPixels) {
+        if (bottomObstructionPixels > 0) {
             Log.i(
                 NAVIGATION_UI_LOG_TAG,
-                "trip_summary_layout bottom_obstruction_px=$tripSummaryObstructionPixels",
+                "bottom_panel_layout obstruction_px=$bottomObstructionPixels " +
+                    "trip_visible=$showTripSummary reroute_visible=$routeUpdateNoticeVisible",
             )
         }
     }
@@ -161,7 +280,10 @@ internal fun ActiveNavigationScreen(
         NavigationDeveloperScreen(
             state = state,
             onRequestRouteUpdate = onRequestRouteUpdate,
-            onSimulateOffRoute = onSimulateOffRoute,
+            onSimulateOffRoute = {
+                showDeveloperTools = false
+                onSimulateOffRoute()
+            },
             onClose = { showDeveloperTools = false },
         )
     }
@@ -185,7 +307,7 @@ internal fun ActiveNavigationScreen(
             state = state,
             cameraMode = cameraMode,
             cameraConfig = cameraConfig,
-            bottomObstructionPixels = tripSummaryObstructionPixels,
+            bottomObstructionPixels = bottomObstructionPixels,
             onCameraModeChange = { mode ->
                 if (mode == NavigationCameraMode.FREE) {
                     cameraGestureRevision += 1
@@ -243,6 +365,26 @@ internal fun ActiveNavigationScreen(
                     },
                 )
             }
+            routeUpdateNoticeUi?.let { notice ->
+                AnimatedVisibility(
+                    visible = routeUpdateNoticeVisible,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { routeUpdateNoticeHeightPixels = it.height },
+                    ) {
+                        RouteUpdateNoticeCard(
+                            notice = notice,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
             if (showTripSummary) {
                 Box(
                     modifier = Modifier
@@ -259,6 +401,57 @@ internal fun ActiveNavigationScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RouteUpdateNoticeCard(
+    notice: RouteUpdateNoticeUiModel,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .testTag("navigation_route_update_notice")
+            .clearAndSetSemantics { contentDescription = notice.accessibilityDescription },
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(
+                text = "Percorso alternativo calcolato",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                DrivingSummaryValue("Prima", notice.previousDuration)
+                DrivingSummaryValue("Ora", notice.updatedDuration)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = notice.durationDifference,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (notice.addsTime) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = "Differenza",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -439,31 +632,39 @@ private fun JunctionSignPanel(
         sign.exitName,
         sign.toward?.let { "verso $it" },
     ).joinToString(" · ")
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("navigation_junction_sign"),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            if (heading.isNotBlank()) {
-                Text(
-                    text = heading,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (destination.isNotBlank()) {
-                Text(
-                    text = destination,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        Surface(
+            modifier = Modifier.testTag("navigation_junction_sign"),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (heading.isNotBlank()) {
+                    Text(
+                        text = heading,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (destination.isNotBlank()) {
+                    Text(
+                        text = destination,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

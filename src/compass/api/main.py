@@ -9,6 +9,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from compass import __version__
+from compass.api.auth import (
+    ApiAuthenticationError,
+    require_api_user,
+)
+from compass.api.auth import (
+    router as auth_router,
+)
+from compass.api.contracts import ErrorResponse
 from compass.api.predictive import router as predictive_router
 from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
@@ -32,13 +40,49 @@ app = FastAPI(
     version=__version__,
     description="CNG-aware navigation API foundations for Italy.",
 )
-app.include_router(routes_router)
-app.include_router(search_router)
-app.include_router(ranking_router)
-app.include_router(predictive_router)
-app.include_router(stations_router)
-app.include_router(system_router)
-app.include_router(traffic_router)
+protected_api_dependencies = [Depends(require_api_user)]
+protected_api_responses = {
+    401: {
+        "description": "Missing or invalid Compass API credentials.",
+        "model": ErrorResponse,
+    }
+}
+app.include_router(auth_router)
+app.include_router(
+    routes_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    search_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    ranking_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    predictive_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    stations_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    system_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    traffic_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
 
 
 @app.exception_handler(RequestValidationError)
@@ -48,6 +92,20 @@ async def request_validation_error(
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"code": "invalid_request", "message": "The request payload is invalid."},
+    )
+
+
+@app.exception_handler(ApiAuthenticationError)
+async def api_authentication_error(
+    _request: object, _error: ApiAuthenticationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={"WWW-Authenticate": 'Basic realm="Compass API", charset="UTF-8"'},
+        content={
+            "code": "invalid_credentials",
+            "message": "Valid Compass API credentials are required.",
+        },
     )
 
 

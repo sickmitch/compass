@@ -52,6 +52,8 @@ interface VehicleProfileRepository {
 
     fun select(profileId: String): VehicleProfiles
 
+    fun clearSelection(): VehicleProfiles
+
     fun delete(profileId: String): VehicleProfiles
 }
 
@@ -74,6 +76,11 @@ class InMemoryVehicleProfileRepository(
     override fun select(profileId: String): VehicleProfiles {
         require(value.profiles.any { it.id == profileId })
         value = value.copy(selectedProfileId = profileId)
+        return value
+    }
+
+    override fun clearSelection(): VehicleProfiles {
+        value = value.copy(selectedProfileId = null)
         return value
     }
 

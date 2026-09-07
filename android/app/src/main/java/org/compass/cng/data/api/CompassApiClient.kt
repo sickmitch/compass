@@ -12,27 +12,50 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DEFAULT_CNG_REFUEL_DWELL_SECONDS
+import org.compass.cng.domain.server.ServerConnection
 
 class CompassApiClient(
-    baseUrl: String,
+    private val connectionProvider: () -> ServerConnection,
     private val httpClient: OkHttpClient,
     private val json: Json,
     private val eventLogger: (String) -> Unit = {},
     private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
-    private val apiBaseUrl = baseUrl.toHttpUrl()
-    private val routeUrl = resolve("api/v1/routes")
-    private val placeSearchUrl = resolve("api/v1/places/search")
-    private val rankedCandidatesUrl = resolve("api/v1/cng/ranked-candidates")
-    private val predictiveCandidatesUrl = resolve("api/v1/cng/predictive-candidates")
-    private val routeWithCngStopUrl = resolve("api/v1/routes/with-cng-stop")
-    private val routeWithCngItineraryUrl = resolve("api/v1/routes/with-cng-itinerary")
+    constructor(
+        baseUrl: String,
+        httpClient: OkHttpClient,
+        json: Json,
+        eventLogger: (String) -> Unit = {},
+        monotonicNanos: () -> Long = System::nanoTime,
+    ) : this(
+        connectionProvider = {
+            ServerConnection.create(
+                baseUrl = baseUrl,
+                allowInsecureHttp = baseUrl.trim().startsWith("http://", ignoreCase = true),
+            )
+        },
+        httpClient = httpClient,
+        json = json,
+        eventLogger = eventLogger,
+        monotonicNanos = monotonicNanos,
+    )
+
+    private val apiBaseUrl: HttpUrl get() = connectionProvider().baseUrl.toHttpUrl()
+    private val routeUrl: HttpUrl get() = resolve("api/v1/routes")
+    private val placeSearchUrl: HttpUrl get() = resolve("api/v1/places/search")
+    private val rankedCandidatesUrl: HttpUrl get() = resolve("api/v1/cng/ranked-candidates")
+    private val predictiveCandidatesUrl: HttpUrl
+        get() = resolve("api/v1/cng/predictive-candidates")
+    private val routeWithCngStopUrl: HttpUrl get() = resolve("api/v1/routes/with-cng-stop")
+    private val routeWithCngItineraryUrl: HttpUrl
+        get() = resolve("api/v1/routes/with-cng-itinerary")
     private val predictiveHttpClient = httpClient.newBuilder()
         .readTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -186,7 +209,7 @@ class CompassApiClient(
     ): ResponseDto = withContext(Dispatchers.IO) {
         val endpoint = url.encodedPath
         val startedAtNanos = monotonicNanos()
-        val request = Request.Builder()
+        val request = authenticatedRequestBuilder()
             .url(url)
             .post(requestJson.toRequestBody(JSON_MEDIA_TYPE))
             .build()
@@ -250,6 +273,18 @@ class CompassApiClient(
     private fun elapsedMillis(startedAtNanos: Long): Long =
         ((monotonicNanos() - startedAtNanos).coerceAtLeast(0L) / NANOS_PER_MILLISECOND)
 
+    private fun authenticatedRequestBuilder(): Request.Builder {
+        val connection = connectionProvider()
+        return Request.Builder().apply {
+            if (connection.hasCredentials) {
+                header(
+                    "Authorization",
+                    Credentials.basic(connection.username, connection.password, Charsets.UTF_8),
+                )
+            }
+        }
+    }
+
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         const val NANOS_PER_MILLISECOND = 1_000_000L
@@ -260,7 +295,7 @@ class CompassApiClient(
         withContext(Dispatchers.IO) {
             val endpoint = url.encodedPath
             val startedAtNanos = monotonicNanos()
-            val request = Request.Builder().url(url).get().build()
+            val request = authenticatedRequestBuilder().url(url).get().build()
             eventLogger("request started: method=GET endpoint=$endpoint")
             try {
                 httpClient.newCall(request).execute().use { response ->
@@ -304,6 +339,7 @@ class CompassApiClient(
 @Serializable
 private data class PlaceSearchResponseDto(
     val query: String,
+    val cacheable: Boolean = true,
     val results: List<PlaceSearchResultDto>,
 )
 
@@ -884,6 +920,7 @@ private fun Coordinate.toDto(): CoordinateDto = CoordinateDto(
 private fun PlaceSearchResponseDto.toApiPlaceSearchResults(): ApiPlaceSearchResults =
     ApiPlaceSearchResults(
         query = query,
+        cacheable = cacheable,
         results = results.map { result ->
             require(result.resultId.isNotBlank() && result.displayName.isNotBlank()) {
                 "place result identity must not be blank"

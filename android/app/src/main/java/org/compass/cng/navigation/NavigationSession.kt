@@ -9,9 +9,11 @@ class NavigationSession(
     private val eventLogger: (String) -> Unit = {},
 ) {
     val state: StateFlow<NavigationState> = engine.state
+    private val restoredCache = routeStore.load()
+    val restoredNavigationWasActive: Boolean = restoredCache?.navigationWasActive == true
 
     init {
-        routeStore.load()?.let { cached ->
+        restoredCache?.let { cached ->
             engine.preview(
                 route = cached.route,
                 source = NavigationRouteSource.CACHE,

@@ -4,6 +4,22 @@ The runtime contract is [openapi.json](openapi.json). All distances are metres, 
 timestamps ISO 8601, and CNG prices explicit unit prices (normally EUR/kg). Unknown request fields
 are rejected. Errors use `{"code":"...","message":"..."}` except dependency-state health responses.
 
+## Authentication
+
+When `API_AUTH_ENABLED=true`, every `/api/v1` resource requires HTTP Basic authentication. Send the
+configured username and password on every request; use HTTPS so those credentials and route data are
+encrypted in transit. Missing or incorrect credentials return HTTP `401` with code
+`invalid_credentials` and a `WWW-Authenticate: Basic` challenge.
+
+```http
+GET /api/v1/auth/check
+Authorization: Basic <credentials>
+```
+
+The check response confirms whether authentication is enabled without echoing either credential.
+`/health/live` and `/health/ready` remain unauthenticated so Docker and a reverse proxy can monitor
+the service. Their payloads contain operational status only.
+
 ## Place search
 
 ```http
@@ -13,12 +29,22 @@ GET /api/v1/places/search?q=Duomo%20di%20Milano&limit=8&language=it
 The endpoint accepts addresses, cities/localities, POI/business/place names and decimal coordinate
 pairs. Text is resolved by the configured server-side `PlaceSearchProvider`; Android never talks to
 that provider directly. Coordinate input such as `45.4642, 9.19` is normalized locally even when
-external geocoding is disabled.
+external geocoding is disabled. For a street address, put the civic in its own comma-separated
+segment: `Via Cappafredda, 12, Roverchiara`. Only that explicit segment is interpreted as a civic,
+so route numbers such as `SS 434` are not mistaken for house numbers.
 
 Each result contains `display_name`, nullable normalized `address`, `location`, `kind` (`address`,
 `locality`, `poi`, `coordinate` or `unknown`), optional `category`/`poi_name`, and provider identity.
+The top-level `cacheable` flag tells clients whether that result ordering may be persisted.
 Provider outages return `503 search_unavailable`; invalid upstream data returns
 `502 search_provider_error` without raw provider details.
+
+With `GEOCODING_PROVIDER=nominatim_google`, all returned records and coordinates still come from
+Nominatim. Google Places API (New) is queried concurrently and used only during the request to
+corroborate POI name/proximity or exact civic/street/locality/proximity. Explicitly conflicting
+civics are omitted. Google failures degrade to query-ranked Nominatim output and emit a bounded
+warning without credentials. Because Google can influence ordering, these responses have
+`cacheable=false`; Google text, coordinates and identifiers are never returned or stored.
 
 ## Station detail
 

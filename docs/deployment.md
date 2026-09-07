@@ -26,6 +26,52 @@ Edit `.env` so:
 - `HTTP_USER_AGENT` includes a meaningful application/operator contact;
 - no secret is committed back to Git.
 
+## External API access and authentication
+
+The Compose API port remains bound to `127.0.0.1:8000` by default. If the operator's ingress runs on
+the same host, route its HTTPS virtual host to that loopback address. Set
+`API_BIND_ADDRESS=0.0.0.0` only when the chosen ingress must reach the published port through another
+interface, and restrict that port with the host firewall. Compass does not create DNS records,
+certificates or ingress rules.
+
+Before exposing the service, create dedicated mobile credentials in the server's uncommitted
+`.env`. A hexadecimal password avoids Compose interpolation surprises:
+
+```bash
+openssl rand -hex 32
+```
+
+```dotenv
+API_AUTH_ENABLED=true
+API_AUTH_USERNAME=compass-mobile
+API_AUTH_PASSWORD=<generated-value>
+API_BIND_ADDRESS=127.0.0.1
+API_PORT=8000
+```
+
+Rebuild and recreate the API, then verify the boundary locally. Enter the password interactively so
+it is not returned in diagnostics:
+
+```bash
+docker compose build api
+docker compose up -d api
+curl --fail --silent --show-error http://127.0.0.1:8000/health/live
+curl --silent --output /tmp/compass-auth-missing.json \
+  --write-out '%{http_code}\n' http://127.0.0.1:8000/api/v1/auth/check
+read -r -p 'Compass API username: ' COMPASS_CHECK_USER
+read -r -s -p 'Compass API password: ' COMPASS_CHECK_PASSWORD
+printf '\n'
+curl --fail --silent --show-error \
+  --user "$COMPASS_CHECK_USER:$COMPASS_CHECK_PASSWORD" \
+  http://127.0.0.1:8000/api/v1/auth/check
+unset COMPASS_CHECK_USER COMPASS_CHECK_PASSWORD
+```
+
+The unauthenticated request must print `401`; the authenticated response must contain
+`"authenticated":true` and never contains the password. HTTPS termination belongs at the operator's
+ingress. HTTP is supported for constrained/private deployments, but Basic credentials are then sent
+without transport encryption and the Android app requires an explicit warning acknowledgement.
+
 ## Phase 0 bootstrap validation
 
 ```bash
@@ -1006,6 +1052,57 @@ non-cumulative multi-stop timing and missing chronological dwell in subsequent E
 half verifies client requests, CNG-stop preservation across automatic rerouting, replacement of a
 simulated invalid stop, foreground lifecycle continuity and teardown. Human screenshots remain
 mandatory; automated output alone does not accept Phase 12.
+
+### Optional Google Places (New) corroboration
+
+Keep the key only in the server `.env`; it is never an Android build setting. Configure:
+
+```dotenv
+GEOCODING_PROVIDER=nominatim_google
+GOOGLE_PLACES_API_KEY=replace-with-a-server-restricted-key
+GOOGLE_PLACES_URL=https://places.googleapis.com/v1
+GOOGLE_PLACES_REGION_CODE=IT
+GOOGLE_PLACES_CORROBORATION_RADIUS_METERS=75
+```
+
+The key must have Places API (New) enabled and should be restricted to the server and that API.
+Recreate the API after changing environment values:
+
+```bash
+cd ~/docker/compass
+docker compose build api
+docker compose up -d --force-recreate api
+docker compose exec -T api python -c 'from compass.config import get_settings; s=get_settings(); print({"provider": s.geocoding_provider, "google_key_configured": bool(s.google_places_api_key.get_secret_value()), "radius_m": s.google_places_corroboration_radius_meters})'
+```
+
+The command prints only whether a key exists. Test an address and a POI through the authenticated
+public API:
+
+```bash
+curl --fail --silent --show-error --get \
+  --user "$COMPASS_CHECK_USER:$COMPASS_CHECK_PASSWORD" \
+  --data-urlencode 'q=Via Cappafredda, 12, Roverchiara' \
+  --data 'limit=8' \
+  https://compass.sickmitch.cc/api/v1/places/search | jq
+
+curl --fail --silent --show-error --get \
+  --user "$COMPASS_CHECK_USER:$COMPASS_CHECK_PASSWORD" \
+  --data-urlencode 'q=Duomo di Milano' \
+  --data 'limit=8' \
+  https://compass.sickmitch.cc/api/v1/places/search | jq
+```
+
+Both responses must have `cacheable=false`; every visible result must have
+`provider="nominatim"`. The address result must never present a civic explicitly different from
+`12`. A successful request logs `Place corroboration completed` with result counts only. If
+corroboration fails, search still returns Nominatim results and the API log contains the bounded
+warning `Place corroborator unavailable` without a key or upstream payload. Inspect only those
+events with:
+
+```bash
+docker compose logs --since=10m --no-color api | \
+  grep -E 'Place corroboration completed|Place corroborator unavailable'
+```
 
 ## Phase 13 degraded/offline navigation validation
 

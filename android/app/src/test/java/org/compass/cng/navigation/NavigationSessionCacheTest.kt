@@ -18,10 +18,22 @@ class NavigationSessionCacheTest {
         val restored = NavigationSession(routeStore = store)
 
         assertEquals(NavigationPhase.ROUTE_PREVIEW, restored.state.value.phase)
+        assertEquals(true, restored.restoredNavigationWasActive)
         assertEquals(NavigationRouteSource.CACHE, restored.state.value.routeSource)
         assertEquals("offline-route", restored.state.value.route?.routeId)
         restored.stopToPreview()
         assertNull(store.cached)
+    }
+
+    @Test
+    fun restoredPreviewReportsThatNavigationWasNotActive() {
+        val store = MemoryRouteStore()
+        NavigationSession(routeStore = store).preview(route())
+
+        val restored = NavigationSession(routeStore = store)
+
+        assertEquals(false, restored.restoredNavigationWasActive)
+        assertEquals(NavigationPhase.ROUTE_PREVIEW, restored.state.value.phase)
     }
 
     @Test

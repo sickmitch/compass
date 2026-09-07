@@ -4,7 +4,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from compass.navigation.domain import DEFAULT_CNG_REFUEL_DWELL_SECONDS
@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://compass:compass-local-only@localhost:5432/compass"
     log_level: str = "INFO"
+    api_auth_enabled: bool = False
+    api_auth_username: str = ""
+    api_auth_password: SecretStr = SecretStr("")
     http_timeout_seconds: float = Field(default=180, gt=0)
     http_user_agent: str = "compass-cng/0.1.0"
     mimit_stations_url: str = (
@@ -35,8 +38,12 @@ class Settings(BaseSettings):
     valhalla_route_language: str = Field(default="it-IT", pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$")
     valhalla_matrix_batch_size: int = Field(default=40, gt=0, le=100)
     valhalla_speed_limits_enabled: bool = True
-    geocoding_provider: Literal["none", "nominatim"] = "nominatim"
+    geocoding_provider: Literal["none", "nominatim", "nominatim_google"] = "nominatim"
     nominatim_url: str = "https://nominatim.openstreetmap.org"
+    google_places_url: str = "https://places.googleapis.com/v1"
+    google_places_api_key: SecretStr = SecretStr("")
+    google_places_region_code: str = Field(default="IT", pattern=r"^[A-Z]{2}$")
+    google_places_corroboration_radius_meters: float = Field(default=75, gt=0, le=500)
     geocoding_timeout_seconds: float = Field(default=15, gt=0)
     geocoding_country_codes: str = Field(default="it", pattern=r"^[a-z]{2}(,[a-z]{2})*$")
     geocoding_result_limit: int = Field(default=8, ge=1, le=20)
@@ -129,6 +136,11 @@ class Settings(BaseSettings):
             raise ValueError("valhalla_url must include a host")
         return normalized
 
+    @field_validator("api_auth_username")
+    @classmethod
+    def normalize_api_auth_username(cls, value: str) -> str:
+        return value.strip()
+
     @field_validator("tomtom_traffic_url")
     @classmethod
     def validate_optional_tomtom_url(cls, value: str) -> str:
@@ -148,6 +160,15 @@ class Settings(BaseSettings):
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("nominatim_url must use http or https and include a host")
+        return normalized
+
+    @field_validator("google_places_url")
+    @classmethod
+    def validate_google_places_url(cls, value: str) -> str:
+        normalized = value.rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("google_places_url must use https and include a host")
         return normalized
 
     @field_validator("traffic_updater_url")
@@ -200,6 +221,43 @@ class Settings(BaseSettings):
         )
         if not isclose(total, 1.0, abs_tol=1e-9):
             raise ValueError("CNG ranking weights must sum to one")
+        return self
+
+    @model_validator(mode="after")
+    def validate_api_authentication(self) -> "Settings":
+        if self.api_auth_enabled and (
+            not self.api_auth_username.strip()
+            or not self.api_auth_password.get_secret_value()
+        ):
+            raise ValueError(
+                "api_auth_username and api_auth_password are required when API auth is enabled"
+            )
+        if self.api_auth_enabled:
+            password = self.api_auth_password.get_secret_value()
+            if (
+                ":" in self.api_auth_username
+                or not self.api_auth_username.isascii()
+                or any(
+                    ord(character) < 32 or ord(character) > 126
+                    for character in self.api_auth_username
+                )
+                or not password.isascii()
+                or any(ord(character) < 32 or ord(character) > 126 for character in password)
+            ):
+                raise ValueError(
+                    "API auth credentials must use printable ASCII and username cannot contain ':'"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def validate_google_places_configuration(self) -> "Settings":
+        if (
+            self.geocoding_provider == "nominatim_google"
+            and not self.google_places_api_key.get_secret_value()
+        ):
+            raise ValueError(
+                "google_places_api_key is required when geocoding_provider is nominatim_google"
+            )
         return self
 
     @model_validator(mode="after")

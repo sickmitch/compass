@@ -13,7 +13,7 @@ from compass.search.domain import (
     PlaceSearchRequest,
     PlaceSearchUnavailableError,
 )
-from compass.search.service import search_places
+from compass.search.service import parse_coordinate_query, search_places
 
 router = APIRouter(prefix="/api/v1", tags=["place-search"])
 
@@ -37,6 +37,7 @@ class PlaceSearchResultResponse(StrictModel):
 
 class PlaceSearchResponse(StrictModel):
     query: str
+    cacheable: bool
     results: list[PlaceSearchResultResponse]
 
 
@@ -68,6 +69,10 @@ async def place_search(
         return error_response(502, "search_provider_error", "Place search returned invalid data.")
     return PlaceSearchResponse(
         query=q,
+        cacheable=(
+            parse_coordinate_query(q) is not None
+            or bool(getattr(provider, "cacheable", True))
+        ),
         results=[
             PlaceSearchResultResponse(
                 result_id=result.result_id,

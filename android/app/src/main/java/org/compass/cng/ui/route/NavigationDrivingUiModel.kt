@@ -58,25 +58,27 @@ internal enum class NavigationStatusLevel {
 
 internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
     val activeRoute = requireNotNull(route)
-    return NavigationDrivingUiModel(
-        maneuverVisual = maneuverVisual(currentManeuver?.type, currentManeuver?.instruction),
-        roundaboutExitCount = currentManeuver?.roundaboutExitCount?.takeIf { it > 0 },
-        distanceToManeuver = distanceToNextManeuverMeters?.let(::formatDistance) ?: "—",
-        primaryInstruction = currentManeuver?.instruction ?: "Prosegui sul percorso",
-        targetRoad = currentRoadName
-            ?: currentManeuver?.streetNames?.firstOrNull(),
-        junctionSign = currentManeuver?.sign?.let { sign ->
-            NavigationJunctionSignUiModel(
-                exitNumber = sign.exitNumberElements.joinSignText(),
-                branches = sign.exitBranchElements.joinSignText(),
-                toward = sign.exitTowardElements.joinSignText(),
-                exitName = sign.exitNameElements.joinSignText(),
-            ).takeUnless { model ->
-                listOf(model.exitNumber, model.branches, model.toward, model.exitName).all {
-                    it.isNullOrBlank()
-                }
+    val maneuver = currentManeuver
+    val junctionSign = maneuver?.sign?.let { sign ->
+        NavigationJunctionSignUiModel(
+            exitNumber = sign.exitNumberElements.joinSignText(),
+            branches = sign.exitBranchElements.joinSignText(),
+            toward = sign.exitTowardElements.joinSignText(),
+            exitName = sign.exitNameElements.joinSignText(),
+        ).takeUnless { model ->
+            listOf(model.exitNumber, model.branches, model.toward, model.exitName).all {
+                it.isNullOrBlank()
             }
-        },
+        }
+    }
+    val maneuverRoad = currentRoadName ?: maneuver?.streetNames?.firstOrNull()
+    return NavigationDrivingUiModel(
+        maneuverVisual = maneuverVisual(maneuver?.type, maneuver?.instruction),
+        roundaboutExitCount = maneuver?.roundaboutExitCount?.takeIf { it > 0 },
+        distanceToManeuver = distanceToNextManeuverMeters?.let(::formatDistance) ?: "—",
+        primaryInstruction = maneuver?.instruction ?: "Prosegui sul percorso",
+        targetRoad = maneuverRoad?.takeUnless { junctionSign?.repeats(it) == true },
+        junctionSign = junctionSign,
         followingInstruction = nextManeuver?.instruction,
         followingManeuverVisual = nextManeuver?.let {
             maneuverVisual(it.type, it.instruction)
@@ -173,6 +175,16 @@ internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
         },
     )
 }
+
+private fun NavigationJunctionSignUiModel.repeats(label: String): Boolean {
+    val labelKey = label.signComparisonKey()
+    return labelKey.isNotEmpty() && listOf(branches, toward, exitName)
+        .filterNotNull()
+        .any { it.signComparisonKey() == labelKey }
+}
+
+private fun String.signComparisonKey(): String = lowercase(Locale.ROOT)
+    .filter(Char::isLetterOrDigit)
 
 private fun List<org.compass.cng.domain.model.ManeuverSignElement>.joinSignText(): String? =
     asSequence()

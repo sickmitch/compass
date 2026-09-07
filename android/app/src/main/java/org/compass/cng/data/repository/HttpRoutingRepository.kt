@@ -81,11 +81,17 @@ class HttpRoutingRepository(
                             provider = result.provider,
                         )
                     },
+                    cacheable = response.cacheable,
                     source = PlaceSearchSource.LIVE,
                 )
             }
-            placeSearchCache.put(live)
-            eventLogger("place search cached: result_count=${live.results.size}")
+            if (live.cacheable) {
+                placeSearchCache.put(live)
+            }
+            eventLogger(
+                "place search completed: result_count=${live.results.size} " +
+                    "cacheable=${live.cacheable}",
+            )
             live
         } catch (error: RoutePreviewException) {
             if (error.failure in setOf(RoutePreviewFailure.NETWORK, RoutePreviewFailure.SERVER)) {
@@ -455,6 +461,7 @@ class HttpRoutingRepository(
             throw error
         } catch (error: ApiClientException.Http) {
             val failure = when (error.code) {
+                "invalid_credentials" -> RoutePreviewFailure.AUTHENTICATION
                 "route_not_found" -> RoutePreviewFailure.NO_ROUTE
                 "station_not_found" -> RoutePreviewFailure.STATION_NOT_FOUND
                 "station_inactive", "station_location_unavailable" -> {

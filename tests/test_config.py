@@ -16,7 +16,64 @@ def test_phase12_search_and_refuelling_defaults_are_explicit() -> None:
     assert settings.geocoding_provider == "nominatim"
     assert settings.geocoding_country_codes == "it"
     assert settings.geocoding_result_limit == 8
+    assert settings.google_places_api_key.get_secret_value() == ""
+    assert settings.google_places_corroboration_radius_meters == 75
     assert settings.cng_refuel_dwell_seconds == 20 * 60
+
+
+def test_google_corroboration_requires_an_api_key() -> None:
+    with pytest.raises(ValidationError, match="google_places_api_key"):
+        Settings(_env_file=None, geocoding_provider="nominatim_google")
+
+    settings = Settings(
+        _env_file=None,
+        geocoding_provider="nominatim_google",
+        google_places_api_key="test-secret",
+    )
+    assert settings.geocoding_provider == "nominatim_google"
+    assert settings.google_places_api_key.get_secret_value() == "test-secret"
+
+
+def test_api_authentication_is_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.api_auth_enabled is False
+    assert settings.api_auth_username == ""
+    assert settings.api_auth_password.get_secret_value() == ""
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [("", "secret"), ("compass", "")],
+)
+def test_enabled_api_authentication_requires_both_credentials(
+    username: str,
+    password: str,
+) -> None:
+    with pytest.raises(ValidationError, match="api_auth_username and api_auth_password"):
+        Settings(
+            _env_file=None,
+            api_auth_enabled=True,
+            api_auth_username=username,
+            api_auth_password=password,
+        )
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [("mobile:user", "secret"), ("mòbile", "secret"), ("mobile", "segrèto")],
+)
+def test_api_authentication_rejects_credentials_outside_basic_ascii_contract(
+    username: str,
+    password: str,
+) -> None:
+    with pytest.raises(ValidationError, match="printable ASCII"):
+        Settings(
+            _env_file=None,
+            api_auth_enabled=True,
+            api_auth_username=username,
+            api_auth_password=password,
+        )
 
 
 def test_refuelling_dwell_is_configurable() -> None:

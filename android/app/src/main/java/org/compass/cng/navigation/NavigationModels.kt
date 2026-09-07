@@ -110,6 +110,23 @@ data class NavigationRoute(
     )
 }
 
+data class NavigationRouteUpdateNotice(
+    val routeId: String,
+    val previousDurationSeconds: Double,
+    val updatedDurationSeconds: Double,
+    val createdAtEpochMillis: Long,
+) {
+    init {
+        require(routeId.isNotBlank())
+        require(previousDurationSeconds.isFinite() && previousDurationSeconds >= 0.0)
+        require(updatedDurationSeconds.isFinite() && updatedDurationSeconds >= 0.0)
+        require(createdAtEpochMillis >= 0L)
+    }
+
+    val durationDeltaSeconds: Double
+        get() = updatedDurationSeconds - previousDurationSeconds
+}
+
 data class NavigationState(
     val phase: NavigationPhase = NavigationPhase.IDLE,
     val route: NavigationRoute? = null,
@@ -131,6 +148,7 @@ data class NavigationState(
     val routeUpdateReason: RouteUpdateReason? = null,
     val routeUpdateFailure: RouteUpdateFailure? = null,
     val lastSuccessfulRouteRefreshEpochMillis: Long? = null,
+    val routeUpdateNotice: NavigationRouteUpdateNotice? = null,
     val lastSpokenInstruction: String? = null,
     val rejectedLocationCount: Int = 0,
     val routeSource: NavigationRouteSource = NavigationRouteSource.LIVE,
@@ -148,6 +166,7 @@ data class NavigationState(
 
     val currentSpeedLimitKph: Int?
         get() {
+            if (offRouteStatus != OffRouteStatus.ON_ROUTE) return null
             val segmentIndex = currentRouteSegmentIndex ?: return null
             return route?.speedLimits
                 ?.firstOrNull { segmentIndex in it.beginShapeIndex until it.endShapeIndex }

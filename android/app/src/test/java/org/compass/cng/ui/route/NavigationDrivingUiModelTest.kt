@@ -75,6 +75,45 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
+    fun omitsManeuverRoadWhenTheJunctionSignAlreadyShowsIt() {
+        val road = "Strada Statale 434 Transpolesana"
+        val maneuver = requireNotNull(sampleState().currentManeuver).copy(
+            type = 20,
+            instruction = "Prendi l'uscita $road.",
+            streetNames = listOf(road),
+            sign = ManeuverSign(
+                exitBranchElements = listOf(ManeuverSignElement(road)),
+            ),
+        )
+        val state = sampleState().copy(
+            currentManeuver = maneuver,
+            currentRoadName = road,
+        )
+
+        val ui = state.toDrivingUiModel()
+
+        assertEquals(null, ui.targetRoad)
+        assertEquals(road, ui.junctionSign?.branches)
+    }
+
+    @Test
+    fun retainsManeuverRoadWhenTheJunctionSignAddsDifferentInformation() {
+        val maneuver = requireNotNull(sampleState().currentManeuver).copy(
+            type = 20,
+            sign = ManeuverSign(
+                exitBranchElements = listOf(ManeuverSignElement("A14")),
+                exitTowardElements = listOf(ManeuverSignElement("Bologna")),
+            ),
+        )
+        val state = sampleState().copy(
+            currentManeuver = maneuver,
+            currentRoadName = "Autostrada del Sole",
+        )
+
+        assertEquals("Autostrada del Sole", state.toDrivingUiModel().targetRoad)
+    }
+
+    @Test
     fun exposesGraphSpeedLimitOnlyForTheCurrentlyMatchedShapeSegment() {
         val initial = sampleState()
         val route = requireNotNull(initial.route).copy(

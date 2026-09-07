@@ -82,6 +82,75 @@ class HttpRoutingRepositoryTest {
     }
 
     @Test
+    fun doesNotPersistProviderResultsMarkedNonCacheable() = runTest {
+        var cacheWrites = 0
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    """
+                    {
+                      "query":"Via Roma 1, Milano",
+                      "cacheable":false,
+                      "results":[{
+                        "result_id":"nominatim:1",
+                        "display_name":"Via Roma 1, Milano",
+                        "address":"Via Roma 1, Milano",
+                        "location":{"latitude":45.46,"longitude":9.19},
+                        "kind":"address",
+                        "category":"house",
+                        "poi_name":null,
+                        "provider":"nominatim",
+                        "provider_place_id":"node:1"
+                      }]
+                    }
+                    """.trimIndent(),
+                ),
+        )
+        val repository = HttpRoutingRepository(
+            CompassApiClient(
+                baseUrl = server.url("/").toString(),
+                httpClient = OkHttpClient(),
+                json = Json { ignoreUnknownKeys = false },
+            ),
+            placeSearchCache = object : PlaceSearchCache {
+                override fun get(query: String): PlaceSearchResults? = null
+                override fun put(results: PlaceSearchResults) {
+                    cacheWrites += 1
+                }
+            },
+        )
+
+        val result = repository.searchPlaces("Via Roma 1, Milano")
+
+        assertTrue(!result.cacheable)
+        assertEquals(0, cacheWrites)
+    }
+
+    @Test
+    fun mapsInvalidApiCredentialsToAuthenticationFailure() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    """{"code":"invalid_credentials","message":"credentials required"}""",
+                ),
+        )
+
+        val error = runCatching {
+            repository.previewRoute(MILAN, BOLOGNA)
+        }.exceptionOrNull()
+
+        assertTrue(error is RoutePreviewException)
+        assertEquals(
+            RoutePreviewFailure.AUTHENTICATION,
+            (error as RoutePreviewException).failure,
+        )
+    }
+
+    @Test
     fun mapsRankedCandidatesIntoDomainWithoutLosingExplainability() = runTest {
         enqueue("ranked-candidates-response.json")
 

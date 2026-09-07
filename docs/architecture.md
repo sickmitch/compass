@@ -18,6 +18,12 @@ Compass uses six explicit server/domain boundaries and one first-class device cl
 6. **FastAPI** exposes strict versioned mobile contracts without exposing provider response shapes.
 7. **Android (Kotlin, Jetpack Compose, MapLibre Native)** owns presentation and interaction state.
 
+The public mobile boundary optionally applies HTTP Basic authentication to every `/api/v1` router.
+Credentials exist only in server environment configuration and the Android app-private connection
+profile; the device encrypts the password with Android Keystore. Transport security is terminated by
+the operator's ingress, with HTTPS preferred and explicitly acknowledged HTTP available only as a
+fallback. Health endpoints remain outside this auth boundary for container/ingress monitoring.
+
 Valhalla is the selected routing engine. Phase 3 adds its independently persisted tile bootstrap and
 provider adapter; Valhalla remains inaccessible from host/public ports.
 
@@ -331,9 +337,11 @@ types do not enter the repository interface. Manual application-level dependency
 the boundary replaceable without adding framework infrastructure for a single screen.
 
 The debug API endpoint and map style are build properties. Emulator/USB development can reach the
-loopback-bound backend through `10.0.2.2` or `adb reverse`; cleartext is limited to those development
-addresses, while non-local endpoints require HTTPS. The checked-in device runner preflights the
-backend, builds, installs and launches the app but leaves visual rendering as an explicit human gate.
+loopback-bound backend through `10.0.2.2` or `adb reverse`. The build-time API URL is only a
+first-launch default: the persisted server profile can replace endpoint and credentials immediately.
+Non-local endpoints prefer HTTPS; dynamic HTTP is allowed only after an explicit in-app warning. The
+checked-in device runner preflights the backend, builds, installs and launches the app but leaves
+visual rendering as an explicit human gate.
 
 ## Deliberate Phase 8 limits
 
@@ -436,7 +444,9 @@ shared contract bounds a plan to 32 stops and derives route totals from the vali
 Vehicle profiles are local Android presentation state, persisted as a versioned strict document.
 They contain a label plus effective full range and reserve for CNG and gasoline. Selecting a profile
 pre-fills those policy values; it never invents current tank levels. The driver may separately enter
-estimated remaining gasoline range. Only after complete CNG planning fails may the backend return a
+estimated remaining gasoline range. Extended planning can explicitly clear the selection and use
+custom values; remaining CNG range and maximum detour remain required regardless of that selection.
+Only after complete CNG planning fails may the backend return a
 direct-route `gasoline_fallback`, with explicit required range and reserve margin. Navigation retains
 those metrics across route preview and ordinary rerouting so the fallback stays visible.
 
@@ -500,8 +510,18 @@ confirmed off-route / 5-minute refresh -> RouteUpdateController -> Compass API -
 Raw GPS is exposed in state for diagnostics but is never rendered as the active vehicle position.
 Filtering and projection are pure Kotlin and have deterministic replay fixtures. The matcher uses a
 bounded window around prior progress, heading compatibility and backwards penalties. Three
-consecutive poor fixes are required to confirm off-route; the decision combines route distance,
-accuracy, heading and implausible backwards progress. Ordinary fixes never call the backend.
+consecutive poor fixes are required to confirm off-route; the decision combines a 20-metre
+accuracy-aware route-distance threshold, a separate moving 65-degree heading conflict outside the
+GPS uncertainty band, and implausible backwards progress. Ordinary fixes never call the backend.
+The map-matched position remains the presentation anchor, but deviation evidence is measured before
+that projection is treated as route truth.
+
+On confirmation, `RouteUpdateController` deduplicates the episode and
+`CompassNavigationRouteRecalculator` uses the raw GPS coordinate as the new origin. A successful
+replacement publishes a transient duration comparison in `NavigationState`; Compose alone owns its
+ten-second visibility timer and measured bottom obstruction. The event is not persisted and is not
+emitted for scheduled traffic or manual refreshes. The API remains authoritative for the alternate
+route, so ADB loopback is unsuitable after a device is physically disconnected.
 
 The service and UI share the session through `AppContainer`, allowing Activity recreation,
 backgrounding and screen-off operation without losing the downloaded route. Stage 3 owns
@@ -514,6 +534,12 @@ private route cache. Compose may format them for a bounded sign panel or numeric
 does not parse localized instruction prose or make a routing decision. Lane guidance and speed
 limits require a future source-backed contract because they are not fields of the standard
 turn-by-turn maneuver response used here.
+
+Valhalla maneuver instructions describe the transition at `begin_shape_index`. For a matched route
+segment, `NavigationEngine` therefore selects the first maneuver whose begin index is still ahead
+and measures the remaining distance to that same index. Once the matcher enters the maneuver's
+outgoing segment, guidance advances immediately. The resulting current maneuver and distance are a
+single timeline consumed unchanged by Compose, speech staging, navigation phase and camera policy.
 
 Navigation UI Phase 2 introduced that camera boundary. `NavigationCameraConfig` owns the driving
 pitch, continuous speed- and maneuver-density-dependent zoom, screen anchor and transition timing
@@ -645,21 +671,28 @@ range state, no complete itinerary and transport failures all retain the downloa
 ## Phase 12 destination and journey-time flow
 
 ```text
-Android text/coordinate query -> Compass /places/search -> PlaceSearchProvider -> Nominatim
-          |                              |
-current device location                 +-> normalized address/locality/POI/coordinate
-          |                                               |
-          +-------------------- selected A/B coordinates -+
-                                                          v
-                                           Compass /routes -> Valhalla maneuvers
-                                                          v
-                                         foreground NavigationSession
+                                      +-> Nominatim primary records -----+
+Android text query -> /places/search -+                                  +-> query/civic ranking
+                                      +-> Google Places (ephemeral) -----+          |
+Android coordinate query -----------------> local coordinate parser                 |
+                                                                                   v
+                                                          Nominatim-only results -> selected A/B
+                                                                                   |
+                                                                                   v
+                                                               /routes -> Valhalla maneuvers
 ```
 
 Android never contacts Nominatim directly. Coordinate queries are resolved inside Compass; textual
 queries pass through the provider abstraction and return a strict normalized contract. Current
 location is requested by Android only after user action and is then used as an ordinary route
 origin.
+
+The optional Google adapter is a corroborator, not a second mobile-visible source. It compares
+normalized names and proximity for POIs. For an address it additionally requires the query civic,
+structured civic equality, compatible street/locality and proximity within the configured radius.
+The query grammar requires the civic after a comma (`Via Cappafredda, 12, Roverchiara`) to avoid
+confusing road identifiers with house numbers. Google records are discarded inside the provider;
+only Nominatim records cross the API boundary and Google-influenced ordering is never cached.
 
 The established local matcher, maneuver controller, confirmed off-route state machine and
 foreground service continue to own live progress. A successful reroute first attempts to retain the
@@ -685,7 +718,8 @@ The default Compose graph contains:
 
 - `db`: pinned PostGIS 16 / PostGIS 3.5 family with a named data volume and readiness healthcheck;
 - `migrate`: one-shot Alembic upgrade after the database is healthy;
-- `api`: non-root FastAPI container with liveness/readiness healthcheck and loopback-only host bind;
+- `api`: non-root FastAPI container with liveness/readiness healthcheck, loopback host bind by
+  default, configurable bind address and optional authenticated `/api/v1` boundary;
 - `etl`: profile-gated one-shot job, not a persistent service.
 
 Routing adds two opt-in workloads:
@@ -765,3 +799,23 @@ instead of retaining an old warning.
 Compose owns the transient previous state and renders a second alert ring plus red limit number.
 The navigation engine, API schemas, traffic costing and route cache remain unchanged. Sound and
 haptics are excluded until a later preference contract can make them explicitly opt-in.
+
+## Android route-free startup boundary
+
+The production `RoutePlannerViewModel.Factory` now starts without a route or routing operation. A
+foreground-Activity location listener feeds a dedicated route-free MapLibre surface directly from
+Android GPS; it never invokes the route matcher and therefore cannot manufacture an on-route
+position when no itinerary exists. Starting the navigation foreground service first removes that
+listener, preserving a single location owner.
+
+```text
+fresh launch -> FOLLOW -> raw GPS -> route-free MapLibre puck
+                    |
+                    +-> Crea viaggio -> endpoint selector -> POST /api/v1/routes -> preview
+```
+
+The route-free camera shares the accepted 75%-height puck anchor and temporary free-pan recentering
+policy. It intentionally has no overview because there is no route geometry. Endpoint choices are
+presentation state: current position and normalized search write coordinates into the same strict
+routing request used by manual coordinate entry; the future-favourites button remains an inert,
+visible placeholder.

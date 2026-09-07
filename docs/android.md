@@ -2,10 +2,10 @@
 
 ## Android scope
 
-The Android app is a native Kotlin/Jetpack Compose client in `android/`. It calls the accepted
-`POST /api/v1/routes` backend operation, decodes its polyline6 geometry and renders a fixed
-Milan-to-Bologna route preview with MapLibre. The screen also shows distance, duration, provider and
-the backend maneuver list.
+The Android app is a native Kotlin/Jetpack Compose client in `android/`. It opens in route-free GPS
+follow mode and does not call the routing API until the driver creates a trip. `Crea viaggio` opens
+the endpoint selector; after both endpoints are chosen, the app calls `POST /api/v1/routes`, decodes
+its polyline6 geometry and renders the route preview with MapLibre.
 
 Phase 9 retains that fixed endpoint pair and adds the manual `Aggiungi tappa → Metano` workflow. It
 collects maximum detour and effective range, displays arrival-aware ranked station markers/cards,
@@ -56,7 +56,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.19.0` (`versionCode=20`).
+Android version is `0.19.3` (`versionCode=23`).
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1
@@ -89,6 +89,65 @@ accessibility description. Missing speed or limit stays `UNAVAILABLE`. The phase
 no sound or vibration.
 Its live gate treats visual behavior as operator-owned evidence and does not use UIAutomator or
 screenshot parsing.
+
+The `0.19.1` road-test follow-up removes redundant road text when the structured junction sign
+already contains the same normalized name. The instruction and structured sign remain authoritative;
+ordinary maneuvers without that duplication retain their road subtitle. Junction signs are centered
+within the maneuver card and size to their text plus horizontal padding, up to the card width.
+
+Android `0.19.2`, accepted in the operator's physical-device road test on 2026-09-06, corrects the
+maneuver timeline exposed by the first road test. Valhalla maneuver instructions describe the
+transition at `begin_shape_index`; guidance therefore selects the first maneuver whose begin index
+is still ahead of the matched route segment and measures distance to that same index. This keeps the
+visible instruction, following instruction, voice timing, approach phase and maneuver-aware camera
+on the same upcoming transition instead of retaining the completed one. Evidence is recorded in
+`docs/phases/android-0.19.2-road-test-acceptance.md`.
+
+Android `0.19.3` strengthens the existing `OFF_ROUTE` route-update path. The local engine still
+requires three consecutive accepted fixes, while using a 20-metre accuracy-aware lateral threshold
+and a separate 65-degree moving-heading conflict threshold beyond the GPS uncertainty band. Once
+confirmed, the existing route recalculator requests a server route from the raw GPS coordinate and
+preserves remaining CNG stops or replans them through the established predictive policy.
+
+A successful off-route replacement records the previous remaining trip duration and the new route
+duration. Compose presents `Prima`, `Ora` and their signed `Differenza` in an accessible bottom card,
+slides it into the same layout family as the trip panel, includes its measured height in camera
+padding and removes it ten seconds after the server commit. Traffic/manual refreshes do not create
+this notice, and speed-limit presentation becomes unavailable while the position is suspected or
+confirmed off-route.
+
+The final `0.19.3` increment makes the no-route state explicit. On a fresh launch, the foreground
+Activity subscribes directly to GPS updates and renders the raw device position on a dedicated
+route-free MapLibre surface. It retains the same 75%-height follow anchor and temporary free-pan
+recentring policy, but has no route overview, maneuver matching, speed limit or destination. This
+foreground-only listener stops with the Activity and before the navigation foreground service
+starts, so route guidance continues to have a single location owner.
+
+The `Crea viaggio` control replaces `Viaggio` only on that route-free surface. Its selector offers
+`Posizione attuale`, a disabled `Posizioni preferite` placeholder, `Ricerca` and `Coordinate` as
+content-width buttons that wrap onto additional rows. Departure puts current position first;
+destination puts it last. The existing normalized place search can now fill either endpoint and
+routing begins only after both endpoint values validate. Current-position acquisition reports its
+state inside the relevant pill: a spinner while waiting, a green check on success and a light-red X
+on failure. It does not emit a separate error-styled success message or repeat the selected label.
+The search field accepts POIs and addresses and explains the address grammar directly below the
+input: the civic must occupy a comma-separated segment, for example
+`Via Cappafredda, 12, Roverchiara`. The keyboard search action submits the same query as the button.
+The selector begins directly with `Partenza`. After a successful calculation it keeps the endpoint
+choices visible and enables the direct route, one-stop planning and extended planning; editing an
+endpoint locks those actions again until recalculation. Extended planning offers saved vehicle
+profiles and an explicit custom-values choice. A selected profile supplies full-range and reserve
+defaults, while remaining CNG range and maximum detour always remain driver inputs.
+
+Route recalculation is server-backed. An APK using loopback HTTP plus `adb reverse` loses the API as
+soon as USB/ADB is removed. Compass opens server configuration automatically when credentials are
+missing or a routing/search request encounters a connection or authentication failure. There is no
+manual server shortcut in the planner; it will move to the future settings surface. The connection
+profile persists like vehicle profiles; its
+password is encrypted with an app-private Android Keystore key and Android backup is disabled.
+Every subsequent API request reads the current profile, so saving does not require an app restart or
+rebuild. HTTPS is accepted directly. HTTP requires the user to acknowledge the cleartext-credential
+warning explicitly and is intended only as a fallback on a trusted private network.
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
 overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
@@ -328,6 +387,18 @@ The generated APK is:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+To build, install and cold-launch Android `0.19.3` on the single authorized device while preserving
+the saved vehicle and server profiles:
+
+```bash
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+bash scripts/install-android-0.19.3.sh
+```
+
+Set `COMPASS_ADB_SERIAL` only if more than one device is connected. This installer intentionally
+does not use UIAutomator, inspect screenshots or clear application data.
+
 ## Backend and map configuration
 
 The debug build defaults to the emulator host alias:
@@ -335,6 +406,13 @@ The debug build defaults to the emulator host alias:
 ```text
 COMPASS_API_BASE_URL=http://10.0.2.2:8000/
 ```
+
+This value is only the first-launch default. If no authenticated profile exists, Compass opens the
+server form automatically. Enter the externally reachable endpoint and the backend's
+`API_AUTH_USERNAME`/`API_AUTH_PASSWORD`, then choose `Salva e connetti`. The same form opens after a
+connection or authentication error. The endpoint may include a reverse-proxy path and its trailing
+slash is added automatically. Credentials embedded in the URL, query strings and fragments are
+rejected.
 
 Override it at build time; the trailing slash is mandatory:
 
@@ -376,9 +454,10 @@ cd ..
 No token is committed. If a chosen style requires credentials, inject a protected style URL using
 the operator's normal secret/configuration mechanism and do not add it to Git.
 
-Debug HTTP in cleartext is limited to `127.0.0.1` and `10.0.2.2`. Use HTTPS for any LAN/public
-hostname or IP. A physical-device gate can retain the backend's safe loopback-only bind by using
-`adb reverse`, which the checked-in runner configures automatically.
+Use HTTPS for any LAN/public hostname or IP. Android permits dynamic HTTP endpoints only because the
+runtime `Server` form blocks saving them until the user accepts the visible cleartext-credential
+warning. A physical-device gate can retain the backend's safe loopback-only bind by using `adb
+reverse`, which the checked-in runner configures automatically.
 
 ## Phase 9 physical-device live gate
 
