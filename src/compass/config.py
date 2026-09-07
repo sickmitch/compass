@@ -38,6 +38,24 @@ class Settings(BaseSettings):
     valhalla_route_language: str = Field(default="it-IT", pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$")
     valhalla_matrix_batch_size: int = Field(default=40, gt=0, le=100)
     valhalla_speed_limits_enabled: bool = True
+    destination_search_providers: str = "none"
+    google_places_enabled: bool = False
+    tomtom_search_enabled: bool = False
+    destination_search_fallback_enabled: bool = False
+    destination_search_debounce_ms: int = Field(default=300, ge=100, le=2_000)
+    destination_search_min_chars: int = Field(default=3, ge=1, le=20)
+    destination_search_language: str = Field(default="it", pattern=r"^[a-z]{2}$")
+    destination_search_region: str = Field(default="it", pattern=r"^[a-z]{2}$")
+    destination_search_included_regions: str = Field(
+        default="it", pattern=r"^[a-z]{2}(,[a-z]{2})*$"
+    )
+    destination_search_bias_radius_meters: float = Field(default=25_000, ge=1, le=50_000)
+    destination_search_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    destination_search_session_ttl_seconds: int = Field(default=900, ge=60, le=3_600)
+    destination_search_max_concurrency: int = Field(default=8, ge=1, le=64)
+    destination_search_rate_limit_per_minute: int = Field(default=60, ge=1, le=1_000)
+    google_places_text_search_enabled: bool = False
+    google_places_contract_regime: Literal["unverified", "eea", "non_eea"] = "unverified"
     geocoding_provider: Literal["none", "nominatim", "nominatim_google"] = "nominatim"
     nominatim_url: str = "https://nominatim.openstreetmap.org"
     google_places_url: str = "https://places.googleapis.com/v1"
@@ -61,9 +79,7 @@ class Settings(BaseSettings):
     traffic_route_max_probes: int = Field(default=16, ge=2, le=100)
     traffic_route_refresh_timeout_seconds: float = Field(default=45, gt=0)
     traffic_updater_url: str = "http://traffic-updater:8003"
-    traffic_refresh_ledger_path: str = (
-        "/custom_files/compass_traffic_state/route_refresh.json"
-    )
+    traffic_refresh_ledger_path: str = "/custom_files/compass_traffic_state/route_refresh.json"
     traffic_expiry_sweep_seconds: float = Field(default=30, gt=0)
     traffic_update_segment_limit: int = Field(default=1000, gt=0, le=10000)
     traffic_max_age_seconds: float = Field(default=300, gt=0)
@@ -82,9 +98,7 @@ class Settings(BaseSettings):
     traffic_state_path: str = "/custom_files/compass_traffic_state/state.json"
     traffic_health_path: str = "/custom_files/compass_traffic_state/health.json"
     traffic_mock_fixture_path: str = ""
-    tomtom_traffic_api_mode: Literal["flow_segment", "intermediate_json"] = (
-        "flow_segment"
-    )
+    tomtom_traffic_api_mode: Literal["flow_segment", "intermediate_json"] = "flow_segment"
     tomtom_traffic_url: str = ""
     tomtom_flow_segment_points: str = ""
     tomtom_flow_segment_style: Literal[
@@ -206,9 +220,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_corridor_radii(self) -> "Settings":
         if self.cng_corridor_minimum_radius_km > self.cng_corridor_maximum_radius_km:
-            raise ValueError(
-                "cng corridor minimum radius must not exceed its maximum radius"
-            )
+            raise ValueError("cng corridor minimum radius must not exceed its maximum radius")
         return self
 
     @model_validator(mode="after")
@@ -226,8 +238,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_api_authentication(self) -> "Settings":
         if self.api_auth_enabled and (
-            not self.api_auth_username.strip()
-            or not self.api_auth_password.get_secret_value()
+            not self.api_auth_username.strip() or not self.api_auth_password.get_secret_value()
         ):
             raise ValueError(
                 "api_auth_username and api_auth_password are required when API auth is enabled"
@@ -251,12 +262,37 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_google_places_configuration(self) -> "Settings":
-        if (
-            self.geocoding_provider == "nominatim_google"
-            and not self.google_places_api_key.get_secret_value()
-        ):
+        active_destination_providers = tuple(
+            item.strip()
+            for item in self.destination_search_providers.split(",")
+            if item.strip() and item.strip() != "none"
+        )
+        if active_destination_providers not in {(), ("google_places_new",)}:
             raise ValueError(
-                "google_places_api_key is required when geocoding_provider is nominatim_google"
+                "destination_search_providers must be none or google_places_new during testing"
+            )
+        if self.google_places_enabled != (active_destination_providers == ("google_places_new",)):
+            raise ValueError(
+                "google_places_enabled must match the google_places_new provider registry"
+            )
+        if active_destination_providers and self.geocoding_provider != "none":
+            raise ValueError(
+                "geocoding_provider must be none while Google-only destination search is active"
+            )
+        if self.tomtom_search_enabled or self.destination_search_fallback_enabled:
+            raise ValueError("TomTom destination search and fallback must remain disabled")
+        if self.google_places_text_search_enabled:
+            raise ValueError("Google Text Search must remain disabled in this increment")
+        if self.google_places_enabled and self.google_places_contract_regime != "eea":
+            raise ValueError(
+                "google_places_contract_regime must be eea after billing-account verification; "
+                "non_eea integration requires a separate terms review before enabling"
+            )
+        if (
+            self.google_places_enabled or self.geocoding_provider == "nominatim_google"
+        ) and not self.google_places_api_key.get_secret_value():
+            raise ValueError(
+                "google_places_api_key is required when Google destination search is enabled"
             )
         return self
 
@@ -266,13 +302,8 @@ class Settings(BaseSettings):
             raise ValueError("traffic_provider must be mock or tomtom when traffic is enabled")
         if self.traffic_valhalla_overlay_enabled and not self.traffic_enabled:
             raise ValueError("traffic overlay cannot be enabled while traffic is disabled")
-        if (
-            self.traffic_valhalla_overlay_enabled
-            and not self.traffic_valhalla_tileset_version
-        ):
-            raise ValueError(
-                "traffic_valhalla_tileset_version is required when overlay is enabled"
-            )
+        if self.traffic_valhalla_overlay_enabled and not self.traffic_valhalla_tileset_version:
+            raise ValueError("traffic_valhalla_tileset_version is required when overlay is enabled")
         if (
             self.traffic_enabled
             and self.traffic_provider == "tomtom"

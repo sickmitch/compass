@@ -694,6 +694,25 @@ The query grammar requires the civic after a comma (`Via Cappafredda, 12, Roverc
 confusing road identifiers with house numbers. Google records are discarded inside the provider;
 only Nominatim records cross the API boundary and Google-influenced ordering is never cached.
 
+## Android 0.19.4 Google destination boundary
+
+ADR 0021 supersedes the preceding corroboration path for the active destination selector:
+
+```text
+mapless Compose search -> /destinations/suggest -> Google Autocomplete (New)
+        selection       -> /destinations/resolve -> Google Place Details (New)
+                                                 |
+                                                 +-> text selection (mapless only)
+                                                 +-> WGS84 + Place ID + neutral label
+                                                             |
+                                                             +-> Valhalla / MapLibre
+```
+
+The testing registry contains only `google_places_new`. Exact Place IDs are deduplicated without
+cross-ID merging; TomTom/Nominatim destination adapters and Text Search remain dormant. The separate
+TomTom traffic provider is unaffected. Suggestion/resolution state is transient and the map-safe
+target is a distinct type that cannot carry Google name or address fields.
+
 The established local matcher, maneuver controller, confirmed off-route state machine and
 foreground service continue to own live progress. A successful reroute first attempts to retain the
 remaining ordered CNG stops and their range policy. If Compass reports a missing, unavailable or

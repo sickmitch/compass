@@ -1,5 +1,67 @@
 package org.compass.cng.data.api
 
+import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.DestinationSearchContext
+
+data class ApiDestinationSuggestRequest(
+    val query: String,
+    val sessionId: String,
+    val revision: Int,
+    val context: DestinationSearchContext,
+)
+
+data class ApiDestinationSuggestions(
+    val sessionId: String,
+    val revision: Int,
+    val results: List<ApiDestinationSuggestion>,
+)
+
+data class ApiDestinationSuggestion(
+    val id: String,
+    val provider: String,
+    val providerRef: String,
+    val kind: String,
+    val title: String,
+    val subtitle: String?,
+    val addressPreview: String?,
+    val distanceMeters: Int?,
+    val providerRank: Int,
+    val attribution: String,
+)
+
+data class ApiResolvedDestination(
+    val sessionId: String,
+    val revision: Int,
+    val provider: String,
+    val providerRef: String,
+    val formattedAddress: String?,
+    val addressComponents: List<ApiAddressComponent>,
+    val normalizedAddress: ApiNormalizedAddress,
+    val coordinate: Coordinate,
+    val kind: String,
+    val attribution: List<String>,
+    val fieldSources: Map<String, String>,
+    val navigationCoordinate: Coordinate,
+    val navigationProviderRef: String?,
+    val mapLabel: String,
+)
+
+data class ApiNormalizedAddress(
+    val street: String?,
+    val streetNumber: String?,
+    val locality: String?,
+    val province: String?,
+    val region: String?,
+    val postalCode: String?,
+    val country: String?,
+)
+
+data class ApiAddressComponent(
+    val longText: String,
+    val shortText: String?,
+    val types: List<String>,
+)
+
 data class ApiPlaceSearchResults(
     val query: String,
     val results: List<ApiPlaceSearchResult>,

@@ -23,6 +23,15 @@ import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.AddressComponent
+import org.compass.cng.domain.model.DestinationKind
+import org.compass.cng.domain.model.DestinationSuggestRequest
+import org.compass.cng.domain.model.DestinationSuggestion
+import org.compass.cng.domain.model.DestinationSuggestions
+import org.compass.cng.domain.model.NavigationTarget
+import org.compass.cng.domain.model.NormalizedAddress
+import org.compass.cng.domain.model.ResolvedDestination
+import org.compass.cng.domain.model.ResolvedDestinationSelection
 import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.ManeuverSign
@@ -57,6 +66,80 @@ class HttpRoutingRepository(
     private val placeSearchCache: PlaceSearchCache = NoOpPlaceSearchCache,
     private val eventLogger: (String) -> Unit = {},
 ) : RoutingRepository {
+    override suspend fun suggestDestinations(
+        request: DestinationSuggestRequest,
+    ): DestinationSuggestions = mapFailures {
+        val response = apiClient.suggestDestinations(
+            org.compass.cng.data.api.ApiDestinationSuggestRequest(
+                query = request.query,
+                sessionId = request.sessionId,
+                revision = request.revision,
+                context = request.context,
+            ),
+        )
+        DestinationSuggestions(
+            sessionId = response.sessionId,
+            revision = response.revision,
+            results = response.results.map { result ->
+                DestinationSuggestion(
+                    id = result.id,
+                    provider = result.provider,
+                    providerRef = result.providerRef,
+                    kind = result.kind.toDestinationKind(),
+                    title = result.title,
+                    subtitle = result.subtitle,
+                    addressPreview = result.addressPreview,
+                    distanceMeters = result.distanceMeters,
+                    providerRank = result.providerRank,
+                    attribution = result.attribution,
+                )
+            },
+        )
+    }
+
+    override suspend fun resolveDestination(
+        sessionId: String,
+        revision: Int,
+        suggestion: DestinationSuggestion,
+    ): ResolvedDestination = mapFailures {
+        val response = apiClient.resolveDestination(
+            sessionId,
+            revision,
+            suggestion.provider,
+            suggestion.providerRef,
+        )
+        ResolvedDestination(
+            sessionId = response.sessionId,
+            revision = response.revision,
+            selection = ResolvedDestinationSelection(
+                provider = response.provider,
+                providerRef = response.providerRef,
+                formattedAddress = response.formattedAddress,
+                addressComponents = response.addressComponents.map {
+                    AddressComponent(it.longText, it.shortText, it.types)
+                },
+                normalizedAddress = NormalizedAddress(
+                    street = response.normalizedAddress.street,
+                    streetNumber = response.normalizedAddress.streetNumber,
+                    locality = response.normalizedAddress.locality,
+                    province = response.normalizedAddress.province,
+                    region = response.normalizedAddress.region,
+                    postalCode = response.normalizedAddress.postalCode,
+                    country = response.normalizedAddress.country,
+                ),
+                location = response.coordinate,
+                kind = response.kind.toDestinationKind(),
+                attribution = response.attribution,
+                fieldSources = response.fieldSources,
+            ),
+            navigationTarget = NavigationTarget(
+                location = response.navigationCoordinate,
+                providerRef = response.navigationProviderRef,
+                mapLabel = response.mapLabel,
+            ),
+        )
+    }
+
     override suspend fun searchPlaces(query: String, limit: Int): PlaceSearchResults {
         return try {
             val live = mapFailures {
@@ -485,6 +568,13 @@ class HttpRoutingRepository(
             throw RoutePreviewException(RoutePreviewFailure.INVALID_RESPONSE, error)
         }
     }
+}
+
+private fun String.toDestinationKind(): DestinationKind = when (this) {
+    "business" -> DestinationKind.BUSINESS
+    "address" -> DestinationKind.ADDRESS
+    "locality" -> DestinationKind.LOCALITY
+    else -> DestinationKind.UNKNOWN
 }
 
 private fun ApiRoute.toRoutePreview(

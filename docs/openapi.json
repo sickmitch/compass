@@ -1,6 +1,40 @@
 {
   "components": {
     "schemas": {
+      "AddressComponentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "long_text": {
+            "title": "Long Text",
+            "type": "string"
+          },
+          "short_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Text"
+          },
+          "types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "long_text",
+          "short_text",
+          "types"
+        ],
+        "title": "AddressComponentResponse",
+        "type": "object"
+      },
       "AuthenticationCheckResponse": {
         "properties": {
           "auth_enabled": {
@@ -657,6 +691,338 @@
           "freshness_threshold_seconds"
         ],
         "title": "DataSourceFreshnessResponse",
+        "type": "object"
+      },
+      "DestinationContextRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "bias_radius_meters": {
+            "anyOf": [
+              {
+                "maximum": 50000.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bias Radius Meters"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchCoordinateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "DestinationContextRequest",
+        "type": "object"
+      },
+      "DestinationResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "const": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Provider Ref",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "revision",
+          "provider",
+          "provider_ref"
+        ],
+        "title": "DestinationResolveRequest",
+        "type": "object"
+      },
+      "DestinationResolveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "navigation_target": {
+            "$ref": "#/components/schemas/NavigationTargetResponse"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/ResolvedSelectionResponse"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "revision",
+          "selection",
+          "navigation_target"
+        ],
+        "title": "DestinationResolveResponse",
+        "type": "object"
+      },
+      "DestinationSearchMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "provider_errors": {
+            "title": "Provider Errors",
+            "type": "integer"
+          },
+          "rate_limited": {
+            "title": "Rate Limited",
+            "type": "integer"
+          },
+          "resolutions_succeeded": {
+            "title": "Resolutions Succeeded",
+            "type": "integer"
+          },
+          "resolve_latency_ms_total": {
+            "title": "Resolve Latency Ms Total",
+            "type": "integer"
+          },
+          "resolve_requests": {
+            "title": "Resolve Requests",
+            "type": "integer"
+          },
+          "sessions_abandoned": {
+            "title": "Sessions Abandoned",
+            "type": "integer"
+          },
+          "sessions_concluded": {
+            "title": "Sessions Concluded",
+            "type": "integer"
+          },
+          "sessions_started": {
+            "title": "Sessions Started",
+            "type": "integer"
+          },
+          "suggest_latency_ms_total": {
+            "title": "Suggest Latency Ms Total",
+            "type": "integer"
+          },
+          "suggest_requests": {
+            "title": "Suggest Requests",
+            "type": "integer"
+          },
+          "tomtom_destination_calls": {
+            "title": "Tomtom Destination Calls",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions_started",
+          "sessions_concluded",
+          "sessions_abandoned",
+          "suggest_requests",
+          "resolve_requests",
+          "suggest_latency_ms_total",
+          "resolve_latency_ms_total",
+          "resolutions_succeeded",
+          "provider_errors",
+          "rate_limited",
+          "tomtom_destination_calls"
+        ],
+        "title": "DestinationSearchMetricsResponse",
+        "type": "object"
+      },
+      "DestinationSuggestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DestinationContextRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "language": {
+            "default": "it",
+            "pattern": "^[a-z]{2}$",
+            "title": "Language",
+            "type": "string"
+          },
+          "query": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "session_id",
+          "revision"
+        ],
+        "title": "DestinationSuggestRequest",
+        "type": "object"
+      },
+      "DestinationSuggestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum_results": {
+            "default": 5,
+            "title": "Maximum Results",
+            "type": "integer"
+          },
+          "provider": {
+            "const": "google_places_new",
+            "default": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/DestinationSuggestionResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "revision",
+          "results"
+        ],
+        "title": "DestinationSuggestResponse",
+        "type": "object"
+      },
+      "DestinationSuggestionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Preview"
+          },
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "distance_meters": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Meters"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "business",
+              "address",
+              "locality",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "provider": {
+            "const": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_rank": {
+            "minimum": 0.0,
+            "title": "Provider Rank",
+            "type": "integer"
+          },
+          "provider_ref": {
+            "title": "Provider Ref",
+            "type": "string"
+          },
+          "requires_resolution": {
+            "title": "Requires Resolution",
+            "type": "boolean"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "provider_ref",
+          "kind",
+          "title",
+          "subtitle",
+          "address_preview",
+          "provider_rank",
+          "requires_resolution",
+          "attribution"
+        ],
+        "title": "DestinationSuggestionResponse",
         "type": "object"
       },
       "DetourCandidatesRequest": {
@@ -1317,6 +1683,37 @@
         "title": "ManeuverSignResponse",
         "type": "object"
       },
+      "NavigationTargetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          },
+          "map_label": {
+            "const": "Destinazione selezionata",
+            "title": "Map Label",
+            "type": "string"
+          },
+          "provider_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Ref"
+          }
+        },
+        "required": [
+          "location",
+          "provider_ref",
+          "map_label"
+        ],
+        "title": "NavigationTargetResponse",
+        "type": "object"
+      },
       "NavigationTimingResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1587,6 +1984,99 @@
           "per_candidate_route_calls"
         ],
         "title": "NetworkEvaluationMetricsResponse",
+        "type": "object"
+      },
+      "NormalizedAddressResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "locality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locality"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          },
+          "street_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Number"
+          }
+        },
+        "required": [
+          "street",
+          "street_number",
+          "locality",
+          "province",
+          "region",
+          "postal_code",
+          "country"
+        ],
+        "title": "NormalizedAddressResponse",
         "type": "object"
       },
       "OpeningHoursEvaluationResponse": {
@@ -3101,6 +3591,88 @@
           "closed_candidate_policy"
         ],
         "title": "RankingPolicyResponse",
+        "type": "object"
+      },
+      "ResolvedSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address_components": {
+            "items": {
+              "$ref": "#/components/schemas/AddressComponentResponse"
+            },
+            "title": "Address Components",
+            "type": "array"
+          },
+          "attribution": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attribution",
+            "type": "array"
+          },
+          "field_sources": {
+            "additionalProperties": {
+              "const": "google_places_new",
+              "type": "string"
+            },
+            "title": "Field Sources",
+            "type": "object"
+          },
+          "formatted_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formatted Address"
+          },
+          "kind": {
+            "enum": [
+              "business",
+              "address",
+              "locality",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          },
+          "normalized_address": {
+            "$ref": "#/components/schemas/NormalizedAddressResponse"
+          },
+          "provider": {
+            "const": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_ref": {
+            "title": "Provider Ref",
+            "type": "string"
+          },
+          "resolution_status": {
+            "const": "resolved",
+            "title": "Resolution Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_ref",
+          "formatted_address",
+          "address_components",
+          "normalized_address",
+          "location",
+          "kind",
+          "resolution_status",
+          "attribution",
+          "field_sources"
+        ],
+        "title": "ResolvedSelectionResponse",
         "type": "object"
       },
       "RouteGeometry": {
@@ -4854,6 +5426,245 @@
         "summary": "Data Freshness",
         "tags": [
           "operations"
+        ]
+      }
+    },
+    "/api/v1/destinations/metrics": {
+      "get": {
+        "description": "Aggregate operational counters; queries and Place IDs are never metric labels.",
+        "operationId": "destination_metrics_api_v1_destinations_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationSearchMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Destination Metrics",
+        "tags": [
+          "place-search"
+        ]
+      }
+    },
+    "/api/v1/destinations/resolve": {
+      "post": {
+        "operationId": "destination_resolve_api_v1_destinations_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DestinationResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Destination Resolve",
+        "tags": [
+          "place-search"
+        ]
+      }
+    },
+    "/api/v1/destinations/suggest": {
+      "post": {
+        "operationId": "destination_suggest_api_v1_destinations_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DestinationSuggestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationSuggestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Destination Suggest",
+        "tags": [
+          "place-search"
         ]
       }
     },

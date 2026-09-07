@@ -50,6 +50,8 @@ class CompassApiClient(
     private val apiBaseUrl: HttpUrl get() = connectionProvider().baseUrl.toHttpUrl()
     private val routeUrl: HttpUrl get() = resolve("api/v1/routes")
     private val placeSearchUrl: HttpUrl get() = resolve("api/v1/places/search")
+    private val destinationSuggestUrl: HttpUrl get() = resolve("api/v1/destinations/suggest")
+    private val destinationResolveUrl: HttpUrl get() = resolve("api/v1/destinations/resolve")
     private val rankedCandidatesUrl: HttpUrl get() = resolve("api/v1/cng/ranked-candidates")
     private val predictiveCandidatesUrl: HttpUrl
         get() = resolve("api/v1/cng/predictive-candidates")
@@ -70,6 +72,33 @@ class CompassApiClient(
             .addQueryParameter("language", "it")
             .build()
         return get<PlaceSearchResponseDto>(url).toApiPlaceSearchResults()
+    }
+
+    suspend fun suggestDestinations(
+        request: ApiDestinationSuggestRequest,
+    ): ApiDestinationSuggestions = try {
+        post<DestinationSuggestResponseDto>(
+            destinationSuggestUrl,
+            json.encodeToString(DestinationSuggestRequestDto.fromApi(request)),
+        ).toApi()
+    } catch (error: IllegalArgumentException) {
+        throw ApiClientException.InvalidResponse(error)
+    }
+
+    suspend fun resolveDestination(
+        sessionId: String,
+        revision: Int,
+        provider: String,
+        providerRef: String,
+    ): ApiResolvedDestination = try {
+        post<DestinationResolveResponseDto>(
+            destinationResolveUrl,
+            json.encodeToString(
+                DestinationResolveRequestDto(sessionId, revision, provider, providerRef),
+            ),
+        ).toApi()
+    } catch (error: IllegalArgumentException) {
+        throw ApiClientException.InvalidResponse(error)
     }
 
     suspend fun getRoute(
@@ -341,6 +370,114 @@ private data class PlaceSearchResponseDto(
     val query: String,
     val cacheable: Boolean = true,
     val results: List<PlaceSearchResultDto>,
+)
+
+@Serializable
+private data class DestinationSuggestRequestDto(
+    val query: String,
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    val language: String = "it",
+    val context: DestinationContextDto? = null,
+) {
+    companion object {
+        fun fromApi(value: ApiDestinationSuggestRequest) = DestinationSuggestRequestDto(
+            query = value.query,
+            sessionId = value.sessionId,
+            revision = value.revision,
+            context = value.context.location?.let { coordinate ->
+                DestinationContextDto(
+                    location = CoordinateDto(coordinate.latitude, coordinate.longitude),
+                    biasRadiusMeters = value.context.biasRadiusMeters,
+                )
+            },
+        )
+    }
+}
+
+@Serializable
+private data class DestinationContextDto(
+    val location: CoordinateDto,
+    @SerialName("bias_radius_meters") val biasRadiusMeters: Double? = null,
+)
+
+@Serializable
+private data class DestinationSuggestResponseDto(
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    val provider: String,
+    @SerialName("maximum_results") val maximumResults: Int,
+    val results: List<DestinationSuggestionDto>,
+)
+
+@Serializable
+private data class DestinationSuggestionDto(
+    val id: String,
+    val provider: String,
+    @SerialName("provider_ref") val providerRef: String,
+    val kind: String,
+    val title: String,
+    val subtitle: String?,
+    @SerialName("address_preview") val addressPreview: String?,
+    @SerialName("distance_meters") val distanceMeters: Int?,
+    @SerialName("provider_rank") val providerRank: Int,
+    @SerialName("requires_resolution") val requiresResolution: Boolean,
+    val attribution: String,
+)
+
+@Serializable
+private data class DestinationResolveRequestDto(
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    val provider: String,
+    @SerialName("provider_ref") val providerRef: String,
+)
+
+@Serializable
+private data class DestinationResolveResponseDto(
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    val selection: ResolvedSelectionDto,
+    @SerialName("navigation_target") val navigationTarget: NavigationTargetDto,
+)
+
+@Serializable
+private data class ResolvedSelectionDto(
+    val provider: String,
+    @SerialName("provider_ref") val providerRef: String,
+    @SerialName("formatted_address") val formattedAddress: String?,
+    @SerialName("address_components") val addressComponents: List<AddressComponentDto>,
+    @SerialName("normalized_address") val normalizedAddress: NormalizedAddressDto,
+    val location: CoordinateDto,
+    val kind: String,
+    @SerialName("resolution_status") val resolutionStatus: String,
+    val attribution: List<String>,
+    @SerialName("field_sources") val fieldSources: Map<String, String>,
+)
+
+@Serializable
+private data class NormalizedAddressDto(
+    val street: String?,
+    @SerialName("street_number") val streetNumber: String?,
+    val locality: String?,
+    val province: String?,
+    val region: String?,
+    @SerialName("postal_code") val postalCode: String?,
+    val country: String?,
+)
+
+@Serializable
+private data class AddressComponentDto(
+    @SerialName("long_text") val longText: String,
+    @SerialName("short_text") val shortText: String?,
+    val types: List<String>,
+)
+
+@Serializable
+private data class NavigationTargetDto(
+    val location: CoordinateDto,
+    @SerialName("provider_ref") val providerRef: String?,
+    @SerialName("map_label") val mapLabel: String,
 )
 
 @Serializable
@@ -941,6 +1078,76 @@ private fun PlaceSearchResponseDto.toApiPlaceSearchResults(): ApiPlaceSearchResu
             )
         },
     )
+
+private fun DestinationSuggestResponseDto.toApi(): ApiDestinationSuggestions {
+    require(provider == "google_places_new" && maximumResults == 5)
+    return ApiDestinationSuggestions(
+        sessionId = sessionId,
+        revision = revision,
+        results = results.map { result ->
+            require(result.provider == "google_places_new" && result.requiresResolution)
+            require(result.kind in setOf("business", "address", "locality", "unknown"))
+            ApiDestinationSuggestion(
+                id = result.id,
+                provider = result.provider,
+                providerRef = result.providerRef,
+                kind = result.kind,
+                title = result.title,
+                subtitle = result.subtitle,
+                addressPreview = result.addressPreview,
+                distanceMeters = result.distanceMeters,
+                providerRank = result.providerRank,
+                attribution = result.attribution,
+            )
+        },
+    )
+}
+
+private fun DestinationResolveResponseDto.toApi(): ApiResolvedDestination {
+    require(selection.provider == "google_places_new")
+    require(selection.resolutionStatus == "resolved")
+    require(selection.kind in setOf("business", "address", "locality", "unknown"))
+    require(navigationTarget.mapLabel == "Destinazione selezionata")
+    require(navigationTarget.providerRef == selection.providerRef)
+    require(selection.fieldSources.values.all { it == "google_places_new" })
+    require(
+        selection.fieldSources.keys.containsAll(
+            setOf("formatted_address", "address_components", "location"),
+        ),
+    )
+    val selectionCoordinate = Coordinate(selection.location.latitude, selection.location.longitude)
+    val navigationCoordinate = Coordinate(
+        navigationTarget.location.latitude,
+        navigationTarget.location.longitude,
+    )
+    require(selectionCoordinate == navigationCoordinate)
+    return ApiResolvedDestination(
+        sessionId = sessionId,
+        revision = revision,
+        provider = selection.provider,
+        providerRef = selection.providerRef,
+        formattedAddress = selection.formattedAddress,
+        addressComponents = selection.addressComponents.map {
+            ApiAddressComponent(it.longText, it.shortText, it.types)
+        },
+        normalizedAddress = ApiNormalizedAddress(
+            street = selection.normalizedAddress.street,
+            streetNumber = selection.normalizedAddress.streetNumber,
+            locality = selection.normalizedAddress.locality,
+            province = selection.normalizedAddress.province,
+            region = selection.normalizedAddress.region,
+            postalCode = selection.normalizedAddress.postalCode,
+            country = selection.normalizedAddress.country,
+        ),
+        coordinate = selectionCoordinate,
+        kind = selection.kind,
+        attribution = selection.attribution,
+        fieldSources = selection.fieldSources,
+        navigationCoordinate = navigationCoordinate,
+        navigationProviderRef = navigationTarget.providerRef,
+        mapLabel = navigationTarget.mapLabel,
+    )
+}
 
 private fun RouteResponseDto.toApiRoute(): ApiRoute {
     require(geometry.format == "polyline6") { "unsupported route geometry format" }

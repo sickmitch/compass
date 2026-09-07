@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Response, status
@@ -30,15 +31,24 @@ from compass.freshness.service import load_data_freshness
 from compass.logging import configure_logging
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import RoutingProvider
+from compass.search.dependencies import close_destination_search_runtime
 from compass.traffic.domain import TrafficHealthState
 from compass.traffic.service import traffic_health_from_settings
 
 configure_logging(get_settings().log_level)
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await close_destination_search_runtime()
+
+
 app = FastAPI(
     title="Compass CNG API",
     version=__version__,
     description="CNG-aware navigation API foundations for Italy.",
+    lifespan=lifespan,
 )
 protected_api_dependencies = [Depends(require_api_user)]
 protected_api_responses = {

@@ -25,12 +25,26 @@ val compassMapAmbientCacheMb = providers.gradleProperty("COMPASS_MAP_AMBIENT_CAC
     .orElse("100")
     .get()
     .toLong()
+val destinationSearchDebounceMs = providers.gradleProperty("DESTINATION_SEARCH_DEBOUNCE_MS")
+    .orElse("300")
+    .get()
+    .toLong()
+val destinationSearchMinChars = providers.gradleProperty("DESTINATION_SEARCH_MIN_CHARS")
+    .orElse("3")
+    .get()
+    .toInt()
 
 require(compassApiBaseUrl.endsWith("/")) {
     "COMPASS_API_BASE_URL must end with '/': $compassApiBaseUrl"
 }
 require(compassMapAmbientCacheMb in 16..1024) {
     "COMPASS_MAP_AMBIENT_CACHE_MB must be between 16 and 1024"
+}
+require(destinationSearchDebounceMs in 100..2_000) {
+    "DESTINATION_SEARCH_DEBOUNCE_MS must be between 100 and 2000"
+}
+require(destinationSearchMinChars in 1..20) {
+    "DESTINATION_SEARCH_MIN_CHARS must be between 1 and 20"
 }
 
 android {
@@ -41,8 +55,8 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 23
-        versionName = "0.19.3"
+        versionCode = 24
+        versionName = "0.19.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())
@@ -61,6 +75,8 @@ android {
             "COMPASS_MAP_AMBIENT_CACHE_BYTES",
             "${compassMapAmbientCacheMb * 1024L * 1024L}L",
         )
+        buildConfigField("long", "DESTINATION_SEARCH_DEBOUNCE_MS", "${destinationSearchDebounceMs}L")
+        buildConfigField("int", "DESTINATION_SEARCH_MIN_CHARS", "$destinationSearchMinChars")
     }
 
     buildTypes {

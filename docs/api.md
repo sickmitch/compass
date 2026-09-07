@@ -46,6 +46,27 @@ civics are omitted. Google failures degrade to query-ranked Nominatim output and
 warning without credentials. Because Google can influence ordering, these responses have
 `cacheable=false`; Google text, coordinates and identifiers are never returned or stored.
 
+The endpoint above is retained for the dormant legacy adapter. The Android `0.19.4` destination
+flow uses the two authenticated endpoints below while `GEOCODING_PROVIDER=none`.
+
+```http
+POST /api/v1/destinations/suggest
+POST /api/v1/destinations/resolve
+GET /api/v1/destinations/metrics
+```
+
+`suggest` accepts `query`, a Compass UUID-v4 `session_id`, monotonically increasing `revision`,
+language and optional location/bias context. It returns at most five normalized Google predictions
+without coordinates. `resolve` accepts a suggestion's session, revision, provider and
+`provider_ref`; it returns a text-capable `selection` plus a separate `navigation_target` containing
+only WGS84 `location`, optional Place ID and the literal map label `Destinazione selezionata`.
+Errors distinguish `rate_limited`, `place_not_found`, `destination_unresolvable`, `stale_selection`,
+`search_provider_error` and `search_unavailable`.
+
+The metrics endpoint exposes aggregate operation counts, total latency and lifecycle counters. It
+never exposes query, coordinate or Place-ID labels; `tomtom_destination_calls` must remain zero for
+the Google-only gate.
+
 ## Station detail
 
 ```http

@@ -1,5 +1,7 @@
 package org.compass.cng.ui.route
 
+import org.compass.cng.BuildConfig
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -8,6 +10,7 @@ import java.time.OffsetDateTime
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +19,10 @@ import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.DestinationSearchContext
+import org.compass.cng.domain.model.DestinationSuggestRequest
+import org.compass.cng.domain.model.DestinationSuggestion
+import org.compass.cng.domain.model.ResolvedDestination
 import org.compass.cng.domain.model.PlaceSearchResult
 import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PredictiveCngSuggestion
@@ -74,6 +81,7 @@ enum class CurrentLocationAcquisitionStatus {
 enum class PlannerOperation {
     BASE_ROUTE,
     PLACE_SEARCH,
+    PLACE_RESOLUTION,
     CNG_CANDIDATES,
     PREDICTIVE_CANDIDATES,
     SELECTED_ROUTE,
@@ -95,6 +103,8 @@ data class RoutePlannerUiState(
     val destinationLongitudeInput: String = "",
     val originDisplayName: String = "Non selezionata",
     val destinationDisplayName: String = "Non selezionata",
+    val originAttributions: List<String> = emptyList(),
+    val destinationAttributions: List<String> = emptyList(),
     val originLocationMethod: RouteLocationMethod? = null,
     val destinationLocationMethod: RouteLocationMethod? = null,
     val originCurrentLocationStatus: CurrentLocationAcquisitionStatus =
@@ -107,6 +117,11 @@ data class RoutePlannerUiState(
     val followLocation: NavigationLocation? = null,
     val placeSearchQuery: String = "",
     val placeSearchResults: List<PlaceSearchResult> = emptyList(),
+    val destinationSuggestions: List<DestinationSuggestion> = emptyList(),
+    val destinationSearchSessionId: String? = null,
+    val destinationSearchRevision: Int = 0,
+    val pendingResolvedDestination: ResolvedDestination? = null,
+    val pendingDestinationSuggestion: DestinationSuggestion? = null,
     val placeSearchSource: PlaceSearchSource = PlaceSearchSource.LIVE,
     val placeSearchCachedAtEpochMillis: Long? = null,
     val baseRoute: RoutePreview? = null,
@@ -232,6 +247,7 @@ class RoutePlannerViewModel(
     val uiState: StateFlow<RoutePlannerUiState> = mutableUiState.asStateFlow()
 
     private var requestJob: Job? = null
+    private var destinationSearchJob: Job? = null
     private var serverReturnStage: PlannerStage = PlannerStage.FOLLOW
 
     init {
@@ -265,12 +281,14 @@ class RoutePlannerViewModel(
             RouteEndpoint.ORIGIN -> mutableUiState.value.copy(
                 originLocationMethod = RouteLocationMethod.COORDINATES,
                 originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                originAttributions = emptyList(),
                 routeInputsDirty = true,
                 message = null,
             )
             RouteEndpoint.DESTINATION -> mutableUiState.value.copy(
                 destinationLocationMethod = RouteLocationMethod.COORDINATES,
                 destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                destinationAttributions = emptyList(),
                 routeInputsDirty = true,
                 message = null,
             )
@@ -295,6 +313,11 @@ class RoutePlannerViewModel(
                 },
                 placeSearchQuery = "",
                 placeSearchResults = emptyList(),
+                destinationSuggestions = emptyList(),
+                destinationSearchSessionId = UUID.randomUUID().toString(),
+                destinationSearchRevision = 0,
+                pendingResolvedDestination = null,
+                pendingDestinationSuggestion = null,
                 placeSearchSource = PlaceSearchSource.LIVE,
                 placeSearchCachedAtEpochMillis = null,
                 message = null,
@@ -305,35 +328,77 @@ class RoutePlannerViewModel(
     fun openDestinationSearch() = openPlaceSearch(RouteEndpoint.DESTINATION)
 
     fun updatePlaceSearchQuery(value: String) {
-        if (value.length <= 200) {
+        if (value.length <= 200 && value != mutableUiState.value.placeSearchQuery) {
+            val nextRevision = mutableUiState.value.destinationSearchRevision + 1
             mutableUiState.value = mutableUiState.value.copy(
                 placeSearchQuery = value,
+                destinationSearchRevision = nextRevision,
+                destinationSuggestions = emptyList(),
+                pendingResolvedDestination = null,
+                pendingDestinationSuggestion = null,
                 message = null,
             )
+            scheduleDestinationSuggestions(immediate = false)
         }
     }
 
     fun searchDestinations() {
-        val state = mutableUiState.value
-        val query = state.placeSearchQuery.trim()
-        if (query.isEmpty()) {
-            mutableUiState.value = state.copy(message = "Inserisci un indirizzo, luogo o coordinate.")
+        scheduleDestinationSuggestions(immediate = true)
+    }
+
+    private fun scheduleDestinationSuggestions(immediate: Boolean) {
+        destinationSearchJob?.cancel()
+        val snapshot = mutableUiState.value
+        val query = snapshot.placeSearchQuery.trim()
+        if (query.count { !it.isWhitespace() } < BuildConfig.DESTINATION_SEARCH_MIN_CHARS) {
+            mutableUiState.value = snapshot.copy(
+                operation = null,
+                destinationSuggestions = emptyList(),
+                message = if (query.isEmpty()) {
+                    null
+                } else {
+                    "Digita almeno ${BuildConfig.DESTINATION_SEARCH_MIN_CHARS} caratteri."
+                },
+            )
             return
         }
-        requestJob?.cancel()
-        requestJob = viewModelScope.launch {
-            mutableUiState.value = state.copy(
+        val sessionId = snapshot.destinationSearchSessionId ?: return
+        val revision = snapshot.destinationSearchRevision
+        destinationSearchJob = viewModelScope.launch {
+            if (!immediate) delay(BuildConfig.DESTINATION_SEARCH_DEBOUNCE_MS)
+            val current = mutableUiState.value
+            if (
+                current.destinationSearchSessionId != sessionId ||
+                current.destinationSearchRevision != revision ||
+                current.placeSearchQuery.trim() != query
+            ) return@launch
+            mutableUiState.value = current.copy(
                 operation = PlannerOperation.PLACE_SEARCH,
-                placeSearchResults = emptyList(),
+                destinationSuggestions = emptyList(),
                 message = null,
             )
             try {
-                val results = routingRepository.searchPlaces(query)
+                val contextLocation = current.followLocation?.coordinate
+                    ?: selectedTerritorialContext(current)
+                val results = routingRepository.suggestDestinations(
+                    DestinationSuggestRequest(
+                        query = query,
+                        sessionId = sessionId,
+                        revision = revision,
+                        context = DestinationSearchContext(
+                            location = contextLocation,
+                            biasRadiusMeters = contextLocation?.let { 25_000.0 },
+                        ),
+                    ),
+                )
+                val latest = mutableUiState.value
+                if (
+                    latest.destinationSearchSessionId != results.sessionId ||
+                    latest.destinationSearchRevision != results.revision
+                ) return@launch
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
-                    placeSearchResults = results.results,
-                    placeSearchSource = results.source,
-                    placeSearchCachedAtEpochMillis = results.cachedAtEpochMillis,
+                    destinationSuggestions = results.results,
                     message = if (results.results.isEmpty()) "Nessun luogo trovato." else null,
                 )
             } catch (error: CancellationException) {
@@ -359,6 +424,106 @@ class RoutePlannerViewModel(
         }
     }
 
+    fun selectDestinationSuggestion(suggestion: DestinationSuggestion) {
+        val snapshot = mutableUiState.value
+        if (snapshot.operation != null || suggestion !in snapshot.destinationSuggestions) return
+        val sessionId = snapshot.destinationSearchSessionId ?: return
+        val revision = snapshot.destinationSearchRevision
+        destinationSearchJob?.cancel()
+        destinationSearchJob = viewModelScope.launch {
+            mutableUiState.value = snapshot.copy(
+                operation = PlannerOperation.PLACE_RESOLUTION,
+                pendingDestinationSuggestion = suggestion,
+                message = null,
+            )
+            try {
+                val resolved = routingRepository.resolveDestination(
+                    sessionId,
+                    revision,
+                    suggestion,
+                )
+                val latest = mutableUiState.value
+                if (
+                    latest.destinationSearchSessionId != resolved.sessionId ||
+                    latest.destinationSearchRevision != resolved.revision ||
+                    latest.pendingDestinationSuggestion?.id != suggestion.id
+                ) return@launch
+                if (resolved.selection.formattedAddress == null) {
+                    mutableUiState.value = latest.copy(
+                        operation = null,
+                        pendingResolvedDestination = resolved,
+                        message = "Indirizzo completo non disponibile. Conferma l'uso delle sole coordinate.",
+                    )
+                } else {
+                    applyResolvedDestination(resolved)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: RoutePreviewException) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = error.failure.placeSearchMessage(),
+                )
+            } catch (_: Exception) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = "Impossibile risolvere la destinazione selezionata.",
+                )
+            }
+        }
+    }
+
+    fun confirmCoordinateOnlyDestination() {
+        mutableUiState.value.pendingResolvedDestination?.let(::applyResolvedDestination)
+    }
+
+    private fun applyResolvedDestination(resolved: ResolvedDestination) {
+        val state = mutableUiState.value
+        val coordinate = resolved.navigationTarget.location
+        val selectionLabel = resolved.selection.formattedAddress
+            ?: "${coordinate.latitude.toCoordinateInput()}, ${coordinate.longitude.toCoordinateInput()}"
+        mutableUiState.value = when (state.placeSearchTarget) {
+            RouteEndpoint.ORIGIN -> state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                operation = null,
+                originLatitudeInput = coordinate.latitude.toCoordinateInput(),
+                originLongitudeInput = coordinate.longitude.toCoordinateInput(),
+                originDisplayName = selectionLabel,
+                originAttributions = resolved.selection.attribution,
+                originLocationMethod = RouteLocationMethod.SEARCH,
+                routeInputsDirty = true,
+                destinationSuggestions = emptyList(),
+                pendingResolvedDestination = null,
+                pendingDestinationSuggestion = null,
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                operation = null,
+                destinationLatitudeInput = coordinate.latitude.toCoordinateInput(),
+                destinationLongitudeInput = coordinate.longitude.toCoordinateInput(),
+                destinationDisplayName = selectionLabel,
+                destinationAttributions = resolved.selection.attribution,
+                destinationLocationMethod = RouteLocationMethod.SEARCH,
+                routeInputsDirty = true,
+                destinationSuggestions = emptyList(),
+                pendingResolvedDestination = null,
+                pendingDestinationSuggestion = null,
+                message = null,
+            )
+        }
+    }
+
+    private fun selectedTerritorialContext(state: RoutePlannerUiState): Coordinate? =
+        when (state.placeSearchTarget) {
+            RouteEndpoint.ORIGIN -> state.activeDestination.takeIf {
+                state.destinationLocationMethod != null
+            }
+            RouteEndpoint.DESTINATION -> state.activeOrigin.takeIf {
+                state.originLocationMethod != null
+            }
+        }
+
     fun selectDestination(result: PlaceSearchResult) {
         val state = mutableUiState.value
         val draftOrigin = parseCoordinate(
@@ -382,6 +547,7 @@ class RoutePlannerViewModel(
                 originLatitudeInput = result.location.latitude.toCoordinateInput(),
                 originLongitudeInput = result.location.longitude.toCoordinateInput(),
                 originDisplayName = result.displayName,
+                originAttributions = emptyList(),
                 originLocationMethod = RouteLocationMethod.SEARCH,
                 originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
                 routeInputsDirty = true,
@@ -393,6 +559,7 @@ class RoutePlannerViewModel(
                 destinationLatitudeInput = result.location.latitude.toCoordinateInput(),
                 destinationLongitudeInput = result.location.longitude.toCoordinateInput(),
                 destinationDisplayName = result.displayName,
+                destinationAttributions = emptyList(),
                 destinationLocationMethod = RouteLocationMethod.SEARCH,
                 destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
                 routeInputsDirty = true,
@@ -432,6 +599,7 @@ class RoutePlannerViewModel(
                 originLatitudeInput = coordinate.latitude.toCoordinateInput(),
                 originLongitudeInput = coordinate.longitude.toCoordinateInput(),
                 originDisplayName = "Posizione attuale",
+                originAttributions = emptyList(),
                 originLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
                 originCurrentLocationStatus = CurrentLocationAcquisitionStatus.SUCCESS,
                 routeInputsDirty = true,
@@ -444,6 +612,7 @@ class RoutePlannerViewModel(
                 destinationLatitudeInput = coordinate.latitude.toCoordinateInput(),
                 destinationLongitudeInput = coordinate.longitude.toCoordinateInput(),
                 destinationDisplayName = "Posizione attuale",
+                destinationAttributions = emptyList(),
                 destinationLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
                 destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.SUCCESS,
                 routeInputsDirty = true,
@@ -581,7 +750,7 @@ class RoutePlannerViewModel(
             !mutableUiState.value.routeInputsDirty &&
             !mutableUiState.value.isBusy
         ) {
-            mutableUiState.value = mutableUiState.value.copy(
+            mutableUiState.value = mutableUiState.value.withMapSafeSearchLabels().copy(
                 stage = PlannerStage.CONFIGURE_CNG,
                 workflowMode = CngWorkflowMode.MANUAL,
                 message = null,
@@ -595,7 +764,7 @@ class RoutePlannerViewModel(
             !mutableUiState.value.routeInputsDirty &&
             !mutableUiState.value.isBusy
         ) {
-            mutableUiState.value = mutableUiState.value.copy(
+            mutableUiState.value = mutableUiState.value.withMapSafeSearchLabels().copy(
                 stage = PlannerStage.CONFIGURE_PREDICTIVE,
                 workflowMode = CngWorkflowMode.PREDICTIVE,
                 message = null,
@@ -1261,7 +1430,7 @@ class RoutePlannerViewModel(
             ?: mutableUiState.value.baseRoute?.toNavigationRoute()
             ?: return
         navigationSession.preview(route)
-        mutableUiState.value = mutableUiState.value.copy(
+        mutableUiState.value = mutableUiState.value.withMapSafeSearchLabels().copy(
             stage = PlannerStage.NAVIGATION_PREVIEW,
             message = null,
         )
@@ -1277,7 +1446,10 @@ class RoutePlannerViewModel(
         ) return
         val route = state.baseRoute?.toNavigationRoute(gasolineFallback = fallback) ?: return
         navigationSession.preview(route)
-        mutableUiState.value = state.copy(stage = PlannerStage.NAVIGATION_PREVIEW, message = null)
+        mutableUiState.value = state.withMapSafeSearchLabels().copy(
+            stage = PlannerStage.NAVIGATION_PREVIEW,
+            message = null,
+        )
     }
 
     fun startNavigation() {
@@ -1505,6 +1677,19 @@ private fun RoutePlannerUiState.withServerConnection(
     serverUsernameInput = connection.username,
     serverPasswordInput = connection.password,
     serverAllowInsecureHttp = connection.allowInsecureHttp,
+)
+
+private fun RoutePlannerUiState.withMapSafeSearchLabels(): RoutePlannerUiState = copy(
+    originDisplayName = if (originLocationMethod == RouteLocationMethod.SEARCH) {
+        "Partenza selezionata"
+    } else {
+        originDisplayName
+    },
+    destinationDisplayName = if (destinationLocationMethod == RouteLocationMethod.SEARCH) {
+        "Destinazione selezionata"
+    } else {
+        destinationDisplayName
+    },
 )
 
 private fun RoutePreviewFailure.baseRouteMessage(): String = when (this) {

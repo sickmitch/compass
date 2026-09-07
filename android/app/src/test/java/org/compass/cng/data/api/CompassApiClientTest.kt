@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.DestinationSearchContext
 import org.compass.cng.domain.server.ServerConnection
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -115,6 +116,152 @@ class CompassApiClientTest {
         assertEquals("GET", recorded.method)
         assertEquals("Duomo di Milano", recorded.requestUrl?.queryParameter("q"))
         assertEquals("it", recorded.requestUrl?.queryParameter("language"))
+    }
+
+    @Test
+    fun suggestsThenResolvesDestinationWithSeparateMapSafeTarget() = runTest {
+        server.enqueue(
+            successResponse(
+                """
+                {
+                  "session_id":"9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                  "revision":4,
+                  "provider":"google_places_new",
+                  "maximum_results":5,
+                  "results":[{
+                    "id":"google_places_new:place-a",
+                    "provider":"google_places_new",
+                    "provider_ref":"place-a",
+                    "kind":"business",
+                    "title":"Libreria Verona",
+                    "subtitle":"Via Roma 12, Verona",
+                    "address_preview":"Via Roma 12, Verona",
+                    "distance_meters":321,
+                    "provider_rank":0,
+                    "requires_resolution":true,
+                    "attribution":"Google Maps"
+                  }]
+                }
+                """.trimIndent(),
+            ),
+        )
+        server.enqueue(
+            successResponse(
+                """
+                {
+                  "session_id":"9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                  "revision":4,
+                  "selection":{
+                    "provider":"google_places_new",
+                    "provider_ref":"place-a",
+                    "formatted_address":"Via Roma 12, 37100 Verona VR, Italia",
+                    "address_components":[{
+                      "long_text":"12","short_text":"12","types":["street_number"]
+                    }],
+                    "normalized_address":{
+                      "street":"Via Roma","street_number":"12","locality":"Verona",
+                      "province":"Verona","region":"Veneto","postal_code":"37100",
+                      "country":"Italia"
+                    },
+                    "location":{"latitude":45.44,"longitude":10.99},
+                    "kind":"business",
+                    "resolution_status":"resolved",
+                    "attribution":["Google Maps"],
+                    "field_sources":{
+                      "formatted_address":"google_places_new",
+                      "address_components":"google_places_new",
+                      "location":"google_places_new"
+                    }
+                  },
+                  "navigation_target":{
+                    "location":{"latitude":45.44,"longitude":10.99},
+                    "provider_ref":"place-a",
+                    "map_label":"Destinazione selezionata"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+        val request = ApiDestinationSuggestRequest(
+            query = "Libreria Verona",
+            sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+            revision = 4,
+            context = DestinationSearchContext(Coordinate(45.4384, 10.9916), 25_000.0),
+        )
+
+        val suggestions = client().suggestDestinations(request)
+        val resolved = client().resolveDestination(
+            request.sessionId,
+            request.revision,
+            suggestions.results.single().provider,
+            suggestions.results.single().providerRef,
+        )
+
+        assertEquals("Libreria Verona", suggestions.results.single().title)
+        assertEquals(321, suggestions.results.single().distanceMeters)
+        assertEquals("Via Roma 12, 37100 Verona VR, Italia", resolved.formattedAddress)
+        assertEquals("12", resolved.normalizedAddress.streetNumber)
+        assertEquals(Coordinate(45.44, 10.99), resolved.navigationCoordinate)
+        assertEquals("Destinazione selezionata", resolved.mapLabel)
+
+        val suggestRequest = server.takeRequest()
+        assertEquals("/api/v1/destinations/suggest", suggestRequest.path)
+        val suggestJson = json.parseToJsonElement(suggestRequest.body.readUtf8()).jsonObject
+        assertEquals("4", suggestJson.getValue("revision").jsonPrimitive.content)
+        assertEquals(
+            "25000.0",
+            suggestJson.getValue("context").jsonObject
+                .getValue("bias_radius_meters").jsonPrimitive.content,
+        )
+        val resolveRequest = server.takeRequest()
+        assertEquals("/api/v1/destinations/resolve", resolveRequest.path)
+        val resolveJson = json.parseToJsonElement(resolveRequest.body.readUtf8()).jsonObject
+        assertEquals("place-a", resolveJson.getValue("provider_ref").jsonPrimitive.content)
+    }
+
+    @Test
+    fun rejectsDestinationResponseThatLeaksGoogleTextIntoMapTarget() = runTest {
+        server.enqueue(
+            successResponse(
+                """
+                {
+                  "session_id":"9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                  "revision":4,
+                  "selection":{
+                    "provider":"google_places_new","provider_ref":"place-a",
+                    "formatted_address":"Via Roma 12","address_components":[],
+                    "normalized_address":{
+                      "street":"Via Roma","street_number":"12","locality":null,
+                      "province":null,"region":null,"postal_code":null,"country":null
+                    },
+                    "location":{"latitude":45.44,"longitude":10.99},
+                    "kind":"address","resolution_status":"resolved",
+                    "attribution":["Google Maps"],
+                    "field_sources":{
+                      "formatted_address":"google_places_new",
+                      "address_components":"google_places_new",
+                      "location":"google_places_new"
+                    }
+                  },
+                  "navigation_target":{
+                    "location":{"latitude":45.44,"longitude":10.99},
+                    "provider_ref":"place-a","map_label":"Via Roma 12"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val failure = runCatching {
+            client().resolveDestination(
+                "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                4,
+                "google_places_new",
+                "place-a",
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is ApiClientException.InvalidResponse)
     }
 
     @Test

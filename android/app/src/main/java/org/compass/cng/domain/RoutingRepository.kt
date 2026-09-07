@@ -2,6 +2,10 @@ package org.compass.cng.domain
 
 import java.time.OffsetDateTime
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.DestinationSuggestRequest
+import org.compass.cng.domain.model.DestinationSuggestions
+import org.compass.cng.domain.model.DestinationSuggestion
+import org.compass.cng.domain.model.ResolvedDestination
 import org.compass.cng.domain.model.PlaceSearchResults
 import org.compass.cng.domain.model.PredictiveCngSuggestion
 import org.compass.cng.domain.model.RankedCngStations
@@ -10,6 +14,17 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 
 interface RoutingRepository {
+    suspend fun suggestDestinations(request: DestinationSuggestRequest): DestinationSuggestions =
+        throw UnsupportedOperationException("destination suggestions are unavailable")
+
+    suspend fun resolveDestination(
+        sessionId: String,
+        revision: Int,
+        suggestion: DestinationSuggestion,
+    ): ResolvedDestination = throw UnsupportedOperationException(
+        "destination resolution is unavailable",
+    )
+
     suspend fun searchPlaces(
         query: String,
         limit: Int = 8,

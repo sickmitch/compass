@@ -141,9 +141,7 @@ def _score_result(
     original_index: int,
 ) -> _ScoredResult:
     candidate_text = " ".join(
-        part
-        for part in (result.poi_name, result.display_name, result.address)
-        if part is not None
+        part for part in (result.poi_name, result.display_name, result.address) if part is not None
     )
     query_normalized = _normalize_text(query)
     candidate_normalized = _normalize_text(candidate_text)
@@ -236,18 +234,14 @@ def _distance_meters(left: PlaceSearchResult, right: PlaceSearchResult) -> float
     delta_longitude = math.radians(right.coordinate.longitude - left.coordinate.longitude)
     haversine = (
         math.sin(delta_latitude / 2) ** 2
-        + math.cos(latitude_1)
-        * math.cos(latitude_2)
-        * math.sin(delta_longitude / 2) ** 2
+        + math.cos(latitude_1) * math.cos(latitude_2) * math.sin(delta_longitude / 2) ** 2
     )
     return 2 * 6_371_000 * math.asin(min(1.0, math.sqrt(haversine)))
 
 
 def _normalize_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value.casefold())
-    without_marks = "".join(
-        char for char in decomposed if not unicodedata.combining(char)
-    )
+    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
     return " ".join(_WORD_PATTERN.findall(without_marks))
 
 

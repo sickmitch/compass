@@ -56,7 +56,19 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.19.3` (`versionCode=23`).
+Android version is `0.19.4` (`versionCode=24`).
+
+Destination search uses Compass `POST /api/v1/destinations/suggest` after a configurable 300 ms
+debounce and `POST /api/v1/destinations/resolve` only after selection. Results and full Google
+addresses are displayed on a mapless screen with attribution. Entering any MapLibre surface replaces
+that text with `Destinazione selezionata`; routing receives the resolved coordinate directly. Search
+sessions survive recomposition/rotation with the ViewModel but are not persisted across process
+death, and no Google content enters the legacy place-search cache.
+
+The Google-only destination live gate was accepted on the live backend and a physical device on
+2026-09-07. Eight applicable manual cases passed. The ninth proposed case—editing the destination
+of an already active CNG/vehicle plan while preserving it—is not exposed by the current UI and was
+explicitly waived by the operator; it is not recorded as a successful on-device test.
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1
@@ -407,13 +419,13 @@ The generated APK is:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To build, install and cold-launch Android `0.19.3` on the single authorized device while preserving
+To build, install and cold-launch Android `0.19.4` on the single authorized device while preserving
 the saved vehicle and server profiles:
 
 ```bash
 export JAVA_HOME=/home/mike/toolchains/jdk17
 export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-bash scripts/install-android-0.19.3.sh
+bash scripts/install-android-0.19.4.sh
 ```
 
 Set `COMPASS_ADB_SERIAL` only if more than one device is connected. This installer intentionally

@@ -1,6 +1,6 @@
 # ADR 0020: ephemeral Google Places corroboration with Nominatim output
 
-Status: proposed pending live API and Android acceptance.
+Status: superseded by ADR 0021 for the active destination-search path. The adapter remains dormant.
 
 ## Context
 

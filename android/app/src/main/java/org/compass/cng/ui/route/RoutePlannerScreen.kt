@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.OffsetDateTime
@@ -63,6 +65,9 @@ import org.compass.cng.BuildConfig
 import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngItineraryRouteLeg
+import org.compass.cng.domain.model.DestinationKind
+import org.compass.cng.domain.model.DestinationSuggestion
+import org.compass.cng.domain.model.ResolvedDestination
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.PlaceKind
@@ -191,6 +196,8 @@ fun RoutePlannerScreen(
                     destinationLongitudeInput = state.destinationLongitudeInput,
                     originDisplayName = state.originDisplayName,
                     destinationDisplayName = state.destinationDisplayName,
+                    originAttributions = state.originAttributions,
+                    destinationAttributions = state.destinationAttributions,
                     originLocationMethod = state.originLocationMethod,
                     destinationLocationMethod = state.destinationLocationMethod,
                     originCurrentLocationStatus = state.originCurrentLocationStatus,
@@ -213,14 +220,15 @@ fun RoutePlannerScreen(
                 state.stage == PlannerStage.DESTINATION_SEARCH -> DestinationSearchContent(
                     target = state.placeSearchTarget,
                     query = state.placeSearchQuery,
-                    results = state.placeSearchResults,
+                    results = state.destinationSuggestions,
                     isSearching = state.operation == PlannerOperation.PLACE_SEARCH,
+                    isResolving = state.operation == PlannerOperation.PLACE_RESOLUTION,
                     message = state.message,
-                    source = state.placeSearchSource,
-                    cachedAtEpochMillis = state.placeSearchCachedAtEpochMillis,
+                    pendingResolvedDestination = state.pendingResolvedDestination,
                     onQueryChanged = viewModel::updatePlaceSearchQuery,
                     onSearch = viewModel::searchDestinations,
-                    onSelect = viewModel::selectPlace,
+                    onSelect = viewModel::selectDestinationSuggestion,
+                    onConfirmCoordinateOnly = viewModel::confirmCoordinateOnlyDestination,
                 )
                 baseRoute == null && state.operation == PlannerOperation.BASE_ROUTE -> {
                     LoadingState("Calcolo del percorso…")
@@ -1012,6 +1020,8 @@ private fun ConfigureRouteContent(
     destinationLongitudeInput: String,
     originDisplayName: String,
     destinationDisplayName: String,
+    originAttributions: List<String>,
+    destinationAttributions: List<String>,
     originLocationMethod: RouteLocationMethod?,
     destinationLocationMethod: RouteLocationMethod?,
     originCurrentLocationStatus: CurrentLocationAcquisitionStatus,
@@ -1055,6 +1065,7 @@ private fun ConfigureRouteContent(
                     title = "Partenza",
                     endpoint = RouteEndpoint.ORIGIN,
                     displayName = originDisplayName,
+                    attributions = originAttributions,
                     selectedMethod = originLocationMethod,
                     currentLocationStatus = originCurrentLocationStatus,
                     currentLocationLast = false,
@@ -1071,6 +1082,7 @@ private fun ConfigureRouteContent(
                     title = "Destinazione",
                     endpoint = RouteEndpoint.DESTINATION,
                     displayName = destinationDisplayName,
+                    attributions = destinationAttributions,
                     selectedMethod = destinationLocationMethod,
                     currentLocationStatus = destinationCurrentLocationStatus,
                     currentLocationLast = true,
@@ -1148,6 +1160,7 @@ private fun RouteEndpointSelector(
     title: String,
     endpoint: RouteEndpoint,
     displayName: String,
+    attributions: List<String>,
     selectedMethod: RouteLocationMethod?,
     currentLocationStatus: CurrentLocationAcquisitionStatus,
     currentLocationLast: Boolean,
@@ -1174,6 +1187,13 @@ private fun RouteEndpointSelector(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
+            if (selectedMethod == RouteLocationMethod.SEARCH && attributions.isNotEmpty()) {
+                Text(
+                    "Risultato fornito da ${attributions.joinToString()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         val methods = buildList {
             if (!currentLocationLast) add(RouteLocationMethod.CURRENT_LOCATION)
@@ -1318,15 +1338,29 @@ private fun CurrentLocationChoiceButton(
 private fun DestinationSearchContent(
     target: RouteEndpoint,
     query: String,
-    results: List<PlaceSearchResult>,
+    results: List<DestinationSuggestion>,
     isSearching: Boolean,
+    isResolving: Boolean,
     message: String?,
-    source: PlaceSearchSource,
-    cachedAtEpochMillis: Long?,
+    pendingResolvedDestination: ResolvedDestination?,
     onQueryChanged: (String) -> Unit,
     onSearch: () -> Unit,
-    onSelect: (PlaceSearchResult) -> Unit,
+    onSelect: (DestinationSuggestion) -> Unit,
+    onConfirmCoordinateOnly: () -> Unit,
 ) {
+    var input by remember { mutableStateOf(TextFieldValue(query)) }
+    LaunchedEffect(query) {
+        if (query != input.text && input.composition == null) {
+            input = TextFieldValue(query)
+        }
+    }
+    val isBusy = isSearching || isResolving
+    val canSearch = query.count { !it.isWhitespace() } >= BuildConfig.DESTINATION_SEARCH_MIN_CHARS &&
+        !isBusy
+    val isRecoverableError = message != null &&
+        !message.startsWith("Digita almeno") &&
+        message != "Nessun luogo trovato." &&
+        pendingResolvedDestination == null
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -1334,20 +1368,23 @@ private fun DestinationSearchContent(
     ) {
         item {
             Text(
-                "Indirizzo, città, attività, POI oppure coordinate",
+                "Indirizzo, città, attività o POI",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChanged,
+                value = input,
+                onValueChange = { value ->
+                    input = value
+                    if (value.composition == null) onQueryChanged(value.text)
+                },
                 label = {
                     Text(if (target == RouteEndpoint.ORIGIN) "Partenza" else "Destinazione")
                 },
                 placeholder = { Text("es. Duomo di Milano") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                keyboardActions = KeyboardActions(onSearch = { if (canSearch) onSearch() }),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -1361,37 +1398,66 @@ private fun DestinationSearchContent(
             Spacer(modifier = Modifier.height(8.dp))
             Button(
                 onClick = onSearch,
-                enabled = !isSearching,
+                enabled = canSearch,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (isSearching) "Ricerca…" else "Cerca")
+                Text(if (isBusy) "Attendi…" else "Cerca")
             }
-            if (isSearching) {
+            if (isBusy) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             message?.let {
                 Spacer(modifier = Modifier.height(8.dp))
-                InlineError(it)
+                if (isRecoverableError) {
+                    InlineError(it)
+                    TextButton(onClick = onSearch, enabled = canSearch) {
+                        Text("Riprova")
+                    }
+                } else {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            if (source == PlaceSearchSource.CACHE && results.isNotEmpty()) {
+            if (results.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "Risultati salvati sul dispositivo: ricerca live non disponibile" +
-                        (cachedAtEpochMillis?.let { " · cache ${formatCacheTime(it)}" } ?: "") + ".",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text("Risultati forniti da Google Maps", style = MaterialTheme.typography.labelMedium)
+            }
+            pendingResolvedDestination?.let { resolved ->
+                Spacer(modifier = Modifier.height(10.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Destinazione disponibile solo come coordinate")
+                        Text(
+                            "${resolved.navigationTarget.location.latitude}, " +
+                                "${resolved.navigationTarget.location.longitude}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(onClick = onConfirmCoordinateOnly) {
+                            Text("Usa queste coordinate")
+                        }
+                    }
+                }
             }
         }
         itemsIndexed(results, key = { _, result -> result.id }) { _, result ->
-            Card(onClick = { onSelect(result) }, modifier = Modifier.fillMaxWidth()) {
+            Card(
+                onClick = { onSelect(result) },
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(result.displayName, fontWeight = FontWeight.SemiBold)
-                    result.address?.let {
+                    Text(result.title, fontWeight = FontWeight.SemiBold)
+                    result.subtitle?.let {
                         Text(
                             it,
                             style = MaterialTheme.typography.bodySmall,
@@ -1400,14 +1466,24 @@ private fun DestinationSearchContent(
                     }
                     Text(
                         when (result.kind) {
-                            PlaceKind.ADDRESS -> "Indirizzo"
-                            PlaceKind.LOCALITY -> "Città o località"
-                            PlaceKind.POI -> result.category?.let { "Luogo · $it" } ?: "Luogo"
-                            PlaceKind.COORDINATE -> "Coordinate"
-                            PlaceKind.UNKNOWN -> "Risultato"
+                            DestinationKind.ADDRESS -> "Indirizzo"
+                            DestinationKind.LOCALITY -> "Città o località"
+                            DestinationKind.BUSINESS -> "Attività"
+                            DestinationKind.UNKNOWN -> "Risultato"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
+                    )
+                    result.distanceMeters?.let { distance ->
+                        Text(
+                            "${formatDistance(distance.toDouble())} in linea d'aria",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    Text(
+                        result.attribution,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

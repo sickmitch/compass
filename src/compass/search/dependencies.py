@@ -6,8 +6,13 @@ from fastapi import Depends
 
 from compass.config import Settings, get_api_settings
 from compass.search.corroboration import CorroboratedPlaceSearchProvider
+from compass.search.destination_domain import DestinationSearchUnavailableError
+from compass.search.destination_service import DestinationSearchMetrics, DestinationSearchService
 from compass.search.domain import PlaceSearchProvider, PlaceSearchUnavailableError
-from compass.search.google_places import GooglePlacesNewSearchProvider
+from compass.search.google_places import (
+    GooglePlacesNewDestinationProvider,
+    GooglePlacesNewSearchProvider,
+)
 from compass.search.nominatim import NominatimPlaceSearchProvider
 
 
@@ -43,7 +48,73 @@ async def get_place_search_provider(
         yield CorroboratedPlaceSearchProvider(
             primary=nominatim,
             corroborator=google_places,
-            corroboration_radius_meters=(
-                settings.google_places_corroboration_radius_meters
-            ),
+            corroboration_radius_meters=(settings.google_places_corroboration_radius_meters),
         )
+
+
+class DisabledDestinationSearchService:
+    metrics = DestinationSearchMetrics()
+
+    async def suggest(self, *_args, **_kwargs):
+        raise DestinationSearchUnavailableError("destination search is not configured")
+
+    async def resolve(self, *_args, **_kwargs):
+        raise DestinationSearchUnavailableError("destination search is not configured")
+
+
+class DestinationSearchRuntime:
+    def __init__(self, settings: Settings) -> None:
+        providers = tuple(
+            item.strip()
+            for item in settings.destination_search_providers.split(",")
+            if item.strip() and item.strip() != "none"
+        )
+        if not providers:
+            self.client = None
+            self.service = DisabledDestinationSearchService()
+            return
+        if providers != ("google_places_new",) or not settings.google_places_enabled:
+            raise ValueError("only google_places_new may be active during Google testing")
+        self.client = httpx.AsyncClient()
+        google = GooglePlacesNewDestinationProvider(
+            base_url=settings.google_places_url,
+            api_key=settings.google_places_api_key.get_secret_value(),
+            timeout_seconds=settings.destination_search_timeout_seconds,
+            region_code=settings.destination_search_region,
+            included_region_codes=tuple(
+                item.strip()
+                for item in settings.destination_search_included_regions.split(",")
+                if item.strip()
+            ),
+            client=self.client,
+        )
+        self.service = DestinationSearchService(
+            providers=(google,),
+            session_ttl_seconds=settings.destination_search_session_ttl_seconds,
+            max_concurrency=settings.destination_search_max_concurrency,
+            requests_per_user_minute=settings.destination_search_rate_limit_per_minute,
+            minimum_query_characters=settings.destination_search_min_chars,
+        )
+
+    async def close(self) -> None:
+        if self.client is not None:
+            await self.client.aclose()
+
+
+_destination_runtime: DestinationSearchRuntime | None = None
+
+
+async def get_destination_search_service(
+    settings: Annotated[Settings, Depends(get_api_settings)],
+):
+    global _destination_runtime
+    if _destination_runtime is None:
+        _destination_runtime = DestinationSearchRuntime(settings)
+    return _destination_runtime.service
+
+
+async def close_destination_search_runtime() -> None:
+    global _destination_runtime
+    if _destination_runtime is not None:
+        await _destination_runtime.close()
+        _destination_runtime = None

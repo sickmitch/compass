@@ -38,6 +38,28 @@ alternate compliant instance. A failed OSM import does not delete or invalidate 
 
 ## Google Places API (New) search corroboration
 
+ADR 0021 supersedes this corroboration design for the active destination selector. The old Text
+Search adapter remains packaged but is disabled with `GEOCODING_PROVIDER=none` and
+`GOOGLE_PLACES_TEXT_SEARCH_ENABLED=false`.
+
+## Google Places API (New) destination selection
+
+Compass uses Autocomplete (New) as transient input assistance and Place Details (New) only for the
+Place ID explicitly selected by the user. No Google business catalog is stored, no response is
+written to the CNG tables, and Android does not persist predictions, names or addresses. Exact
+provider/Place-ID duplicates retain the first Google rank; different IDs remain distinct.
+
+The server key is restricted to environment/secrets. The EEA profile separates mapless Google text
+selection from MapLibre: only coordinates, Place ID and a neutral Compass label cross into map and
+navigation models. The operator must verify the Cloud billing-account address and set
+`GOOGLE_PLACES_CONTRACT_REGIME=eea`; an unverified or non-EEA profile cannot enable this boundary.
+
+- Autocomplete (New): <https://developers.google.com/maps/documentation/places/web-service/place-autocomplete>
+- Place Details (New): <https://developers.google.com/maps/documentation/places/web-service/place-details>
+- Places policy: <https://developers.google.com/maps/documentation/places/web-service/policies>
+
+### Historical corroboration design
+
 Google Places is an optional, runtime-only corroboration source for place search. It is disabled by
 default and configured with `GEOCODING_PROVIDER=nominatim_google`. Compass requests Text Search
 (New) structured address components, name and location, then compares them with Nominatim

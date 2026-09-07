@@ -1055,6 +1055,39 @@ mandatory; automated output alone does not accept Phase 12.
 
 ### Optional Google Places (New) corroboration
 
+This section describes the dormant pre-0.19.4 corroborator. For the active destination selector use
+the Google-only configuration below.
+
+### Google Places (New) destination selector
+
+First verify the country associated with the Google Cloud billing account. For the currently
+implemented EEA/MapLibre separation configure:
+
+```dotenv
+DESTINATION_SEARCH_PROVIDERS=google_places_new
+GOOGLE_PLACES_ENABLED=true
+GOOGLE_PLACES_API_KEY=replace-with-a-server-restricted-key
+GOOGLE_PLACES_CONTRACT_REGIME=eea
+TOMTOM_SEARCH_ENABLED=false
+DESTINATION_SEARCH_FALLBACK_ENABLED=false
+GOOGLE_PLACES_TEXT_SEARCH_ENABLED=false
+GEOCODING_PROVIDER=none
+```
+
+`GOOGLE_PLACES_CONTRACT_REGIME=unverified` is the safe default and prevents API startup when Google
+destination search is enabled. A verified `non_eea` value is also blocked pending a separate terms
+review; do not infer the regime from device position. Enable Places API (New), billing, quota and
+server-compatible key restrictions, then rebuild/recreate only the API. Traffic variables, including
+`TRAFFIC_PROVIDER=tomtom`, are independent.
+
+Autocomplete and Details share an ephemeral session token. The service rate limit, provider
+concurrency, timeout, query threshold and bias are controlled by the documented
+`DESTINATION_SEARCH_*` values in `.env.example`. Android debounce/minimum-character defaults can be
+overridden at build time with Gradle properties of the same names.
+
+Use the full operator procedure in
+[`android-0.19.4-google-destination-search-acceptance.md`](phases/android-0.19.4-google-destination-search-acceptance.md).
+
 Keep the key only in the server `.env`; it is never an Android build setting. Configure:
 
 ```dotenv

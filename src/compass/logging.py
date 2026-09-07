@@ -20,7 +20,14 @@ def configure_logging(level: str) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
-    root.handlers = [handler]
+    # Replace only Compass' own structured handler. Framework/test capture handlers
+    # are independent integrations and must not be silently detached.
+    root.handlers = [
+        existing
+        for existing in root.handlers
+        if not isinstance(existing.formatter, JsonFormatter)
+    ]
+    root.addHandler(handler)
     root.setLevel(level.upper())
     # httpx includes the complete request URL in its INFO message. Some providers,
     # including TomTom's base Traffic API, require credentials in the query string.

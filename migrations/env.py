@@ -13,7 +13,9 @@ config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Alembic may run inside the API/test process. Do not disable application
+    # loggers merely because they are absent from alembic.ini.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

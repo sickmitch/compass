@@ -15,13 +15,20 @@ import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.DestinationKind
+import org.compass.cng.domain.model.DestinationSuggestRequest
+import org.compass.cng.domain.model.DestinationSuggestion
+import org.compass.cng.domain.model.DestinationSuggestions
+import org.compass.cng.domain.model.NavigationTarget
+import org.compass.cng.domain.model.NormalizedAddress
+import org.compass.cng.domain.model.ResolvedDestination
+import org.compass.cng.domain.model.ResolvedDestinationSelection
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.OpeningValidation
 import org.compass.cng.domain.model.PlaceKind
 import org.compass.cng.domain.model.PlaceSearchResult
-import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PlaceSearchResults
 import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.PredictiveCngStation
@@ -449,57 +456,145 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun searchesAndSelectsAPoiAsDestination() = runTest {
-        val poi = PlaceSearchResult(
-            id = "nominatim:node:123",
-            displayName = "Duomo di Milano",
-            address = "Piazza del Duomo, Milano",
-            location = Coordinate(45.4641, 9.1919),
-            kind = PlaceKind.POI,
-            category = "place_of_worship",
-            poiName = "Duomo di Milano",
-            provider = "nominatim",
-        )
+    fun searchesAndResolvesGoogleDestinationWithoutRoutingByText() = runTest {
+        val suggestion = destinationSuggestion()
+        val resolved = resolvedDestination(suggestion)
         val repository = FakeRoutingRepository(
             baseResult = Result.success(sampleRoute()),
-            placeSearchResult = Result.success(PlaceSearchResults("Duomo di Milano", listOf(poi))),
+            destinationSuggestionsResult = Result.success(
+                DestinationSuggestions("9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da", 1, listOf(suggestion)),
+            ),
+            resolvedDestinationResult = Result.success(resolved),
         )
-        val viewModel = RoutePlannerViewModel(repository)
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
 
         viewModel.openRouteConfiguration()
         viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, listOf(suggestion)),
+        )
+        repository.resolvedDestinationResult = Result.success(resolved.copy(sessionId = session))
         viewModel.updatePlaceSearchQuery("Duomo di Milano")
         viewModel.searchDestinations()
 
-        assertEquals(listOf(poi), viewModel.uiState.value.placeSearchResults)
-        viewModel.selectDestination(poi)
-        assertEquals(poi.location, repository.lastPreviewDestination)
-        assertEquals("Duomo di Milano", viewModel.uiState.value.destinationDisplayName)
-        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
-        assertFalse(viewModel.uiState.value.routeInputsDirty)
+        assertEquals(listOf(suggestion), viewModel.uiState.value.destinationSuggestions)
+        viewModel.selectDestinationSuggestion(suggestion)
+
+        assertEquals(1, repository.destinationSuggestCalls)
+        assertEquals(1, repository.destinationResolveCalls)
+        assertEquals(0, repository.previewCalls)
+        assertEquals("45.464100", viewModel.uiState.value.destinationLatitudeInput)
+        assertEquals("9.191900", viewModel.uiState.value.destinationLongitudeInput)
+        assertEquals(resolved.selection.formattedAddress, viewModel.uiState.value.destinationDisplayName)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertTrue(viewModel.uiState.value.routeInputsDirty)
     }
 
     @Test
-    fun exposesCachedSearchProvenanceToTheUi() = runTest {
-        val cached = PlaceSearchResults(
-            query = "Duomo di Milano",
-            results = emptyList(),
-            source = PlaceSearchSource.CACHE,
-            cachedAtEpochMillis = 1234,
+    fun duplicateTapDoesNotResolveSelectionTwice() = runTest {
+        val suggestion = destinationSuggestion()
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute()),
         )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, listOf(suggestion)),
+        )
+        repository.resolvedDestinationResult = Result.success(
+            resolvedDestination(suggestion).copy(sessionId = session),
+        )
+        viewModel.updatePlaceSearchQuery("Duomo di Milano")
+        viewModel.searchDestinations()
+
+        viewModel.selectDestinationSuggestion(suggestion)
+        viewModel.selectDestinationSuggestion(suggestion)
+
+        assertEquals(1, repository.destinationResolveCalls)
+    }
+
+    @Test
+    fun ignoresSuggestionResponseForAnOlderRevision() = runTest {
+        val suggestion = destinationSuggestion()
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
         val viewModel = RoutePlannerViewModel(
-            FakeRoutingRepository(
-                baseResult = Result.success(sampleRoute()),
-                placeSearchResult = Result.success(cached),
-            ),
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
         )
         viewModel.openRouteConfiguration()
         viewModel.openDestinationSearch()
-        viewModel.updatePlaceSearchQuery(cached.query)
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 0, listOf(suggestion)),
+        )
+
+        viewModel.updatePlaceSearchQuery("Verona")
         viewModel.searchDestinations()
 
-        assertEquals(PlaceSearchSource.CACHE, viewModel.uiState.value.placeSearchSource)
-        assertEquals(1234L, viewModel.uiState.value.placeSearchCachedAtEpochMillis)
+        assertTrue(viewModel.uiState.value.destinationSuggestions.isEmpty())
+        assertNull(viewModel.uiState.value.message)
+    }
+
+    @Test
+    fun searchWithoutGpsDoesNotInventABiasCoordinate() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, emptyList()),
+        )
+
+        viewModel.updatePlaceSearchQuery("Roma")
+        viewModel.searchDestinations()
+
+        assertNull(repository.lastDestinationSuggestRequest?.context?.location)
+        assertNull(repository.lastDestinationSuggestRequest?.context?.biasRadiusMeters)
+    }
+
+    @Test
+    fun mapStagesReplaceGoogleAddressWithNeutralDestinationLabel() = runTest {
+        val suggestion = destinationSuggestion()
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, listOf(suggestion)),
+        )
+        repository.resolvedDestinationResult = Result.success(
+            resolvedDestination(suggestion).copy(sessionId = session),
+        )
+        viewModel.updateEffectiveRange("240")
+        viewModel.updateReserveRange("35")
+        viewModel.updateMaximumDetour("12")
+        viewModel.updatePlaceSearchQuery("Duomo di Milano")
+        viewModel.searchDestinations()
+        viewModel.selectDestinationSuggestion(suggestion)
+        assertEquals("Piazza del Duomo, Milano", viewModel.uiState.value.destinationDisplayName)
+
+        viewModel.applyRouteInputs()
+        viewModel.openNavigationPreview()
+
+        assertEquals("Destinazione selezionata", viewModel.uiState.value.destinationDisplayName)
+        assertEquals(resolvedDestination(suggestion).navigationTarget.location, repository.lastPreviewDestination)
+        assertEquals("240", viewModel.uiState.value.effectiveRangeKmInput)
+        assertEquals("35", viewModel.uiState.value.reserveRangeKmInput)
+        assertEquals("12", viewModel.uiState.value.maximumDetourMinutesInput)
     }
 
     @Test
@@ -965,6 +1060,52 @@ class RoutePlannerViewModelTest {
         ),
     )
 
+    private fun destinationSuggestion() = DestinationSuggestion(
+        id = "google_places_new:place-a",
+        provider = "google_places_new",
+        providerRef = "place-a",
+        kind = DestinationKind.BUSINESS,
+        title = "Duomo di Milano",
+        subtitle = "Piazza del Duomo, Milano",
+        addressPreview = "Piazza del Duomo, Milano",
+        distanceMeters = 250,
+        providerRank = 0,
+        attribution = "Google Maps",
+    )
+
+    private fun resolvedDestination(suggestion: DestinationSuggestion) = ResolvedDestination(
+        sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+        revision = 1,
+        selection = ResolvedDestinationSelection(
+            provider = suggestion.provider,
+            providerRef = suggestion.providerRef,
+            formattedAddress = "Piazza del Duomo, Milano",
+            addressComponents = emptyList(),
+            normalizedAddress = NormalizedAddress(
+                street = null,
+                streetNumber = null,
+                locality = "Milano",
+                province = null,
+                region = null,
+                postalCode = null,
+                country = "Italia",
+            ),
+            location = Coordinate(45.4641, 9.1919),
+            kind = suggestion.kind,
+            attribution = listOf("Google Maps"),
+            fieldSources = mapOf(
+                "formatted_address" to "google_places_new",
+                "address_components" to "google_places_new",
+                "location" to "google_places_new",
+            ),
+        ),
+        navigationTarget = NavigationTarget(
+            location = Coordinate(45.4641, 9.1919),
+            providerRef = suggestion.providerRef,
+            mapLabel = "Destinazione selezionata",
+        ),
+    )
+
     private class FakeRoutingRepository(
         private val baseResult: Result<RoutePreview>,
         private val rankedResult: Result<RankedCngStations> = Result.failure(
@@ -982,8 +1123,17 @@ class RoutePlannerViewModelTest {
         private val placeSearchResult: Result<PlaceSearchResults> = Result.failure(
             AssertionError("searchPlaces was not expected"),
         ),
+        var destinationSuggestionsResult: Result<DestinationSuggestions> = Result.failure(
+            AssertionError("suggestDestinations was not expected"),
+        ),
+        var resolvedDestinationResult: Result<ResolvedDestination> = Result.failure(
+            AssertionError("resolveDestination was not expected"),
+        ),
     ) : RoutingRepository {
         var previewCalls = 0
+        var destinationSuggestCalls = 0
+        var destinationResolveCalls = 0
+        var lastDestinationSuggestRequest: DestinationSuggestRequest? = null
         var candidateCalls = 0
         var predictiveCalls = 0
         var lastRangeKm = 0.0
@@ -1009,6 +1159,23 @@ class RoutePlannerViewModelTest {
 
         override suspend fun searchPlaces(query: String, limit: Int): PlaceSearchResults =
             placeSearchResult.getOrThrow()
+
+        override suspend fun suggestDestinations(
+            request: DestinationSuggestRequest,
+        ): DestinationSuggestions {
+            destinationSuggestCalls += 1
+            lastDestinationSuggestRequest = request
+            return destinationSuggestionsResult.getOrThrow()
+        }
+
+        override suspend fun resolveDestination(
+            sessionId: String,
+            revision: Int,
+            suggestion: DestinationSuggestion,
+        ): ResolvedDestination {
+            destinationResolveCalls += 1
+            return resolvedDestinationResult.getOrThrow()
+        }
 
         override suspend fun previewRoute(
             origin: Coordinate,

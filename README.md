@@ -330,6 +330,20 @@ MapLibre's bounded ambient cache retains already visited resources without promi
 offline coverage. The operator accepted the device gate on 2026-09-03; its runner remains available
 as `bash scripts/run-phase13-live.sh`.
 
+## Android 0.19.4 Google destination search
+
+The active destination flow now uses Google Places API (New) Autocomplete and resolves only the
+selected Place ID through Details. Google is the sole destination provider for this test increment;
+Text Search, legacy geocoding and automatic provider fallback are disabled. TomTom traffic remains
+independent. Search text and addresses stay on mapless screens, while MapLibre and Valhalla receive
+only WGS84 coordinates, the permitted Place ID and the neutral label `Destinazione selezionata`.
+
+Live enablement is fail-closed until the operator verifies the Cloud billing-account regime and sets
+`GOOGLE_PLACES_CONTRACT_REGIME=eea`. See [ADR 0021](docs/adr/0021-google-places-new-destination-boundary.md)
+and the [0.19.4 live gate](docs/phases/android-0.19.4-google-destination-search-acceptance.md),
+accepted on the live backend and a physical device on 2026-09-07. The unavailable active-plan
+destination-edit case is recorded there as explicitly waived, not as a successful device test.
+
 ## Navigation UI upgrade
 
 Navigation UI Phase 1 was accepted on-device on 2026-09-03. During active guidance MapLibre fills
