@@ -222,7 +222,7 @@ fun NavigationMap(
                 state.navigationPosition?.let(puckAnimator::reset)
                 val vehicleLayer = SymbolLayer(PUCK_LAYER, PUCK_SOURCE).withProperties(
                         iconImage(NAVIGATION_VEHICLE_IMAGE),
-                        iconSize(0.55f),
+                        iconSize(NAVIGATION_PUCK_ICON_SCALE),
                         iconPitchAlignment(ICON_PITCH_ALIGNMENT_VIEWPORT),
                         iconAnchor(ICON_ANCHOR_CENTER),
                         iconAllowOverlap(true),
@@ -588,3 +588,4 @@ private const val FUEL_STOPS_SOURCE = "navigation-fuel-stops-source"
 private const val FUEL_STOPS_LAYER = "navigation-fuel-stops-layer"
 private const val FUEL_STOPS_TEXT_LAYER = "navigation-fuel-stops-text-layer"
 private const val NAVIGATION_MAP_LOG_TAG = "CompassNavigationUi"
+internal const val NAVIGATION_PUCK_ICON_SCALE = 1.10f

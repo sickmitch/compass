@@ -150,6 +150,7 @@ data class NavigationState(
     val lastSuccessfulRouteRefreshEpochMillis: Long? = null,
     val routeUpdateNotice: NavigationRouteUpdateNotice? = null,
     val lastSpokenInstruction: String? = null,
+    val voiceGuidanceEnabled: Boolean = true,
     val rejectedLocationCount: Int = 0,
     val routeSource: NavigationRouteSource = NavigationRouteSource.LIVE,
     val routeCachedAtEpochMillis: Long? = null,

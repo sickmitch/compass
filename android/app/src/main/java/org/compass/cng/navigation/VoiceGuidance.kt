@@ -6,6 +6,7 @@ import java.util.Locale
 
 interface VoiceGuidance {
     fun speak(announcement: VoiceAnnouncement)
+    fun stop()
     fun shutdown()
 }
 
@@ -38,9 +39,13 @@ class AndroidTextToSpeechVoiceGuidance(context: Context) : VoiceGuidance,
         )
     }
 
-    override fun shutdown() {
+    override fun stop() {
         pending = null
         textToSpeech.stop()
+    }
+
+    override fun shutdown() {
+        stop()
         textToSpeech.shutdown()
     }
 }

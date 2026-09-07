@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -52,10 +51,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -167,9 +166,15 @@ internal fun ActiveNavigationScreen(
     onRequestRouteUpdate: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
+    onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
     onStopNavigation: () -> Unit,
 ) {
-    val activeRoute = requireNotNull(state.route)
+    val navigationView = LocalView.current
+    DisposableEffect(navigationView) {
+        val wasKeepingScreenOn = navigationView.keepScreenOn
+        navigationView.keepScreenOn = true
+        onDispose { navigationView.keepScreenOn = wasKeepingScreenOn }
+    }
     LaunchedEffect(Unit) {
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
@@ -191,9 +196,6 @@ internal fun ActiveNavigationScreen(
     var tripSummaryHeightPixels by remember { mutableIntStateOf(0) }
     var routeUpdateNoticeHeightPixels by remember { mutableIntStateOf(0) }
     var routeUpdateNoticeVisible by remember { mutableStateOf(false) }
-    var speedCompliance by remember(activeRoute.routeId) {
-        mutableStateOf(SpeedLimitComplianceStatus.UNAVAILABLE)
-    }
     val routeUpdateNotice = state.routeUpdateNotice
     val routeUpdateNoticeUi = routeUpdateNotice?.toUiModel()
     LaunchedEffect(routeUpdateNotice) {
@@ -234,27 +236,6 @@ internal fun ActiveNavigationScreen(
             )
         }
     }
-    val observedSpeedMetersPerSecond = state.navigationPosition
-        ?.speedMetersPerSecond
-        ?.takeIf { state.gpsStatus == GpsStatus.ACTIVE }
-    val currentSpeedKph = speedKphForDisplay(observedSpeedMetersPerSecond)
-    LaunchedEffect(observedSpeedMetersPerSecond, ui.currentSpeedLimitKph) {
-        val next = speedLimitComplianceStatus(
-            previous = speedCompliance,
-            speedMetersPerSecond = observedSpeedMetersPerSecond,
-            speedLimitKph = ui.currentSpeedLimitKph,
-        )
-        if (next != speedCompliance) {
-            Log.i(
-                NAVIGATION_UI_LOG_TAG,
-                "speed_compliance from=${speedCompliance.name.lowercase()} " +
-                    "to=${next.name.lowercase()} speed_kph=${currentSpeedKph ?: "unavailable"} " +
-                    "limit_kph=${ui.currentSpeedLimitKph ?: "unavailable"}",
-            )
-            speedCompliance = next
-        }
-    }
-
     LaunchedEffect(cameraMode, cameraGestureRevision) {
         if (cameraMode == NavigationCameraMode.FREE) {
             delay(cameraConfig.freeModeAutoRecenterMillis)
@@ -339,14 +320,13 @@ internal fun ActiveNavigationScreen(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                ui.currentSpeedLimitKph?.let { limit ->
-                    SpeedLimitBadge(
-                        speedLimitKph = limit,
-                        currentSpeedKph = currentSpeedKph,
-                        complianceStatus = speedCompliance,
-                        modifier = Modifier.padding(bottom = 44.dp),
-                    )
-                }
+                VoiceGuidanceToggle(
+                    enabled = state.voiceGuidanceEnabled,
+                    onToggle = {
+                        onVoiceGuidanceEnabledChange(!state.voiceGuidanceEnabled)
+                    },
+                    modifier = Modifier.padding(bottom = 44.dp),
+                )
                 Spacer(modifier = Modifier.weight(1f))
                 MapModeControls(
                     cameraMode = cameraMode,
@@ -460,47 +440,50 @@ private fun RouteUpdateNoticeCard(
 }
 
 @Composable
-private fun SpeedLimitBadge(
-    speedLimitKph: Int,
-    currentSpeedKph: Int?,
-    complianceStatus: SpeedLimitComplianceStatus,
+private fun VoiceGuidanceToggle(
+    enabled: Boolean,
+    onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val overLimit = complianceStatus == SpeedLimitComplianceStatus.OVER_LIMIT
-    val warningColor = Color(0xFFFF3B30)
-    val accessibilityLabel = if (overLimit && currentSpeedKph != null) {
-        "Limite $speedLimitKph chilometri orari superato, velocità $currentSpeedKph"
-    } else {
-        "Limite $speedLimitKph chilometri orari"
-    }
-    Box(
+    Surface(
+        onClick = onToggle,
         modifier = modifier
-            .size(68.dp)
-            .testTag(if (overLimit) "navigation_speed_limit_over" else "navigation_speed_limit")
-            .clearAndSetSemantics { contentDescription = accessibilityLabel },
-        contentAlignment = Alignment.Center,
+            .size(width = 76.dp, height = 58.dp)
+            .testTag("navigation_voice_toggle")
+            .clearAndSetSemantics {
+                contentDescription = if (enabled) {
+                    "Voce attiva. Tocca per disattivare"
+                } else {
+                    "Voce disattivata. Tocca per attivare"
+                }
+            },
+        shape = CircleShape,
+        color = if (enabled) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+        },
+        contentColor = if (enabled) {
+            MaterialTheme.colorScheme.onPrimary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        tonalElevation = 7.dp,
     ) {
-        if (overLimit) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                shape = CircleShape,
-                color = Color.Transparent,
-                border = BorderStroke(3.dp, warningColor),
-            ) {}
-        }
-        Surface(
-            modifier = Modifier.size(58.dp),
-            shape = CircleShape,
-            color = Color.White,
-            contentColor = if (overLimit) warningColor else Color.Black,
-            border = BorderStroke(4.dp, Color(0xFFD20A0A)),
-            shadowElevation = if (overLimit) 12.dp else 7.dp,
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                text = speedLimitKph.toString(),
-                modifier = Modifier.wrapContentSize(Alignment.Center),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
+                text = "Voce",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            Text(
+                text = if (enabled) "ON" else "OFF",
+                style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
             )
         }

@@ -91,6 +91,13 @@ class NavigationForegroundService : Service(), LocationListener {
             simulateOffRoute()
             return START_STICKY
         }
+        if (intent?.action == ACTION_SET_VOICE_GUIDANCE) {
+            val enabled = intent.getBooleanExtra(EXTRA_VOICE_GUIDANCE_ENABLED, true)
+            session.setVoiceGuidanceEnabled(enabled)
+            if (!enabled) voiceGuidance.stop()
+            Log.i(LOG_TAG, "voice guidance enabled=$enabled")
+            return START_STICKY
+        }
         session.start()
         if (!updateControllerStarted) {
             routeUpdateController.navigationStarted(System.currentTimeMillis())
@@ -220,8 +227,10 @@ class NavigationForegroundService : Service(), LocationListener {
     private fun processNavigationState(nowEpochMillis: Long) {
         val state = session.state.value
         maneuverController.nextAnnouncement(state)?.let { announcement ->
-            voiceGuidance.speak(announcement)
-            session.recordSpokenInstruction(announcement.text)
+            if (state.voiceGuidanceEnabled) {
+                voiceGuidance.speak(announcement)
+                session.recordSpokenInstruction(announcement.text)
+            }
         }
         getSystemService(NotificationManager::class.java).notify(
             NOTIFICATION_ID,
@@ -426,6 +435,9 @@ class NavigationForegroundService : Service(), LocationListener {
         const val ACTION_REPLACE_UNAVAILABLE_FUEL_STOP =
             "org.compass.cng.navigation.REPLACE_UNAVAILABLE_FUEL_STOP"
         const val ACTION_SIMULATE_OFF_ROUTE = "org.compass.cng.navigation.SIMULATE_OFF_ROUTE"
+        const val ACTION_SET_VOICE_GUIDANCE =
+            "org.compass.cng.navigation.SET_VOICE_GUIDANCE"
+        const val EXTRA_VOICE_GUIDANCE_ENABLED = "voice_guidance_enabled"
         const val ACTION_STOP = "org.compass.cng.navigation.STOP"
         private const val NOTIFICATION_CHANNEL_ID = "compass_navigation"
         private const val NOTIFICATION_ID = 4_201

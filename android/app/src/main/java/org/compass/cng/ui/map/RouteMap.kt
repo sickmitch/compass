@@ -44,6 +44,7 @@ fun RouteMap(
     route: RoutePreview,
     modifier: Modifier = Modifier,
     candidateStations: List<RankedCngStation> = emptyList(),
+    selectedCandidateStationId: String? = null,
     cngStops: List<Coordinate> = emptyList(),
 ) {
     val mapView = rememberMapViewWithLifecycle()
@@ -54,7 +55,14 @@ fun RouteMap(
         modifier = modifier,
     )
 
-    LaunchedEffect(mapView, route, appearance, candidateStations, cngStops) {
+    LaunchedEffect(
+        mapView,
+        route,
+        appearance,
+        candidateStations,
+        selectedCandidateStationId,
+        cngStops,
+    ) {
         mapView.getMapAsync { map ->
             map.setStyle(Style.Builder().fromUri(appearance.styleUrl)) { style ->
                 Log.i(
@@ -124,6 +132,17 @@ fun RouteMap(
                             circleStrokeWidth(1.5f),
                         ),
                     )
+                    candidateStations
+                        .firstOrNull { it.mimitStationId == selectedCandidateStationId }
+                        ?.let { selected ->
+                            addEndpointLayer(
+                                style = style,
+                                idPrefix = "selected-cng-candidate",
+                                coordinate = selected.location,
+                                color = appearance.palette.selectedCng,
+                                strokeColor = appearance.palette.markerStroke,
+                            )
+                        }
                 }
                 cngStops.forEachIndexed { index, stop ->
                     addEndpointLayer(

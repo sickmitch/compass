@@ -533,6 +533,15 @@ class RoutePlannerViewModel(
 
     fun applyRouteInputs() {
         val state = mutableUiState.value
+        if (
+            state.originLatitudeInput.isBlank() ||
+            state.originLongitudeInput.isBlank() ||
+            state.destinationLatitudeInput.isBlank() ||
+            state.destinationLongitudeInput.isBlank()
+        ) {
+            mutableUiState.value = state.copy(message = null)
+            return
+        }
         val parsedOrigin = parseCoordinate(
             latitudeInput = state.originLatitudeInput,
             longitudeInput = state.originLongitudeInput,

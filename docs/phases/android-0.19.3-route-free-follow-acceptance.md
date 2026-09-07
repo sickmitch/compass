@@ -2,9 +2,9 @@
 
 ## Scope
 
-This final `0.19.3` increment removes the startup route request and makes the no-destination state a
-first-class GPS-follow mode. It does not change the server routing contract, off-route rerouting or
-active-navigation controls.
+This final `0.19.3` increment removes the startup route request, makes the no-destination state a
+first-class GPS-follow mode and applies the accepted driving-surface refinements. It does not change
+the server routing contract or off-route rerouting.
 
 Acceptance requires all of these invariants:
 
@@ -24,14 +24,27 @@ Acceptance requires all of these invariants:
   light-red X on failure, without a redundant label or global success/error line;
 - coordinates remain available only after selecting `Coordinate`;
 - `Calcola percorso` performs the first routing request without leaving the selector;
+- `Calcola percorso` is disabled while either endpoint is empty and no red empty-field message is
+  shown;
 - direct route, single-stop and extended-planning actions stay disabled until that route succeeds,
   and become disabled again whenever either endpoint changes;
+- single-stop and extended planning are equal outlined buttons on one row; direct route is a
+  centered content-width pill;
 - extended planning lists saved vehicle profiles plus a custom-values choice; selecting a profile
   pre-fills its policy but never removes the required remaining-range and maximum-detour inputs;
 - missing server credentials, authentication failures and connection failures open server
   configuration automatically; no manual server action is exposed in the planner;
 - active navigation still shows `Viaggio` and `Panoramica` unchanged;
-- `Termina navigazione` returns to route-free follow.
+- `Termina navigazione` returns to route-free follow;
+- tapping a CNG candidate card highlights only its map point; only `Scegli` adds it to the route;
+- candidate cards omit internal score percentages and emphasize price plus opening-at-arrival.
+- price observation timestamps remain visible without `prezzo non recente` or another qualitative
+  freshness label;
+- the puck is doubled in route-free follow and active navigation;
+- night mode renders the remaining route in intense blue;
+- the speed-limit sign is replaced by a voice ON/OFF toggle which controls foreground-service TTS;
+- the screen remains awake while the active-navigation surface is present and returns to ordinary
+  system timeout behavior after navigation ends.
 
 ## Repository-local evidence
 
@@ -74,14 +87,22 @@ Check manually:
    selected values. Confirm the current-position pill progresses from spinner to green check and no
    separate `Posizione ... acquisita` line appears. Repeat the inverse roles if practical.
 5. Select `Coordinate` and confirm latitude/longitude fields appear only for that endpoint.
-6. Before calculation, confirm direct route, single stop and extended planning are disabled.
-   Calculate the route and confirm all three activate without leaving the selector. Change an
-   endpoint and confirm they disable until recalculation.
+6. Before both endpoints are complete, confirm `Calcola percorso` is disabled without a red error.
+   After calculation, confirm the equal outlined stop/planning actions share one row and the direct
+   route pill is centered at content width. Change an endpoint and confirm they disable until
+   recalculation.
 7. Open `Pianificazione estesa`: saved vehicles, if present, must be listed along with
    `Nessun profilo · valori personalizzati`. With either choice, confirm autonomy remaining and
    maximum detour are still requested.
-8. Open the direct route, start navigation and confirm `Viaggio` plus `Panoramica` retain their
-   existing behavior. Terminate navigation and confirm Compass returns to route-free GPS follow.
+8. Open `Imposta una sosta`. Tap a card outside `Scegli`: no route request starts and only that
+   station's map marker turns amber. Confirm score percentages are absent and price plus arrival
+   opening state are prominent. Confirm the observation timestamp has no `prezzo non recente`
+   suffix. Tap `Scegli` and confirm the station is added.
+9. Open the direct route, start navigation and confirm `Viaggio` plus `Panoramica` retain their
+   existing behavior. In dark mode confirm the route is intense blue, the puck is doubled, and the
+   old speed sign is absent. Toggle `Voce` OFF and ON and confirm TTS follows the control. Leave the
+   device untouched long enough to confirm the display stays awake. Terminate navigation, confirm
+   Compass returns to route-free GPS follow, and confirm the ordinary screen timeout is restored.
 
 Screenshots are optional. Return a short confirmation plus any unexpected UI behavior. No
 UIAutomator or screenshot inspection is part of this gate.

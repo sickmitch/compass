@@ -289,6 +289,10 @@ class NavigationEngine(
         mutableState.value = mutableState.value.copy(lastSpokenInstruction = instruction)
     }
 
+    fun setVoiceGuidanceEnabled(enabled: Boolean) {
+        mutableState.value = mutableState.value.copy(voiceGuidanceEnabled = enabled)
+    }
+
     fun tick(nowEpochMillis: Long) {
         val state = mutableState.value
         if (state.phase == NavigationPhase.IDLE || state.phase == NavigationPhase.ROUTE_PREVIEW) return

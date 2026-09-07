@@ -20,8 +20,11 @@ class CompassMapAppearanceTest {
 
         assertEquals("https://maps.example/day.json", day.styleUrl)
         assertEquals("https://maps.example/night.json", night.styleUrl)
+        assertEquals(0xFF009DFF.toInt(), night.palette.route)
         assertNotEquals(day.palette.route, night.palette.route)
         assertNotEquals(day.palette.markerStroke, night.palette.markerStroke)
+        assertNotEquals(day.palette.cng, day.palette.selectedCng)
+        assertNotEquals(night.palette.cng, night.palette.selectedCng)
     }
 
     @Test
@@ -29,5 +32,10 @@ class CompassMapAppearanceTest {
         assertEquals("bundled", mapStyleSource("asset://compass-day.json"))
         assertEquals("remote_https", mapStyleSource("https://secret.example/style?token=value"))
         assertEquals("custom", mapStyleSource("file:///tmp/style.json"))
+    }
+
+    @Test
+    fun navigationPuckUsesTheDoubledIconScale() {
+        assertEquals(1.10f, NAVIGATION_PUCK_ICON_SCALE)
     }
 }

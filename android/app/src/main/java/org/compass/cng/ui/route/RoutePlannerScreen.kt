@@ -68,7 +68,6 @@ import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.PlaceKind
 import org.compass.cng.domain.model.PlaceSearchResult
 import org.compass.cng.domain.model.PlaceSearchSource
-import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.PredictiveCngStation
 import org.compass.cng.domain.model.PredictiveCngSuggestion
 import org.compass.cng.domain.model.PredictiveItineraryStop
@@ -103,6 +102,7 @@ fun RoutePlannerScreen(
     onRequestRouteUpdate: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
+    onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
     onUseCurrentLocation: (RouteEndpoint) -> Unit,
     onStopNavigation: () -> Unit,
 ) {
@@ -131,6 +131,7 @@ fun RoutePlannerScreen(
                 onRequestRouteUpdate = onRequestRouteUpdate,
                 onSimulateOffRoute = onSimulateOffRoute,
                 onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
+                onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
                 onStopNavigation = onStopNavigation,
             )
         }
@@ -347,6 +348,7 @@ fun RoutePlannerScreen(
                         onRequestRouteUpdate = onRequestRouteUpdate,
                         onSimulateOffRoute = onSimulateOffRoute,
                         onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
+                        onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
                         onStopNavigation = onStopNavigation,
                     )
                 }
@@ -552,6 +554,7 @@ private fun NavigationPreviewContent(
     onRequestRouteUpdate: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
+    onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
     onStopNavigation: () -> Unit,
 ) {
     if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
@@ -560,6 +563,7 @@ private fun NavigationPreviewContent(
             onRequestRouteUpdate = onRequestRouteUpdate,
             onSimulateOffRoute = onSimulateOffRoute,
             onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
+            onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
             onStopNavigation = onStopNavigation,
         )
         return
@@ -1027,7 +1031,20 @@ private fun ConfigureRouteContent(
     onAddStop: () -> Unit,
     onExtendedPlanning: () -> Unit,
 ) {
-    val routeReady = route != null && !routeInputsDirty && !isCalculating
+    val originReady = originLatitudeInput.isNotBlank() &&
+        originLongitudeInput.isNotBlank() &&
+        (
+            originLocationMethod != RouteLocationMethod.CURRENT_LOCATION ||
+                originCurrentLocationStatus == CurrentLocationAcquisitionStatus.SUCCESS
+            )
+    val destinationReady = destinationLatitudeInput.isNotBlank() &&
+        destinationLongitudeInput.isNotBlank() &&
+        (
+            destinationLocationMethod != RouteLocationMethod.CURRENT_LOCATION ||
+                destinationCurrentLocationStatus == CurrentLocationAcquisitionStatus.SUCCESS
+            )
+    val endpointsReady = originReady && destinationReady
+    val routeReady = endpointsReady && route != null && !routeInputsDirty && !isCalculating
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Column(
@@ -1068,7 +1085,7 @@ private fun ConfigureRouteContent(
                 message?.let { InlineError(it) }
                 Button(
                     onClick = onApply,
-                    enabled = !isCalculating,
+                    enabled = endpointsReady && !isCalculating,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (isCalculating) {
@@ -1087,26 +1104,38 @@ private fun ConfigureRouteContent(
                         },
                     )
                 }
-                Button(
-                    onClick = onAddStop,
-                    enabled = routeReady,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Imposta una sosta")
+                    OutlinedButton(
+                        onClick = onAddStop,
+                        enabled = routeReady,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Imposta una sosta")
+                    }
+                    OutlinedButton(
+                        onClick = onExtendedPlanning,
+                        enabled = routeReady,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Pianificazione estesa")
+                    }
                 }
-                OutlinedButton(
-                    onClick = onExtendedPlanning,
-                    enabled = routeReady,
+                Box(
                     modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text("Pianificazione estesa")
-                }
-                OutlinedButton(
-                    onClick = onDirectRoute,
-                    enabled = routeReady,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Usa percorso diretto")
+                    OutlinedButton(
+                        onClick = onDirectRoute,
+                        enabled = routeReady,
+                        modifier = Modifier
+                            .wrapContentWidth()
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        Text("Usa percorso diretto")
+                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -2003,10 +2032,12 @@ private fun CandidateContent(
     message: String?,
     onSelect: (RankedCngStation) -> Unit,
 ) {
+    var selectedStationId by remember(rankedStations) { mutableStateOf<String?>(null) }
     Column(modifier = Modifier.fillMaxSize()) {
         RouteMap(
             route = rankedStations.baseRoute,
             candidateStations = rankedStations.candidates,
+            selectedCandidateStationId = selectedStationId,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(0.38f),
@@ -2076,7 +2107,8 @@ private fun CandidateContent(
                             },
                         selecting = pendingStation?.mimitStationId == station.mimitStationId,
                         enabled = pendingStation == null,
-                        onSelect = { onSelect(station) },
+                        onHighlight = { selectedStationId = station.mimitStationId },
+                        onChoose = { onSelect(station) },
                     )
                 }
             }
@@ -2090,11 +2122,12 @@ private fun CandidateCard(
     predictiveStation: PredictiveCngStation?,
     selecting: Boolean,
     enabled: Boolean,
-    onSelect: () -> Unit,
+    onHighlight: () -> Unit,
+    onChoose: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
     Card(
-        onClick = onSelect,
+        onClick = onHighlight,
         enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
@@ -2150,43 +2183,55 @@ private fun CandidateCard(
                 station.opening.openingHours ?: "Orari non disponibili",
                 style = MaterialTheme.typography.bodySmall,
             )
-            station.price?.let { price ->
-                Text(
-                    "${formatPrice(price)} · rilevato ${formatDateTime(price.observedAt)} · ${freshnessLabel(price.freshness)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            } ?: Text(
-                "Prezzo CNG non disponibile",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "Punteggio ${formatScore(station.ranking.totalScore)} · deviazione ${formatScore(station.ranking.detourScore)} · apertura ${formatScore(station.ranking.openingScore)} · prezzo ${formatScore(station.ranking.priceScore)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
             ) {
-                station.phone?.let { phone ->
-                    TextButton(onClick = { uriHandler.openUri("tel:${phone.filterPhoneCharacters()}") }) {
-                        Text("Chiama")
-                    }
-                }
-                Button(onClick = onSelect, enabled = enabled) {
-                    if (selecting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .width(18.dp)
-                                .height(18.dp),
-                            strokeWidth = 2.dp,
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    station.price?.let { price ->
+                        CandidatePrice(price)
+                        Text(
+                            "Rilevato ${formatDateTime(price.observedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Calcolo…")
-                    } else {
-                        Text("Scegli")
+                    } ?: Text(
+                        "Prezzo CNG non disponibile",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    station.phone?.let { phone ->
+                        TextButton(
+                            onClick = {
+                                uriHandler.openUri("tel:${phone.filterPhoneCharacters()}")
+                            },
+                        ) {
+                            Text("Chiama")
+                        }
+                    }
+                    Button(onClick = onChoose, enabled = enabled) {
+                        if (selecting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .width(18.dp)
+                                    .height(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Calcolo…")
+                        } else {
+                            Text("Scegli")
+                        }
                     }
                 }
             }
@@ -2342,7 +2387,7 @@ private fun PredictiveItineraryStopCard(stop: PredictiveItineraryStop) {
             )
             stop.price?.let { price ->
                 Text(
-                    "${formatPrice(price)} · rilevato ${formatDateTime(price.observedAt)} · ${freshnessLabel(price.freshness)}",
+                    "${formatPrice(price)} · rilevato ${formatDateTime(price.observedAt)}",
                     style = MaterialTheme.typography.bodySmall,
                 )
             } ?: Text(
@@ -2737,18 +2782,57 @@ private fun RankingBadge(rank: Int) {
 
 @Composable
 private fun OpeningBadge(state: OpeningState) {
-    val (label, color) = when (state) {
-        OpeningState.OPEN -> "Aperto all'arrivo" to Color(0xFF146C3A)
-        OpeningState.CLOSED -> "Chiuso all'arrivo" to MaterialTheme.colorScheme.error
-        OpeningState.UNKNOWN -> "Orario sconosciuto" to MaterialTheme.colorScheme.onSurfaceVariant
+    val (label, containerColor, contentColor) = when (state) {
+        OpeningState.OPEN -> Triple(
+            "Aperto all'arrivo",
+            Color(0xFF146C3A),
+            Color.White,
+        )
+        OpeningState.CLOSED -> Triple(
+            "Chiuso all'arrivo",
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+        )
+        OpeningState.UNKNOWN -> Triple(
+            "Orario sconosciuto",
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-    Surface(color = color.copy(alpha = 0.14f), shape = MaterialTheme.shapes.small) {
+    Surface(color = containerColor, shape = MaterialTheme.shapes.small) {
         Text(
             label,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = contentColor,
+            fontWeight = FontWeight.Bold,
         )
+    }
+}
+
+@Composable
+private fun CandidatePrice(price: CngPrice) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.wrapContentWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                "Prezzo Metano",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                formatPrice(price),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
@@ -2818,15 +2902,6 @@ private fun formatPrice(price: CngPrice): String = String.format(
     price.currency,
     price.unit,
 )
-
-private fun formatScore(score: Double): String = String.format(Locale.ITALY, "%.0f%%", score * 100)
-
-private fun freshnessLabel(freshness: PriceFreshness): String = when (freshness) {
-    PriceFreshness.FRESH -> "prezzo recente"
-    PriceFreshness.STALE -> "prezzo non recente"
-    PriceFreshness.FUTURE_OBSERVATION -> "data prezzo anomala"
-    PriceFreshness.UNKNOWN -> "freschezza sconosciuta"
-}
 
 private fun trafficLabel(trafficState: String): String = when (trafficState) {
     "not_configured" -> "live non configurato"

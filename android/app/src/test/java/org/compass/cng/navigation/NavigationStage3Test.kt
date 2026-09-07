@@ -13,6 +13,19 @@ import org.junit.Test
 
 class NavigationStage3Test {
     @Test
+    fun voiceGuidanceCanBeDisabledAndReenabledDuringNavigation() {
+        val engine = NavigationEngine()
+        engine.preview(route("route_voice_toggle"))
+        engine.start(nowEpochMillis = 1_000)
+
+        engine.setVoiceGuidanceEnabled(false)
+        assertEquals(false, engine.state.value.voiceGuidanceEnabled)
+
+        engine.setVoiceGuidanceEnabled(true)
+        assertTrue(engine.state.value.voiceGuidanceEnabled)
+    }
+
+    @Test
     fun maneuverAnnouncementsAdvanceByTimeAndDistanceWithoutDuplicates() {
         val route = route("route_stage_3_voice")
         val controller = ManeuverController()

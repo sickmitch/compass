@@ -139,6 +139,26 @@ endpoint locks those actions again until recalculation. Extended planning offers
 profiles and an explicit custom-values choice. A selected profile supplies full-range and reserve
 defaults, while remaining CNG range and maximum detour always remain driver inputs.
 
+`Calcola percorso` stays disabled until both endpoint coordinate pairs have been acquired or
+entered; attempting an incomplete request programmatically is a no-op and does not show a red
+empty-field error. Once routing succeeds, `Imposta una sosta` and `Pianificazione estesa` use equal
+outlined actions on one row. `Usa percorso diretto` remains a centered content-width pill.
+
+In the CNG candidate list, tapping a station card only changes its corresponding map point from the
+standard CNG green to the selection amber. Only the nested `Scegli` action adds that station and
+requests a new route. Internal ranking percentages are no longer shown. Arrival opening state uses
+a high-contrast badge, while an available CNG price has its own prominent surface with observation
+time immediately below on the card background; qualitative freshness copy is intentionally omitted.
+The price surface wraps only its label
+and value; the transparent `Chiama` action sits above `Scegli` in the adjacent action column.
+
+While turn-by-turn navigation is visible, the Activity keeps the display awake. The vehicle puck is
+rendered at twice its previous scale in both route-free follow and active guidance. Night navigation
+uses an intense blue remaining-route line (`#009DFF`). The former speed-limit badge is not rendered;
+its position now contains a `Voce ON/OFF` control backed by the foreground service. Disabling it
+immediately stops queued/current TTS output while maneuver scheduling continues, so re-enabling does
+not replay stale instructions.
+
 Route recalculation is server-backed. An APK using loopback HTTP plus `adb reverse` loses the API as
 soon as USB/ADB is removed. Compass opens server configuration automatically when credentials are
 missing or a routing/search request encounters a connection or authentication failure. There is no

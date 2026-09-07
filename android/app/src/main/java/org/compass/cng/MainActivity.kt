@@ -150,6 +150,18 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     },
+                    onVoiceGuidanceEnabledChange = { enabled ->
+                        ContextCompat.startForegroundService(
+                            this,
+                            Intent(this, NavigationForegroundService::class.java).apply {
+                                action = NavigationForegroundService.ACTION_SET_VOICE_GUIDANCE
+                                putExtra(
+                                    NavigationForegroundService.EXTRA_VOICE_GUIDANCE_ENABLED,
+                                    enabled,
+                                )
+                            },
+                        )
+                    },
                     onUseCurrentLocation = { endpoint ->
                         routePlannerViewModel.currentLocationRequested(endpoint)
                         if (hasLocationPermission()) {

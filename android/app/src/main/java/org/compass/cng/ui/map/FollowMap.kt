@@ -134,7 +134,7 @@ fun FollowMap(
                 style.addLayer(
                     SymbolLayer(FOLLOW_PUCK_LAYER, FOLLOW_PUCK_SOURCE).withProperties(
                         iconImage(FOLLOW_VEHICLE_IMAGE),
-                        iconSize(0.55f),
+                        iconSize(NAVIGATION_PUCK_ICON_SCALE),
                         iconPitchAlignment(ICON_PITCH_ALIGNMENT_VIEWPORT),
                         iconAnchor(ICON_ANCHOR_CENTER),
                         iconRotate(0f),

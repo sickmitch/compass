@@ -229,6 +229,23 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
+    fun emptyTripEndpointsDoNotSubmitOrShowAValidationError() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+
+        viewModel.openRouteConfiguration()
+        viewModel.applyRouteInputs()
+
+        assertEquals(0, repository.previewCalls)
+        assertNull(viewModel.uiState.value.message)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+    }
+
+    @Test
     fun backingOutOfANewTripReturnsToRouteFreeFollow() = runTest {
         val viewModel = RoutePlannerViewModel(
             routingRepository = FakeRoutingRepository(baseResult = Result.success(sampleRoute())),

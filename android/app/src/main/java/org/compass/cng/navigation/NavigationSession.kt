@@ -80,6 +80,11 @@ class NavigationSession(
         engine.recordSpokenInstruction(instruction)
     }
 
+    fun setVoiceGuidanceEnabled(enabled: Boolean) {
+        engine.setVoiceGuidanceEnabled(enabled)
+        eventLogger("navigation voice guidance enabled=$enabled")
+    }
+
     fun clear() {
         engine.clear()
         routeStore.clear()
