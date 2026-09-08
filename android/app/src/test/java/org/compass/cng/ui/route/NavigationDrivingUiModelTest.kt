@@ -2,16 +2,25 @@ package org.compass.cng.ui.route
 
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.ManeuverSign
 import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.OpeningAtEta
+import org.compass.cng.domain.model.OpeningState
+import org.compass.cng.domain.model.OpeningValidation
+import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationConnectivity
 import org.compass.cng.navigation.NavigationFuelStop
+import org.compass.cng.navigation.NavigationFuelStopLifecycle
+import org.compass.cng.navigation.NavigationFuelStopProgress
+import org.compass.cng.navigation.NavigationFuelStopVisit
 import org.compass.cng.navigation.NavigationRoute
 import org.compass.cng.navigation.NavigationPosition
 import org.compass.cng.navigation.NavigationRouteSource
@@ -28,7 +37,7 @@ class NavigationDrivingUiModelTest {
     fun exposesGlanceableManeuverTripAndCngInformation() {
         val state = sampleState()
 
-        val ui = state.toDrivingUiModel()
+        val ui = state.toDrivingUiModel(ZoneOffset.UTC)
 
         assertEquals(ManeuverVisualFamily.TURN, ui.maneuverVisual.family)
         assertEquals(ManeuverDirection.RIGHT, ui.maneuverVisual.direction)
@@ -43,7 +52,94 @@ class NavigationDrivingUiModelTest {
         assertEquals("S. ZENONE OVEST", ui.nextCngStop?.name)
         assertEquals("22,5 km", ui.nextCngStop?.distance)
         assertEquals("20:45", ui.nextCngStop?.arrivalTime)
+        assertEquals("Aperto all'arrivo", ui.nextCngStop?.availabilityLabel)
+        assertEquals("1,599 EUR/kg", ui.nextCngStop?.price)
+        assertEquals("In avvicinamento", ui.nextCngStop?.lifecycleLabel)
+        assertEquals("20 min", ui.nextCngStop?.dwellDuration)
+        assertEquals(1, ui.cngStops.size)
         assertEquals(0.25f, ui.progress)
+    }
+
+    @Test
+    fun hidesDynamicCngEvidenceForCachedRoutes() {
+        val ui = sampleState().copy(routeSource = NavigationRouteSource.CACHE).toDrivingUiModel()
+
+        assertEquals(null, ui.nextCngStop?.availabilityLabel)
+        assertEquals(null, ui.nextCngStop?.price)
+        assertEquals("+39 02 123456", ui.nextCngStop?.phone)
+    }
+
+    @Test
+    fun refuellingVisitBecomesTheCurrentIntermediateDestinationWithCountdown() {
+        val base = sampleState()
+        val stop = requireNotNull(base.nextFuelStop).stop
+        val visit = NavigationFuelStopVisit(
+            stop = stop,
+            arrivedAtEpochMillis = 1_000,
+            plannedCompletionAtEpochMillis = 601_000,
+            remainingDwellSeconds = 600.0,
+        )
+        val progress = requireNotNull(base.nextFuelStop).copy(
+            distanceRemainingMeters = 0.0,
+            lifecycle = NavigationFuelStopLifecycle.REFUELING,
+            estimatedArrivalAt = Instant.ofEpochMilli(1_000),
+        )
+
+        val ui = base.copy(
+            activeFuelStopVisit = visit,
+            nextFuelStop = progress,
+            fuelStopProgress = listOf(progress),
+        ).toDrivingUiModel(ZoneOffset.UTC)
+
+        assertEquals(ManeuverVisualFamily.DESTINATION, ui.maneuverVisual.family)
+        assertEquals("Sosta CNG", ui.distanceToManeuver)
+        assertEquals("Rifornimento in corso", ui.primaryInstruction)
+        assertEquals("S. ZENONE OVEST", ui.targetRoad)
+        assertEquals("Conferma quando hai terminato", ui.followingInstruction)
+        assertEquals("10 min", ui.nextCngStop?.refuelingRemainingDuration)
+        assertEquals(false, ui.nextCngStop?.refuelingPlannedDurationElapsed)
+    }
+
+    @Test
+    fun hidesStalePriceAndOpeningEvaluatedForADifferentArrival() {
+        val state = sampleState()
+        val route = requireNotNull(state.route)
+        val originalStop = route.fuelStops.single()
+        val changedStop = originalStop.copy(
+            opening = requireNotNull(originalStop.opening).copy(
+                evaluatedAt = originalStop.expectedArrivalAt!!.minusHours(2),
+            ),
+            price = requireNotNull(originalStop.price).copy(freshness = PriceFreshness.STALE),
+        )
+        val progress = requireNotNull(state.nextFuelStop).copy(stop = changedStop)
+
+        val ui = state.copy(
+            route = route.copy(fuelStops = listOf(changedStop)),
+            nextFuelStop = progress,
+            fuelStopProgress = listOf(progress),
+        ).toDrivingUiModel()
+
+        assertEquals(null, ui.nextCngStop?.availabilityLabel)
+        assertEquals(null, ui.nextCngStop?.price)
+    }
+
+    @Test
+    fun hidesNominallyFreshPriceWhenItsEvaluationBelongsToAnotherEta() {
+        val state = sampleState()
+        val route = requireNotNull(state.route)
+        val originalStop = route.fuelStops.single()
+        val changedStop = originalStop.copy(
+            price = requireNotNull(originalStop.price).copy(ageSeconds = 0.0),
+        )
+        val progress = requireNotNull(state.nextFuelStop).copy(stop = changedStop)
+
+        val ui = state.copy(
+            route = route.copy(fuelStops = listOf(changedStop)),
+            nextFuelStop = progress,
+            fuelStopProgress = listOf(progress),
+        ).toDrivingUiModel()
+
+        assertEquals(null, ui.nextCngStop?.price)
     }
 
     @Test
@@ -209,6 +305,29 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
+    fun convertsBackendUtcStopAndTrafficInstantsToTheDeviceZone() {
+        val state = sampleState().let { sample ->
+            sample.copy(
+                route = requireNotNull(sample.route).copy(
+                    timing = sample.route.timing.copy(
+                        trafficDelaySeconds = 0.0,
+                        trafficDelayState = "estimated",
+                        trafficState = "fresh",
+                        trafficAware = true,
+                        trafficObservedAt = OffsetDateTime.parse("2026-09-03T06:10:00Z"),
+                    ),
+                ),
+            )
+        }
+
+        val ui = state.toDrivingUiModel(ZoneId.of("Europe/Rome"))
+
+        assertEquals("22:45", ui.nextCngStop?.arrivalTime)
+        assertEquals("22:45", ui.arrivalTime)
+        assertTrue(ui.statusMessages.any { "aggiornato 08:10" in it.text })
+    }
+
+    @Test
     fun reportsGraphSpeedFallbackEvenWhenTrafficFeedIsFresh() {
         val state = sampleState().let { sample ->
             sample.copy(
@@ -370,6 +489,35 @@ class NavigationDrivingUiModelTest {
             location = Coordinate(44.9, 9.3),
             expectedArrivalAt = OffsetDateTime.of(2026, 9, 3, 20, 45, 0, 0, ZoneOffset.UTC),
             dwellTimeSeconds = 1_200,
+            opening = OpeningAtEta(
+                state = OpeningState.OPEN,
+                validation = OpeningValidation.VALID,
+                openingHours = "24/7",
+                source = "osm",
+                sourceConfidence = 0.98,
+                evaluatedAt = OffsetDateTime.of(
+                    2026, 9, 3, 20, 45, 0, 0, ZoneOffset.UTC,
+                ),
+                timezone = "Europe/Rome",
+                nextChangeAt = null,
+                warnings = emptyList(),
+            ),
+            phone = "+39 02 123456",
+            price = CngPrice(
+                unitPrice = 1.599,
+                currency = "EUR",
+                unit = "kg",
+                serviceMode = "self",
+                observedAt = OffsetDateTime.of(
+                    2026, 9, 3, 8, 0, 0, 0, ZoneOffset.UTC,
+                ),
+                ingestedAt = OffsetDateTime.of(
+                    2026, 9, 3, 8, 5, 0, 0, ZoneOffset.UTC,
+                ),
+                sourceName = "mimit",
+                ageSeconds = 45_900.0,
+                freshness = PriceFreshness.FRESH,
+            ),
         )
         val route = NavigationRoute(
             routeId = "route-ui",
@@ -396,7 +544,18 @@ class NavigationDrivingUiModelTest {
             estimatedArrivalAt = Instant.parse("2026-09-03T20:45:00Z"),
             routeProgressFraction = 0.25,
             gpsStatus = GpsStatus.ACTIVE,
-            nextFuelStop = org.compass.cng.navigation.NavigationFuelStopProgress(stop, 22_500.0),
+            nextFuelStop = NavigationFuelStopProgress(
+                stop,
+                22_500.0,
+                NavigationFuelStopLifecycle.APPROACHING,
+            ),
+            fuelStopProgress = listOf(
+                NavigationFuelStopProgress(
+                    stop,
+                    22_500.0,
+                    NavigationFuelStopLifecycle.APPROACHING,
+                ),
+            ),
         )
     }
 }

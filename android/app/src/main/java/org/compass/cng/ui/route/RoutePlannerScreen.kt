@@ -108,6 +108,7 @@ fun RoutePlannerScreen(
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
+    onCompleteFuelStop: () -> Unit,
     onUseCurrentLocation: (RouteEndpoint) -> Unit,
     onStopNavigation: () -> Unit,
 ) {
@@ -137,6 +138,7 @@ fun RoutePlannerScreen(
                 onSimulateOffRoute = onSimulateOffRoute,
                 onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
                 onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
+                onCompleteFuelStop = onCompleteFuelStop,
                 onStopNavigation = onStopNavigation,
             )
         }
@@ -357,6 +359,7 @@ fun RoutePlannerScreen(
                         onSimulateOffRoute = onSimulateOffRoute,
                         onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
                         onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
+                        onCompleteFuelStop = onCompleteFuelStop,
                         onStopNavigation = onStopNavigation,
                     )
                 }
@@ -563,6 +566,7 @@ private fun NavigationPreviewContent(
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
+    onCompleteFuelStop: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
     if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
@@ -572,6 +576,7 @@ private fun NavigationPreviewContent(
             onSimulateOffRoute = onSimulateOffRoute,
             onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
             onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
+            onCompleteFuelStop = onCompleteFuelStop,
             onStopNavigation = onStopNavigation,
         )
         return
@@ -2963,13 +2968,16 @@ private fun formatSignedKilometers(kilometers: Double): String = String.format(
     kilometers,
 )
 
-private fun formatTime(value: OffsetDateTime): String = value.format(DateTimeFormatter.ofPattern("HH:mm"))
+private fun formatTime(value: OffsetDateTime): String = DateTimeFormatter.ofPattern("HH:mm")
+    .format(value.atZoneSameInstant(ZoneId.systemDefault()))
 
 private val ACTIVE_NAVIGATION_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter
     .ofPattern("HH:mm")
     .withZone(ZoneId.systemDefault())
 
-private fun formatDateTime(value: OffsetDateTime): String = value.format(DateTimeFormatter.ofPattern("dd/MM HH:mm"))
+private fun formatDateTime(value: OffsetDateTime): String =
+    DateTimeFormatter.ofPattern("dd/MM HH:mm")
+        .format(value.atZoneSameInstant(ZoneId.systemDefault()))
 
 private fun formatPrice(price: CngPrice): String = String.format(
     Locale.ITALY,

@@ -58,6 +58,8 @@ class NavigationEngine(
     private var lastAcceptedFixAtMillis: Long? = null
     private var trackingStartedAtMillis: Long? = null
     private var fuelStopDistances = emptyList<Pair<NavigationFuelStop, Double>>()
+    private val completedFuelStopSequences = mutableSetOf<Int>()
+    private var lastReliableDistanceAlongGeometryMeters: Double? = null
     private var phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
 
     fun preview(
@@ -66,6 +68,7 @@ class NavigationEngine(
         cachedAtEpochMillis: Long? = null,
     ) {
         resetTracking(route)
+        val plannedFuelStops = plannedFuelStopProgress()
         mutableState.value = NavigationState(
             phase = NavigationPhase.ROUTE_PREVIEW,
             route = route,
@@ -74,6 +77,8 @@ class NavigationEngine(
             totalDurationRemainingSeconds = route.totalTripDurationSeconds,
             currentManeuver = route.maneuvers.firstOrNull(),
             nextManeuver = route.maneuvers.getOrNull(1),
+            nextFuelStop = plannedFuelStops.firstOrNull(),
+            fuelStopProgress = plannedFuelStops,
             routeSource = source,
             routeCachedAtEpochMillis = cachedAtEpochMillis,
         )
@@ -108,6 +113,8 @@ class NavigationEngine(
         lastAcceptedFixAtMillis = null
         trackingStartedAtMillis = null
         fuelStopDistances = emptyList()
+        completedFuelStopSequences.clear()
+        lastReliableDistanceAlongGeometryMeters = null
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
         mutableState.value = NavigationState()
     }
@@ -125,6 +132,20 @@ class NavigationEngine(
             mutableState.value = previousState.copy(
                 rawLocation = rawLocation,
                 rejectedLocationCount = previousState.rejectedLocationCount + 1,
+            )
+            return
+        }
+        if (previousState.activeFuelStopVisit != null) {
+            lastAcceptedFixAtMillis = filtered.timestampEpochMillis
+            mutableState.value = refuellingStateAt(
+                state = previousState.copy(
+                    phase = NavigationPhase.AT_FUEL_STOP,
+                    rawLocation = rawLocation,
+                    gpsStatus = GpsStatus.ACTIVE,
+                    offRouteStatus = OffRouteStatus.ON_ROUTE,
+                    offRouteDurationMillis = 0L,
+                ),
+                nowEpochMillis = now.toEpochMilli(),
             )
             return
         }
@@ -192,24 +213,54 @@ class NavigationEngine(
             backwardsConflict = backwardsConflict,
         )
 
+        if (progressIsFirstReliableFix()) {
+            fuelStopDistances
+                .takeWhile { (_, routeDistance) ->
+                    routeDistance + policy.atFuelStopDistanceMeters <
+                        match.distanceAlongGeometryMeters
+                }
+                .forEach { (stop, _) -> completedFuelStopSequences += stop.sequence }
+        }
+        val reachedFuelStop = if (offRouteStatus == OffRouteStatus.ON_ROUTE) {
+            firstReachedFuelStop(match.distanceAlongGeometryMeters)
+        } else {
+            null
+        }
+        val activeVisit = reachedFuelStop?.let { (stop, _) ->
+            val arrivedAt = now.toEpochMilli()
+            NavigationFuelStopVisit(
+                stop = stop,
+                arrivedAtEpochMillis = arrivedAt,
+                plannedCompletionAtEpochMillis = arrivedAt + stop.dwellTimeSeconds * 1_000L,
+                remainingDwellSeconds = stop.dwellTimeSeconds.toDouble(),
+            )
+        }
+        val authoritativeDistanceAlong = reachedFuelStop?.second
+            ?: match.distanceAlongGeometryMeters
         val progressFraction = if (match.geometryLengthMeters == 0.0) {
             0.0
         } else {
-            (match.distanceAlongGeometryMeters / match.geometryLengthMeters).coerceIn(0.0, 1.0)
+            (authoritativeDistanceAlong / match.geometryLengthMeters).coerceIn(0.0, 1.0)
         }
         val distanceRemaining = route.totalDistanceMeters * (1.0 - progressFraction)
         val drivingRemaining = route.drivingDurationSeconds * (1.0 - progressFraction)
-        val nextFuel = fuelStopDistances
-            .firstOrNull { (_, routeDistance) -> routeDistance + policy.atFuelStopDistanceMeters >= match.distanceAlongGeometryMeters }
-            ?.let { (stop, routeDistance) ->
-                NavigationFuelStopProgress(
-                    stop = stop,
-                    distanceRemainingMeters = maxOf(0.0, routeDistance - match.distanceAlongGeometryMeters),
-                )
-            }
-        val remainingDwell = fuelStopDistances.count { (_, routeDistance) ->
-            routeDistance + policy.atFuelStopDistanceMeters >= match.distanceAlongGeometryMeters
-        } * route.timing.dwellSecondsPerRefuelingStop.toDouble()
+        if (offRouteStatus == OffRouteStatus.ON_ROUTE) {
+            lastReliableDistanceAlongGeometryMeters = authoritativeDistanceAlong
+        }
+        val fuelProgress = fuelStopProgressAt(
+            route = route,
+            distanceAlongGeometryMeters = authoritativeDistanceAlong,
+            geometryLengthMeters = match.geometryLengthMeters,
+            now = now,
+            activeVisit = activeVisit,
+        )
+        val nextFuel = fuelProgress.firstOrNull {
+            it.lifecycle != NavigationFuelStopLifecycle.COMPLETED
+        }
+        val remainingDwell = remainingFuelDwellSeconds(
+            nowEpochMillis = now.toEpochMilli(),
+            activeVisit = activeVisit,
+        )
         val maneuverIndex = upcomingManeuverIndex(route, match.segmentIndex)
         val currentManeuver = route.maneuvers.getOrNull(maneuverIndex)
         val nextManeuver = route.maneuvers.getOrNull(maneuverIndex + 1)
@@ -223,7 +274,9 @@ class NavigationEngine(
         val speed = filtered.speedMetersPerSecond ?: 0.0
         val navigationBearing = headingController.update(match.segmentBearingDegrees, speed)
         val progressIsReliable = offRouteStatus == OffRouteStatus.ON_ROUTE
-        val computedPhase = if (progressIsReliable) navigationPhase(
+        val computedPhase = if (activeVisit != null) {
+            NavigationPhase.AT_FUEL_STOP
+        } else if (progressIsReliable) navigationPhase(
             distanceRemainingMeters = distanceRemaining,
             distanceToManeuverMeters = distanceToManeuver,
             speedMetersPerSecond = speed,
@@ -243,7 +296,7 @@ class NavigationEngine(
             rawLocation = rawLocation,
             navigationPosition = if (progressIsReliable) {
                 NavigationPosition(
-                    coordinate = match.snappedCoordinate,
+                    coordinate = reachedFuelStop?.first?.location ?: match.snappedCoordinate,
                     routeSegmentIndex = match.segmentIndex,
                     speedMetersPerSecond = speed,
                     bearingDegrees = navigationBearing,
@@ -291,6 +344,12 @@ class NavigationEngine(
                 previousState.routeProgressFraction
             },
             nextFuelStop = if (progressIsReliable) nextFuel else previousState.nextFuelStop,
+            fuelStopProgress = if (progressIsReliable) {
+                fuelProgress
+            } else {
+                previousState.fuelStopProgress
+            },
+            activeFuelStopVisit = activeVisit,
             offRouteStatus = offRouteStatus,
             distanceFromRouteMeters = match.distanceFromRouteMeters,
             routeMatchConfidence = routeMatchConfidence,
@@ -302,7 +361,8 @@ class NavigationEngine(
     fun beginRouteUpdate(reason: RouteUpdateReason) {
         val current = mutableState.value
         if (current.route == null || current.phase == NavigationPhase.IDLE ||
-            current.phase == NavigationPhase.ROUTE_PREVIEW
+            current.phase == NavigationPhase.ROUTE_PREVIEW ||
+            current.activeFuelStopVisit != null
         ) {
             return
         }
@@ -334,6 +394,7 @@ class NavigationEngine(
             null
         }
         resetTracking(route)
+        val plannedFuelStops = plannedFuelStopProgress()
         trackingStartedAtMillis = refreshedAtEpochMillis
         mutableState.value = NavigationState(
             phase = NavigationPhase.NAVIGATING,
@@ -343,6 +404,8 @@ class NavigationEngine(
             totalDurationRemainingSeconds = route.totalTripDurationSeconds,
             currentManeuver = route.maneuvers.firstOrNull(),
             nextManeuver = route.maneuvers.getOrNull(1),
+            nextFuelStop = plannedFuelStops.firstOrNull(),
+            fuelStopProgress = plannedFuelStops,
             gpsStatus = GpsStatus.ACQUIRING,
             lastSuccessfulRouteRefreshEpochMillis = refreshedAtEpochMillis,
             routeUpdateNotice = updateNotice,
@@ -380,13 +443,66 @@ class NavigationEngine(
         mutableState.value = mutableState.value.copy(voiceGuidanceEnabled = enabled)
     }
 
+    /** Completes only the active visit; GPS proximity alone never resumes navigation. */
+    fun completeFuelStop(nowEpochMillis: Long = System.currentTimeMillis()): Boolean {
+        val current = mutableState.value
+        val visit = current.activeFuelStopVisit ?: return false
+        val route = current.route ?: return false
+        completedFuelStopSequences += visit.stop.sequence
+        val routeMatcher = requireNotNull(matcher)
+        val distanceAlong = lastReliableDistanceAlongGeometryMeters ?: 0.0
+        val fuelProgress = fuelStopProgressAt(
+            route = route,
+            distanceAlongGeometryMeters = distanceAlong,
+            geometryLengthMeters = routeMatcher.distanceAtShapeIndex(route.geometry.lastIndex),
+            now = Instant.ofEpochMilli(nowEpochMillis),
+            activeVisit = null,
+        )
+        val nextFuel = fuelProgress.firstOrNull {
+            it.lifecycle != NavigationFuelStopLifecycle.COMPLETED
+        }
+        val drivingRemaining = current.drivingDurationRemainingSeconds ?: 0.0
+        val remainingDwell = remainingFuelDwellSeconds(
+            nowEpochMillis = nowEpochMillis,
+            activeVisit = null,
+        )
+        val totalRemaining = drivingRemaining + remainingDwell
+        mutableState.value = current.copy(
+            phase = navigationPhase(
+                distanceRemainingMeters = current.distanceRemainingMeters ?: route.totalDistanceMeters,
+                distanceToManeuverMeters = current.distanceToNextManeuverMeters,
+                speedMetersPerSecond = current.currentSpeedMetersPerSecond,
+                nextFuelStop = nextFuel,
+            ),
+            totalDurationRemainingSeconds = totalRemaining,
+            estimatedArrivalAt = Instant.ofEpochMilli(nowEpochMillis)
+                .plusMillis((totalRemaining * 1_000).toLong()),
+            nextFuelStop = nextFuel,
+            fuelStopProgress = fuelProgress,
+            activeFuelStopVisit = null,
+            lastCompletedFuelStop = visit.stop,
+            offRouteStatus = OffRouteStatus.ON_ROUTE,
+            offRouteDurationMillis = 0L,
+        )
+        phaseBehindRouteUpdate = mutableState.value.phase
+        return true
+    }
+
     fun tick(nowEpochMillis: Long) {
-        val state = mutableState.value
+        val state = mutableState.value.activeFuelStopVisit?.let {
+            refuellingStateAt(mutableState.value, nowEpochMillis).also { updated ->
+                mutableState.value = updated
+            }
+        } ?: mutableState.value
         if (state.phase == NavigationPhase.IDLE || state.phase == NavigationPhase.ROUTE_PREVIEW) return
         val freshnessReference = lastAcceptedFixAtMillis ?: trackingStartedAtMillis ?: return
         if (nowEpochMillis - freshnessReference > policy.gpsLostAfterMillis) {
             mutableState.value = state.copy(
-                phase = NavigationPhase.GPS_LOST,
+                phase = if (state.activeFuelStopVisit != null) {
+                    NavigationPhase.AT_FUEL_STOP
+                } else {
+                    NavigationPhase.GPS_LOST
+                },
                 gpsStatus = GpsStatus.LOST,
             )
         }
@@ -401,10 +517,142 @@ class NavigationEngine(
         offRouteEpisodeStartedAtMillis = null
         lastAcceptedFixAtMillis = null
         trackingStartedAtMillis = null
+        completedFuelStopSequences.clear()
+        lastReliableDistanceAlongGeometryMeters = null
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
         val routeMatcher = requireNotNull(matcher)
         fuelStopDistances = route.fuelStops.map { it to routeMatcher.distanceAlongRoute(it.location) }
             .sortedBy { it.second }
+    }
+
+    private fun plannedFuelStopProgress(): List<NavigationFuelStopProgress> =
+        fuelStopDistances.map { (stop, routeDistance) ->
+            NavigationFuelStopProgress(
+                stop = stop,
+                distanceRemainingMeters = routeDistance,
+                lifecycle = NavigationFuelStopLifecycle.PLANNED,
+                estimatedArrivalAt = stop.expectedArrivalAt?.toInstant(),
+            )
+        }
+
+    private fun progressIsFirstReliableFix(): Boolean =
+        lastReliableDistanceAlongGeometryMeters == null
+
+    private fun firstReachedFuelStop(
+        distanceAlongGeometryMeters: Double,
+    ): Pair<NavigationFuelStop, Double>? {
+        val (stop, routeDistance) = fuelStopDistances.firstOrNull { (candidate, _) ->
+            candidate.sequence !in completedFuelStopSequences
+        } ?: return null
+        val insideArrivalArea = kotlin.math.abs(
+            routeDistance - distanceAlongGeometryMeters,
+        ) <= policy.atFuelStopDistanceMeters
+        val previousDistance = lastReliableDistanceAlongGeometryMeters
+        val crossedBetweenFixes = previousDistance != null &&
+            previousDistance < routeDistance - policy.atFuelStopDistanceMeters &&
+            distanceAlongGeometryMeters > routeDistance + policy.atFuelStopDistanceMeters
+        return (stop to routeDistance).takeIf { insideArrivalArea || crossedBetweenFixes }
+    }
+
+    private fun fuelStopProgressAt(
+        route: NavigationRoute,
+        distanceAlongGeometryMeters: Double,
+        geometryLengthMeters: Double,
+        now: Instant,
+        activeVisit: NavigationFuelStopVisit?,
+    ): List<NavigationFuelStopProgress> {
+        var dwellBeforeStopSeconds = 0.0
+        return fuelStopDistances.map { (stop, routeDistance) ->
+            val completed = stop.sequence in completedFuelStopSequences
+            val isActive = activeVisit?.stop?.sequence == stop.sequence
+            val distanceToStop = if (completed || isActive) {
+                0.0
+            } else {
+                maxOf(0.0, routeDistance - distanceAlongGeometryMeters)
+            }
+            val lifecycle = when {
+                completed -> NavigationFuelStopLifecycle.COMPLETED
+                isActive -> NavigationFuelStopLifecycle.REFUELING
+                distanceToStop <= policy.approachingFuelStopDistanceMeters ->
+                    NavigationFuelStopLifecycle.APPROACHING
+                else -> NavigationFuelStopLifecycle.PLANNED
+            }
+            val eta = when {
+                completed -> null
+                isActive -> Instant.ofEpochMilli(activeVisit.arrivedAtEpochMillis)
+                else -> {
+                    val drivingSecondsToStop = if (geometryLengthMeters <= 0.0) {
+                        0.0
+                    } else {
+                        route.drivingDurationSeconds *
+                            (distanceToStop / geometryLengthMeters).coerceIn(0.0, 1.0)
+                    }
+                    now.plusMillis(
+                        ((drivingSecondsToStop + dwellBeforeStopSeconds) * 1_000).toLong(),
+                    )
+                }
+            }
+            if (!completed) {
+                dwellBeforeStopSeconds += if (isActive) {
+                    activeVisit.remainingDwellSeconds
+                } else {
+                    stop.dwellTimeSeconds.toDouble()
+                }
+            }
+            NavigationFuelStopProgress(
+                stop = stop,
+                distanceRemainingMeters = distanceToStop,
+                lifecycle = lifecycle,
+                estimatedArrivalAt = eta,
+            )
+        }
+    }
+
+    private fun remainingFuelDwellSeconds(
+        nowEpochMillis: Long,
+        activeVisit: NavigationFuelStopVisit?,
+    ): Double = fuelStopDistances.sumOf { (stop, _) ->
+        when {
+            stop.sequence in completedFuelStopSequences -> 0.0
+            activeVisit?.stop?.sequence == stop.sequence ->
+                ((activeVisit.plannedCompletionAtEpochMillis - nowEpochMillis) / 1_000.0)
+                    .coerceAtLeast(0.0)
+            else -> stop.dwellTimeSeconds.toDouble()
+        }
+    }
+
+    private fun refuellingStateAt(
+        state: NavigationState,
+        nowEpochMillis: Long,
+    ): NavigationState {
+        val visit = state.activeFuelStopVisit ?: return state
+        val route = state.route ?: return state
+        val remainingSeconds = (
+            visit.plannedCompletionAtEpochMillis - nowEpochMillis
+        ).div(1_000.0).coerceAtLeast(0.0)
+        val updatedVisit = visit.copy(remainingDwellSeconds = remainingSeconds)
+        val remainingDwell = remainingFuelDwellSeconds(nowEpochMillis, updatedVisit)
+        val drivingRemaining = state.drivingDurationRemainingSeconds ?: 0.0
+        val totalRemaining = drivingRemaining + remainingDwell
+        val routeMatcher = requireNotNull(matcher)
+        val progress = fuelStopProgressAt(
+            route = route,
+            distanceAlongGeometryMeters = lastReliableDistanceAlongGeometryMeters ?: 0.0,
+            geometryLengthMeters = routeMatcher.distanceAtShapeIndex(route.geometry.lastIndex),
+            now = Instant.ofEpochMilli(nowEpochMillis),
+            activeVisit = updatedVisit,
+        )
+        return state.copy(
+            phase = NavigationPhase.AT_FUEL_STOP,
+            totalDurationRemainingSeconds = totalRemaining,
+            estimatedArrivalAt = Instant.ofEpochMilli(nowEpochMillis)
+                .plusMillis((totalRemaining * 1_000).toLong()),
+            nextFuelStop = progress.firstOrNull {
+                it.lifecycle != NavigationFuelStopLifecycle.COMPLETED
+            },
+            fuelStopProgress = progress,
+            activeFuelStopVisit = updatedVisit,
+        )
     }
 
     private fun navigationPhase(

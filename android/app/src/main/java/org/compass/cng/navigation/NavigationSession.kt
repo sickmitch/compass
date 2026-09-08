@@ -85,6 +85,11 @@ class NavigationSession(
         eventLogger("navigation voice guidance enabled=$enabled")
     }
 
+    fun completeFuelStop(nowEpochMillis: Long = System.currentTimeMillis()): Boolean =
+        engine.completeFuelStop(nowEpochMillis).also { completed ->
+            if (completed) eventLogger("navigation CNG refuelling completed by operator")
+        }
+
     fun clear() {
         engine.clear()
         routeStore.clear()

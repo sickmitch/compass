@@ -57,7 +57,7 @@ class NavigationRouteRecalculatorTest {
         val second = Coordinate(44.4, 10.2)
         val destination = Coordinate(44.0, 11.0)
         val stops = listOf(
-            fuelStop(1, "first", first),
+            fuelStop(1, "first", first).copy(phone = "+39 02 123456"),
             fuelStop(2, "second", second),
         )
         val route = NavigationRoute(
@@ -87,12 +87,13 @@ class NavigationRouteRecalculatorTest {
             nextFuelStop = NavigationFuelStopProgress(stops.first(), 7_000.0),
         )
 
-        recalculator.recalculate(state, RouteUpdateReason.TRAFFIC_REFRESH)
+        val recalculated = recalculator.recalculate(state, RouteUpdateReason.TRAFFIC_REFRESH)
 
         assertEquals(listOf("first", "second"), repository.lastItineraryIds)
         assertEquals(100.0, requireNotNull(repository.lastEffectiveRangeKm), 0.0)
         assertEquals(62.0, requireNotNull(repository.lastRemainingRangeKm), 0.0)
         assertEquals(30.0, requireNotNull(repository.lastReserveRangeKm), 0.0)
+        assertEquals("+39 02 123456", recalculated.fuelStops.first().phone)
     }
 
     @Test

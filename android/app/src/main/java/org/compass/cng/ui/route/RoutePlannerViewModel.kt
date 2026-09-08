@@ -32,6 +32,7 @@ import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
+import org.compass.cng.domain.model.withNavigationDetailsFrom
 import org.compass.cng.domain.server.InMemoryServerConnectionRepository
 import org.compass.cng.domain.server.ServerConnection
 import org.compass.cng.domain.server.ServerConnectionRepository
@@ -1250,11 +1251,14 @@ class RoutePlannerViewModel(
                 require(route.selectedStop.mimitStationId == station.mimitStationId) {
                     "selected station does not match route response"
                 }
+                val navigationReadyRoute = route.copy(
+                    selectedStop = route.selectedStop.withNavigationDetailsFrom(station),
+                )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.SELECTED_ROUTE,
                     operation = null,
                     pendingStation = null,
-                    selectedRoute = route,
+                    selectedRoute = navigationReadyRoute,
                     message = null,
                 )
             } catch (error: CancellationException) {
@@ -1314,11 +1318,21 @@ class RoutePlannerViewModel(
                     ),
                     reserveCngRangeKm = suggestion.rangeBasis.reserveCngRangeKm,
                 )
+                val detailsByStationId = itinerary.stops.associateBy {
+                    it.station.mimitStationId
+                }
+                val navigationReadyRoute = route.copy(
+                    selectedStops = route.selectedStops.map { selectedStop ->
+                        detailsByStationId[selectedStop.mimitStationId]?.let { plannedStop ->
+                            selectedStop.withNavigationDetailsFrom(plannedStop)
+                        } ?: selectedStop
+                    },
+                )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.SELECTED_ROUTE,
                     operation = null,
                     selectedRoute = null,
-                    selectedItineraryRoute = route,
+                    selectedItineraryRoute = navigationReadyRoute,
                     message = null,
                 )
             } catch (error: CancellationException) {

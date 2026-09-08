@@ -8,10 +8,15 @@ import kotlinx.serialization.json.JsonObject
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.ManeuverSign
 import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.OpeningAtEta
+import org.compass.cng.domain.model.OpeningState
+import org.compass.cng.domain.model.OpeningValidation
+import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngStop
@@ -34,6 +39,9 @@ class NavigationRouteDocumentCodecTest {
 
         assertEquals(cached, restored)
         assertEquals("43690", restored.route.fuelStops.single().mimitStationId)
+        assertEquals(OpeningState.OPEN, restored.route.fuelStops.single().opening?.state)
+        assertEquals(1.599, restored.route.fuelStops.single().price?.unitPrice)
+        assertEquals("+39 02 123456", restored.route.fuelStops.single().phone)
         assertEquals(1_200, restored.route.timing.totalRefuelingDwellSeconds.toInt())
         assertEquals(50, restored.route.speedLimits.first().speedLimitKph)
         assertEquals("valhalla_graph", restored.route.speedLimitSource)
@@ -57,6 +65,7 @@ class NavigationRouteDocumentCodecTest {
         val legacyDocument = Json.parseToJsonElement(codec.encode(cached))
             .withoutStructuredGuidance()
             .withoutSpeedLimitContext()
+            .withoutCngNavigationDetails()
             .toString()
 
         val restored = requireNotNull(codec.decode(legacyDocument))
@@ -67,6 +76,8 @@ class NavigationRouteDocumentCodecTest {
         assertEquals(true, restored.route.maneuvers.all { it.roundaboutExitCount == null })
         assertEquals(emptyList<RouteSpeedLimit>(), restored.route.speedLimits)
         assertNull(restored.route.speedLimitSource)
+        assertNull(restored.route.fuelStops.single().opening)
+        assertNull(restored.route.fuelStops.single().price)
     }
 
     private fun routeWithStop(): RouteWithCngStop {
@@ -78,7 +89,31 @@ class NavigationRouteDocumentCodecTest {
         return RouteWithCngStop(
             selectedStop = SelectedCngStop(
                 "43690", "S.ZENONE OVEST", "San Zenone", "MI", stop,
-                OffsetDateTime.parse("2026-09-03T09:00:00+02:00"), 1_200,
+                OffsetDateTime.parse("2026-09-03T09:00:00+02:00"),
+                1_200,
+                opening = OpeningAtEta(
+                    OpeningState.OPEN,
+                    OpeningValidation.VALID,
+                    "24/7",
+                    "osm",
+                    0.99,
+                    OffsetDateTime.parse("2026-09-03T09:00:00+02:00"),
+                    "Europe/Rome",
+                    null,
+                    emptyList(),
+                ),
+                phone = "+39 02 123456",
+                price = CngPrice(
+                    1.599,
+                    "EUR",
+                    "kg",
+                    "self",
+                    OffsetDateTime.parse("2026-09-03T08:00:00+02:00"),
+                    OffsetDateTime.parse("2026-09-03T08:05:00+02:00"),
+                    "mimit",
+                    3_600.0,
+                    PriceFreshness.FRESH,
+                ),
             ),
             distanceMeters = 120_000.0,
             durationSeconds = 5_400.0,
@@ -151,5 +186,19 @@ private fun JsonElement.withoutSpeedLimitContext(): JsonElement = when (this) {
         }.toMap(),
     )
     is JsonArray -> JsonArray(map(JsonElement::withoutSpeedLimitContext))
+    else -> this
+}
+
+private fun JsonElement.withoutCngNavigationDetails(): JsonElement = when (this) {
+    is JsonObject -> JsonObject(
+        entries.mapNotNull { (key, value) ->
+            if (key in setOf("opening", "phone", "brand", "operator", "price")) {
+                null
+            } else {
+                key to value.withoutCngNavigationDetails()
+            }
+        }.toMap(),
+    )
+    is JsonArray -> JsonArray(map(JsonElement::withoutCngNavigationDetails))
     else -> this
 }

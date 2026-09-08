@@ -76,6 +76,17 @@ class NavigationStage3Test {
         assertEquals(AnnouncementKind.FUEL_STOP, controller.nextAnnouncement(atFuel)?.kind)
         assertNull(controller.nextAnnouncement(atFuel))
 
+        val refuellingCompleted = atFuel.copy(
+            phase = NavigationPhase.NAVIGATING,
+            nextFuelStop = null,
+            lastCompletedFuelStop = stop,
+        )
+        assertEquals(
+            "Rifornimento completato. Riprendi il percorso.",
+            controller.nextAnnouncement(refuellingCompleted)?.text,
+        )
+        assertNull(controller.nextAnnouncement(refuellingCompleted))
+
         val arrived = atFuel.copy(phase = NavigationPhase.ARRIVED, nextFuelStop = null)
         assertEquals(AnnouncementKind.ARRIVAL, controller.nextAnnouncement(arrived)?.kind)
         assertNull(controller.nextAnnouncement(arrived))

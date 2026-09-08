@@ -7,11 +7,16 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.ManeuverSign
 import org.compass.cng.domain.model.ManeuverSignElement
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.OpeningAtEta
+import org.compass.cng.domain.model.OpeningState
+import org.compass.cng.domain.model.OpeningValidation
+import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.navigation.CachedNavigationRoute
 import org.compass.cng.navigation.NavigationFuelPlan
@@ -303,17 +308,78 @@ private data class StoredFuelStop(
     val location: StoredCoordinate,
     val expectedArrivalAt: String?,
     val dwellTimeSeconds: Int,
+    val opening: StoredOpeningAtEta? = null,
+    val phone: String? = null,
+    val brand: String? = null,
+    val operator: String? = null,
+    val price: StoredCngPrice? = null,
 ) {
     fun toDomain() = NavigationFuelStop(
         sequence, mimitStationId, name, municipality, province, location.toDomain(),
-        expectedArrivalAt?.let(OffsetDateTime::parse), dwellTimeSeconds,
+        expectedArrivalAt?.let(OffsetDateTime::parse), dwellTimeSeconds, opening?.toDomain(),
+        phone, brand, operator, price?.toDomain(),
     )
 
     companion object {
         fun fromDomain(value: NavigationFuelStop) = StoredFuelStop(
             value.sequence, value.mimitStationId, value.name, value.municipality, value.province,
             StoredCoordinate.fromDomain(value.location), value.expectedArrivalAt?.toString(),
-            value.dwellTimeSeconds,
+            value.dwellTimeSeconds, value.opening?.let(StoredOpeningAtEta::fromDomain),
+            value.phone, value.brand, value.operator, value.price?.let(StoredCngPrice::fromDomain),
+        )
+    }
+}
+
+@Serializable
+private data class StoredOpeningAtEta(
+    val state: String,
+    val validation: String,
+    val openingHours: String?,
+    val source: String?,
+    val sourceConfidence: Double?,
+    val evaluatedAt: String,
+    val timezone: String,
+    val nextChangeAt: String?,
+    val warnings: List<String>,
+) {
+    fun toDomain() = OpeningAtEta(
+        OpeningState.valueOf(state), OpeningValidation.valueOf(validation), openingHours, source,
+        sourceConfidence, OffsetDateTime.parse(evaluatedAt), timezone,
+        nextChangeAt?.let(OffsetDateTime::parse), warnings,
+    )
+
+    companion object {
+        fun fromDomain(value: OpeningAtEta) = StoredOpeningAtEta(
+            value.state.name, value.validation.name, value.openingHours, value.source,
+            value.sourceConfidence, value.evaluatedAt.toString(), value.timezone,
+            value.nextChangeAt?.toString(), value.warnings,
+        )
+    }
+}
+
+@Serializable
+private data class StoredCngPrice(
+    val unitPrice: Double,
+    val currency: String,
+    val unit: String,
+    val serviceMode: String,
+    val observedAt: String,
+    val ingestedAt: String,
+    val sourceName: String,
+    val ageSeconds: Double?,
+    val freshness: String,
+) {
+    fun toDomain() = CngPrice(
+        unitPrice, currency, unit, serviceMode, OffsetDateTime.parse(observedAt),
+        OffsetDateTime.parse(ingestedAt), sourceName, ageSeconds,
+        PriceFreshness.valueOf(freshness),
+    )
+
+    companion object {
+        fun fromDomain(value: CngPrice) = StoredCngPrice(
+            value.unitPrice, value.currency, value.unit, value.serviceMode,
+            value.observedAt.toString(), value.ingestedAt.toString(), value.sourceName,
+            value.ageSeconds, value.freshness.name,
         )
     }
 }

@@ -869,7 +869,12 @@ class RoutePlannerViewModelTest {
         assertEquals(65.0, repository.lastRemainingRangeKm, 0.0)
         assertEquals(30.0, repository.lastReserveRangeKm, 0.0)
         assertEquals(PlannerStage.SELECTED_ROUTE, viewModel.uiState.value.stage)
-        assertSame(routed, viewModel.uiState.value.selectedItineraryRoute)
+        assertEquals(routed.selectedStops.map { it.mimitStationId }, viewModel.uiState.value
+            .selectedItineraryRoute?.selectedStops?.map { it.mimitStationId })
+        assertEquals(
+            suggestion.itinerary?.stops?.first()?.price,
+            viewModel.uiState.value.selectedItineraryRoute?.selectedStops?.first()?.price,
+        )
         assertNull(viewModel.uiState.value.selectedRoute)
 
         viewModel.navigateBack()
@@ -960,7 +965,16 @@ class RoutePlannerViewModelTest {
         assertEquals(sampleRoute().origin, repository.lastSelectedOrigin)
         assertEquals(sampleRoute().destination, repository.lastSelectedDestination)
         assertEquals(PlannerStage.SELECTED_ROUTE, viewModel.uiState.value.stage)
-        assertSame(selectedRoute, viewModel.uiState.value.selectedRoute)
+        assertEquals(selectedRoute.selectedStop.mimitStationId, viewModel.uiState.value
+            .selectedRoute?.selectedStop?.mimitStationId)
+        assertEquals(
+            ranked.candidates.single().opening,
+            viewModel.uiState.value.selectedRoute?.selectedStop?.opening,
+        )
+        assertEquals(
+            ranked.candidates.single().price,
+            viewModel.uiState.value.selectedRoute?.selectedStop?.price,
+        )
         assertFalse(viewModel.uiState.value.isBusy)
     }
 

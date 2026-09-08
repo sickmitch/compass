@@ -347,6 +347,30 @@ data class SelectedCngStop(
     val location: Coordinate,
     val expectedArrivalAt: OffsetDateTime? = null,
     val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
+    /** Snapshot captured while the user selected the stop; no live lookup occurs while driving. */
+    val opening: OpeningAtEta? = null,
+    val phone: String? = null,
+    val brand: String? = null,
+    val operator: String? = null,
+    val price: CngPrice? = null,
+)
+
+fun SelectedCngStop.withNavigationDetailsFrom(station: RankedCngStation): SelectedCngStop = copy(
+    opening = station.opening,
+    phone = station.phone,
+    brand = station.brand,
+    operator = station.operator,
+    price = station.price,
+)
+
+fun SelectedCngStop.withNavigationDetailsFrom(
+    stop: PredictiveItineraryStop,
+): SelectedCngStop = copy(
+    opening = stop.opening,
+    phone = stop.phone,
+    brand = stop.brand,
+    operator = stop.operator,
+    price = stop.price,
 )
 
 enum class CngRouteLegKind {

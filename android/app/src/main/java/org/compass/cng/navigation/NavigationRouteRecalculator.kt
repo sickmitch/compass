@@ -7,6 +7,7 @@ import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.PredictiveSuggestionState
+import org.compass.cng.domain.model.withNavigationDetailsFrom
 
 sealed interface FuelStopReplacementResult {
     data class Replaced(
@@ -47,7 +48,7 @@ class CompassNavigationRouteRecalculator(
             -> state.snappedLocation ?: state.rawLocation?.coordinate
         } ?: route.origin
         val remainingStops = remainingFuelStops(state)
-        return try {
+        val recalculated = try {
             preserveRemainingPlan(route, state, origin, remainingStops)
         } catch (error: RoutePreviewException) {
             if (error.failure !in FUEL_PLAN_INVALIDATING_FAILURES || route.fuelPlan == null) {
@@ -55,6 +56,7 @@ class CompassNavigationRouteRecalculator(
             }
             replanInvalidFuelStops(route, state, origin, remainingStops)
         }
+        return recalculated.withFuelStopDetailsFrom(route.fuelStops)
     }
 
     private suspend fun preserveRemainingPlan(
@@ -133,13 +135,20 @@ class CompassNavigationRouteRecalculator(
             ).toNavigationRoute()
             PredictiveSuggestionState.SUGGESTED -> {
                 val itinerary = requireNotNull(suggestion.itinerary)
-                routingRepository.routeWithCngItinerary(
+                val routed = routingRepository.routeWithCngItinerary(
                     origin = origin,
                     destination = route.destination,
                     mimitStationIds = itinerary.stops.map { it.station.mimitStationId },
                     effectiveCngRangeKm = plan.effectiveCngRangeKm,
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
+                )
+                routed.copy(
+                    selectedStops = routed.selectedStops.map { selectedStop ->
+                        itinerary.stops.firstOrNull {
+                            it.station.mimitStationId == selectedStop.mimitStationId
+                        }?.let(selectedStop::withNavigationDetailsFrom) ?: selectedStop
+                    },
                 ).toNavigationRoute(
                     maximumDetourMinutes = maximumDetourMinutes,
                     excludedMimitStationIds = excludedIds,
@@ -180,13 +189,20 @@ class CompassNavigationRouteRecalculator(
             ).toNavigationRoute()
             PredictiveSuggestionState.SUGGESTED -> {
                 val itinerary = requireNotNull(suggestion.itinerary)
-                routingRepository.routeWithCngItinerary(
+                val routed = routingRepository.routeWithCngItinerary(
                     origin = origin,
                     destination = route.destination,
                     mimitStationIds = itinerary.stops.map { it.station.mimitStationId },
                     effectiveCngRangeKm = plan.effectiveCngRangeKm,
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
+                )
+                routed.copy(
+                    selectedStops = routed.selectedStops.map { selectedStop ->
+                        itinerary.stops.firstOrNull {
+                            it.station.mimitStationId == selectedStop.mimitStationId
+                        }?.let(selectedStop::withNavigationDetailsFrom) ?: selectedStop
+                    },
                 ).toNavigationRoute(
                     maximumDetourMinutes = maximumDetourMinutes,
                     excludedMimitStationIds = excludedIds,
@@ -199,8 +215,26 @@ class CompassNavigationRouteRecalculator(
             -> return FuelStopReplacementResult.NoSafeAlternative
         }
         return FuelStopReplacementResult.Replaced(
-            route = replacement,
+            route = replacement.withFuelStopDetailsFrom(route.fuelStops),
             excludedMimitStationId = unavailableStop.mimitStationId,
+        )
+    }
+
+    private fun NavigationRoute.withFuelStopDetailsFrom(
+        previousStops: List<NavigationFuelStop>,
+    ): NavigationRoute {
+        val previousById = previousStops.associateBy(NavigationFuelStop::mimitStationId)
+        return copy(
+            fuelStops = fuelStops.map { stop ->
+                val previous = previousById[stop.mimitStationId] ?: return@map stop
+                stop.copy(
+                    opening = stop.opening ?: previous.opening,
+                    phone = stop.phone ?: previous.phone,
+                    brand = stop.brand ?: previous.brand,
+                    operator = stop.operator ?: previous.operator,
+                    price = stop.price ?: previous.price,
+                )
+            },
         )
     }
 

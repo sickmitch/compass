@@ -56,7 +56,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.20.0` (`versionCode=25`).
+Android version is `0.22.0` (`versionCode=27`).
 
 Destination search uses Compass `POST /api/v1/destinations/suggest` after a configurable 300 ms
 debounce and `POST /api/v1/destinations/resolve` only after selection. Results and full Google
@@ -78,6 +78,25 @@ the raw accepted fix and preserves the Compass CNG policy. A compact indetermina
 `Ricalcolo rotta` appears below the maneuver card and in accessibility semantics for every active
 route update. Failed server updates retain downloaded guidance and expose degraded rerouting. The
 operator accepted the complete live-backend and physical-device gate on 2026-09-08.
+
+Navigation UI Phase 11 carries the CNG enrichment already selected by the driver into the
+navigation route instead of dropping it at the routing boundary. The navigation state owns a
+per-waypoint lifecycle and exposes the next stop independently of the optional trip panel. The
+compact CNG card and details sheet show road distance, ETA, why the stop is required, and the
+server-provided dwell duration. Valid opening evidence is displayed only near the ETA for which it
+was evaluated; only fresh prices are displayed. Restored cache-only routes retain waypoint guidance
+but suppress both dynamic claims. Replacement continues through Compass predictive routing, so a
+failed safe-plan search leaves the existing route untouched. The operator accepted the complete
+live-backend and physical-device gate on 2026-09-08, including local-time rendering and placement
+of the recalculation pill below the persistent CNG card.
+
+Navigation UI Phase 12 gives a routed CNG waypoint a real stop lifecycle. On arrival the engine
+enters an explicit refuelling visit, freezes matched route/maneuver progress, counts down the
+server-routed dwell and suppresses rerouting until the driver confirms completion. Final ETA stays
+stable during the planned dwell, improves if the stop finishes early and slips if it runs late.
+The action is available on the compact CNG card, in details and in the foreground notification;
+demo replay pauses and resumes through the same production boundary. The implementation is locally
+validated and awaits its physical-device gate.
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1
@@ -428,13 +447,13 @@ The generated APK is:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To build, install and cold-launch Android `0.20.0` on the single authorized device while preserving
+To build, install and cold-launch Android `0.22.0` on the single authorized device while preserving
 the saved vehicle and server profiles:
 
 ```bash
 export JAVA_HOME=/home/mike/toolchains/jdk17
 export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-bash scripts/install-android-0.20.0.sh
+bash scripts/install-android-0.22.0.sh
 ```
 
 Set `COMPASS_ADB_SERIAL` only if more than one device is connected. This installer intentionally

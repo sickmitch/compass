@@ -269,7 +269,7 @@ class NavigationEngineTest {
     }
 
     @Test
-    fun fuelStopApproachArrivalAndDwellAreFirstClassProgress() {
+    fun fuelStopVisitBlocksProgressCountsDownDwellAndResumesOnlyAfterConfirmation() {
         val base = route()
         val fuelStop = NavigationFuelStop(
             sequence = 1,
@@ -294,17 +294,181 @@ class NavigationEngineTest {
         engine.preview(route)
         engine.start()
 
-        engine.updateLocation(fix(45.0, 9.0010, 1_000, 90.0))
+        engine.updateLocation(
+            fix(45.0, 9.0010, 1_000, 90.0),
+            now = Instant.ofEpochMilli(1_000),
+        )
         assertEquals(NavigationPhase.APPROACHING_FUEL_STOP, engine.state.value.phase)
+        assertEquals(
+            NavigationFuelStopLifecycle.APPROACHING,
+            engine.state.value.fuelStopProgress.single().lifecycle,
+        )
         assertTrue(requireNotNull(engine.state.value.totalDurationRemainingSeconds) > 1_200.0)
 
-        engine.updateLocation(fix(45.0, 9.0020, 2_000, 90.0))
+        engine.updateLocation(
+            fix(45.0, 9.0020, 2_000, 90.0),
+            now = Instant.ofEpochMilli(2_000),
+        )
         assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
         assertEquals("3618", engine.state.value.nextFuelStop?.stop?.mimitStationId)
+        assertEquals(
+            NavigationFuelStopLifecycle.REFUELING,
+            engine.state.value.nextFuelStop?.lifecycle,
+        )
+        assertEquals(
+            1_200.0,
+            requireNotNull(engine.state.value.activeFuelStopVisit).remainingDwellSeconds,
+            0.0,
+        )
+        val progressAtStop = engine.state.value.routeProgressFraction
+        val drivingAtStop = requireNotNull(engine.state.value.drivingDurationRemainingSeconds)
 
-        engine.updateLocation(fix(45.0, 9.0030, 3_000, 90.0))
+        engine.updateLocation(
+            fix(45.0, 9.0030, 3_000, 90.0),
+            now = Instant.ofEpochMilli(3_000),
+        )
+        assertEquals(progressAtStop, engine.state.value.routeProgressFraction, 0.0)
+        assertEquals(
+            drivingAtStop,
+            requireNotNull(engine.state.value.drivingDurationRemainingSeconds),
+            0.0,
+        )
+        assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+
+        val totalAtArrival = requireNotNull(engine.state.value.totalDurationRemainingSeconds)
+        engine.tick(602_000)
+        val waiting = engine.state.value
+        assertEquals(
+            600.0,
+            requireNotNull(waiting.activeFuelStopVisit).remainingDwellSeconds,
+            0.0,
+        )
+        assertEquals(NavigationPhase.AT_FUEL_STOP, waiting.phase)
+        assertTrue(requireNotNull(waiting.totalDurationRemainingSeconds) < totalAtArrival - 590.0)
+        assertEquals(false, requireNotNull(waiting.activeFuelStopVisit).plannedDurationElapsed)
+        engine.beginRouteUpdate(RouteUpdateReason.TRAFFIC_REFRESH)
+        assertEquals(ReroutingStatus.IDLE, engine.state.value.reroutingStatus)
+        assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+
+        assertTrue(engine.completeFuelStop(nowEpochMillis = 602_000))
+        assertEquals(null, engine.state.value.activeFuelStopVisit)
         assertEquals(null, engine.state.value.nextFuelStop)
-        assertTrue(requireNotNull(engine.state.value.totalDurationRemainingSeconds) < 20.0)
+        assertEquals(
+            NavigationFuelStopLifecycle.COMPLETED,
+            engine.state.value.fuelStopProgress.single().lifecycle,
+        )
+        assertEquals("3618", engine.state.value.lastCompletedFuelStop?.mimitStationId)
+        assertEquals(
+            drivingAtStop,
+            requireNotNull(engine.state.value.totalDurationRemainingSeconds),
+            0.0,
+        )
+        assertEquals(false, engine.completeFuelStop(nowEpochMillis = 603_000))
+    }
+
+    @Test
+    fun refuellingDelayPushesFinalEtaAfterPlannedDwellUntilOperatorConfirms() {
+        val base = route()
+        val stop = NavigationFuelStop(
+            sequence = 1,
+            mimitStationId = "late-stop",
+            name = "Tappa test",
+            municipality = null,
+            province = null,
+            location = Coordinate(45.0, 9.0020),
+            expectedArrivalAt = null,
+            dwellTimeSeconds = 60,
+        )
+        val engine = testEngine()
+        engine.preview(
+            base.copy(
+                fuelStops = listOf(stop),
+                totalTripDurationSeconds = base.drivingDurationSeconds + 60.0,
+            ),
+        )
+        engine.start(nowEpochMillis = 1_000)
+        engine.updateLocation(
+            fix(45.0, 9.0020, 2_000, 90.0),
+            now = Instant.ofEpochMilli(2_000),
+        )
+
+        engine.tick(62_000)
+        val onTimeEta = requireNotNull(engine.state.value.estimatedArrivalAt)
+        assertTrue(requireNotNull(engine.state.value.activeFuelStopVisit).plannedDurationElapsed)
+
+        engine.tick(122_000)
+        val delayedEta = requireNotNull(engine.state.value.estimatedArrivalAt)
+        assertEquals(60L, delayedEta.epochSecond - onTimeEta.epochSecond)
+        assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+    }
+
+    @Test
+    fun sparseReliableFixesCaptureAStopCrossedBetweenSamples() {
+        val base = route()
+        val stop = NavigationFuelStop(
+            sequence = 1,
+            mimitStationId = "crossed-stop",
+            name = "Tappa attraversata",
+            municipality = null,
+            province = null,
+            location = Coordinate(45.0, 9.0020),
+            expectedArrivalAt = null,
+            dwellTimeSeconds = 1_200,
+        )
+        val engine = testEngine(
+            policy = NavigationEnginePolicy(atFuelStopDistanceMeters = 10.0),
+        )
+        engine.preview(base.copy(fuelStops = listOf(stop)))
+        engine.start(nowEpochMillis = 1_000)
+        engine.updateLocation(
+            fix(45.0, 9.0018, 2_000, 90.0),
+            now = Instant.ofEpochMilli(2_000),
+        )
+        engine.updateLocation(
+            fix(45.0, 9.0022, 3_000, 90.0),
+            now = Instant.ofEpochMilli(3_000),
+        )
+
+        assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+        assertEquals("crossed-stop", engine.state.value.activeFuelStopVisit?.stop?.mimitStationId)
+        assertEquals(stop.location, engine.state.value.navigationPosition?.coordinate)
+        assertEquals(0.5, engine.state.value.routeProgressFraction, 0.02)
+    }
+
+    @Test
+    fun completingOneVisitMakesTheFollowingCngStopAuthoritative() {
+        val base = route()
+        fun stop(sequence: Int, id: String, longitude: Double) = NavigationFuelStop(
+            sequence = sequence,
+            mimitStationId = id,
+            name = id,
+            municipality = null,
+            province = null,
+            location = Coordinate(45.0, longitude),
+            expectedArrivalAt = null,
+            dwellTimeSeconds = 60,
+        )
+        val first = stop(1, "first", 9.0010)
+        val second = stop(2, "second", 9.0030)
+        val engine = testEngine()
+        engine.preview(base.copy(fuelStops = listOf(first, second)))
+        engine.start(nowEpochMillis = 1_000)
+        engine.updateLocation(
+            fix(45.0, 9.0010, 2_000, 90.0),
+            now = Instant.ofEpochMilli(2_000),
+        )
+
+        assertTrue(engine.completeFuelStop(nowEpochMillis = 3_000))
+
+        assertEquals("second", engine.state.value.nextFuelStop?.stop?.mimitStationId)
+        assertEquals(
+            NavigationFuelStopLifecycle.COMPLETED,
+            engine.state.value.fuelStopProgress.first().lifecycle,
+        )
+        assertEquals(
+            NavigationFuelStopLifecycle.APPROACHING,
+            engine.state.value.fuelStopProgress.last().lifecycle,
+        )
     }
 
     @Test
@@ -338,7 +502,10 @@ class NavigationEngineTest {
         assertEquals(5_000L, notice.createdAtEpochMillis)
     }
 
-    private fun testEngine() = NavigationEngine(
+    private fun testEngine(
+        policy: NavigationEnginePolicy = NavigationEnginePolicy(),
+    ) = NavigationEngine(
+        policy = policy,
         locationFilter = LocationFilter(
             LocationFilterPolicy(
                 maximumAccuracyMeters = 100.0,

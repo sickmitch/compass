@@ -55,6 +55,16 @@ class ManeuverController(
                 ),
             )
         }
+        state.lastCompletedFuelStop?.let { stop ->
+            emitOnce(
+                VoiceAnnouncement(
+                    id = "${route.routeId}:fuel:${stop.sequence}:completed",
+                    text = "Rifornimento completato. Riprendi il percorso.",
+                    stage = AnnouncementStage.NOW,
+                    kind = AnnouncementKind.FUEL_STOP,
+                ),
+            )?.let { return it }
+        }
         state.nextFuelStop?.let { fuel ->
             if (state.phase == NavigationPhase.AT_FUEL_STOP) {
                 emitOnce(

@@ -99,6 +99,15 @@ class NavigationForegroundService : Service(), LocationListener {
             Log.i(LOG_TAG, "voice guidance enabled=$enabled")
             return START_STICKY
         }
+        if (intent?.action == ACTION_COMPLETE_FUEL_STOP) {
+            val completed = session.completeFuelStop(System.currentTimeMillis())
+            if (completed) {
+                Log.i(LOG_TAG, "fuel stop completed by operator; navigation resumed")
+                replayRunnable?.let(handler::post)
+                processNavigationState(System.currentTimeMillis())
+            }
+            return START_STICKY
+        }
         session.start()
         if (!updateControllerStarted) {
             routeUpdateController.navigationStarted(System.currentTimeMillis())
@@ -211,6 +220,14 @@ class NavigationForegroundService : Service(), LocationListener {
                 )
                 processNavigationState(System.currentTimeMillis())
                 previousCoordinate = coordinate
+                if (session.state.value.activeFuelStopVisit != null) {
+                    Log.i(
+                        LOG_TAG,
+                        "demo replay paused for CNG refuelling: station=" +
+                            session.state.value.activeFuelStopVisit?.stop?.mimitStationId,
+                    )
+                    return
+                }
                 position += 1
                 if (position < indexes.size) handler.postDelayed(this, REPLAY_INTERVAL_MILLIS)
             }
@@ -258,7 +275,7 @@ class NavigationForegroundService : Service(), LocationListener {
     private fun requestRouteUpdate(reason: RouteUpdateReason, nowEpochMillis: Long) {
         if (routeUpdateJob?.isActive == true) return
         val snapshot = session.state.value
-        if (snapshot.route == null) return
+        if (snapshot.route == null || snapshot.activeFuelStopVisit != null) return
         routeUpdateController.attemptStarted(nowEpochMillis)
         session.beginRouteUpdate(reason)
         Log.i(
@@ -304,6 +321,7 @@ class NavigationForegroundService : Service(), LocationListener {
     private fun requestFuelStopReplacement(nowEpochMillis: Long) {
         if (routeUpdateJob?.isActive == true) return
         val snapshot = session.state.value
+        if (snapshot.activeFuelStopVisit != null) return
         val unavailable = snapshot.nextFuelStop?.stop ?: return
         routeUpdateController.attemptStarted(nowEpochMillis)
         session.beginRouteUpdate(RouteUpdateReason.FUEL_STOP_UNAVAILABLE)
@@ -426,11 +444,14 @@ class NavigationForegroundService : Service(), LocationListener {
             stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val refuelling = session.state.value.activeFuelStopVisit
+        val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_compass)
             .setContentTitle(getString(R.string.navigation_notification_title))
             .setContentText(
-                if (session.state.value.reroutingStatus == ReroutingStatus.IN_PROGRESS) {
+                if (refuelling != null) {
+                    "Rifornimento CNG · ${formatNotificationDuration(refuelling.remainingDwellSeconds)}"
+                } else if (session.state.value.reroutingStatus == ReroutingStatus.IN_PROGRESS) {
                     "Ricalcolo rotta"
                 } else {
                     session.state.value.currentManeuver?.instruction
@@ -441,7 +462,19 @@ class NavigationForegroundService : Service(), LocationListener {
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingOpen)
             .addAction(0, getString(R.string.navigation_notification_stop), pendingStop)
-            .build()
+        if (refuelling != null) {
+            val completeIntent = Intent(this, NavigationForegroundService::class.java).apply {
+                action = ACTION_COMPLETE_FUEL_STOP
+            }
+            val pendingComplete = PendingIntent.getService(
+                this,
+                2,
+                completeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(0, "Rifornimento completato", pendingComplete)
+        }
+        return builder.build()
     }
 
     companion object {
@@ -453,6 +486,8 @@ class NavigationForegroundService : Service(), LocationListener {
         const val ACTION_SIMULATE_OFF_ROUTE = "org.compass.cng.navigation.SIMULATE_OFF_ROUTE"
         const val ACTION_SET_VOICE_GUIDANCE =
             "org.compass.cng.navigation.SET_VOICE_GUIDANCE"
+        const val ACTION_COMPLETE_FUEL_STOP =
+            "org.compass.cng.navigation.COMPLETE_FUEL_STOP"
         const val EXTRA_VOICE_GUIDANCE_ENABLED = "voice_guidance_enabled"
         const val ACTION_STOP = "org.compass.cng.navigation.STOP"
         private const val NOTIFICATION_CHANNEL_ID = "compass_navigation"
@@ -464,6 +499,11 @@ class NavigationForegroundService : Service(), LocationListener {
         private const val REPLAY_SPEED_METERS_PER_SECOND = 22.0
         private const val LOG_TAG = "CompassNavigation"
     }
+}
+
+private fun formatNotificationDuration(seconds: Double): String {
+    val roundedMinutes = kotlin.math.ceil(seconds.coerceAtLeast(0.0) / 60.0).toInt()
+    return if (roundedMinutes <= 0) "tempo previsto concluso" else "$roundedMinutes min rimanenti"
 }
 
 private fun NavigationRoute.fuelStopIdsForLog(): String =

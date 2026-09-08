@@ -4,6 +4,8 @@ import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.GasolineFallback
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.OpeningAtEta
+import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngItinerary
@@ -32,7 +34,22 @@ data class NavigationFuelStop(
     val location: Coordinate,
     val expectedArrivalAt: java.time.OffsetDateTime?,
     val dwellTimeSeconds: Int,
+    val opening: OpeningAtEta? = null,
+    val phone: String? = null,
+    val brand: String? = null,
+    val operator: String? = null,
+    val price: CngPrice? = null,
 )
+
+enum class NavigationFuelStopLifecycle {
+    PLANNED,
+    APPROACHING,
+    ARRIVED,
+    REFUELING,
+    COMPLETED,
+    SKIPPED,
+    REPLACED,
+}
 
 data class NavigationLeg(
     val sequence: Int,
@@ -142,6 +159,9 @@ data class NavigationState(
     val distanceToNextManeuverMeters: Double? = null,
     val routeProgressFraction: Double = 0.0,
     val nextFuelStop: NavigationFuelStopProgress? = null,
+    val fuelStopProgress: List<NavigationFuelStopProgress> = emptyList(),
+    val activeFuelStopVisit: NavigationFuelStopVisit? = null,
+    val lastCompletedFuelStop: NavigationFuelStop? = null,
     val offRouteStatus: OffRouteStatus = OffRouteStatus.ON_ROUTE,
     val distanceFromRouteMeters: Double? = null,
     val routeMatchConfidence: Double? = null,
@@ -245,7 +265,35 @@ data class NavigationPosition(
 data class NavigationFuelStopProgress(
     val stop: NavigationFuelStop,
     val distanceRemainingMeters: Double,
+    val lifecycle: NavigationFuelStopLifecycle = NavigationFuelStopLifecycle.PLANNED,
+    val estimatedArrivalAt: Instant? = null,
 )
+
+enum class NavigationFuelStopCompletionMode {
+    USER_CONFIRMATION,
+}
+
+/**
+ * Authoritative in-session stop visit. The navigation engine owns this clock so UI recreation,
+ * GPS movement and map rendering cannot accidentally complete a refuelling stop.
+ */
+data class NavigationFuelStopVisit(
+    val stop: NavigationFuelStop,
+    val arrivedAtEpochMillis: Long,
+    val plannedCompletionAtEpochMillis: Long,
+    val remainingDwellSeconds: Double,
+    val completionMode: NavigationFuelStopCompletionMode =
+        NavigationFuelStopCompletionMode.USER_CONFIRMATION,
+) {
+    init {
+        require(arrivedAtEpochMillis >= 0L)
+        require(plannedCompletionAtEpochMillis >= arrivedAtEpochMillis)
+        require(remainingDwellSeconds.isFinite() && remainingDwellSeconds >= 0.0)
+    }
+
+    val plannedDurationElapsed: Boolean
+        get() = remainingDwellSeconds <= 0.0
+}
 
 fun RoutePreview.toNavigationRoute(
     gasolineFallback: GasolineFallback? = null,
@@ -370,6 +418,11 @@ private fun SelectedCngStop.toNavigationFuelStop(sequence: Int): NavigationFuelS
         location = location,
         expectedArrivalAt = expectedArrivalAt,
         dwellTimeSeconds = dwellTimeSeconds,
+        opening = opening,
+        phone = phone,
+        brand = brand,
+        operator = operator,
+        price = price,
     )
 
 private data class NavigationRangeLeg(

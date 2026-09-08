@@ -162,6 +162,14 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     },
+                    onCompleteFuelStop = {
+                        ContextCompat.startForegroundService(
+                            this,
+                            Intent(this, NavigationForegroundService::class.java).apply {
+                                action = NavigationForegroundService.ACTION_COMPLETE_FUEL_STOP
+                            },
+                        )
+                    },
                     onUseCurrentLocation = { endpoint ->
                         routePlannerViewModel.currentLocationRequested(endpoint)
                         if (hasLocationPermission()) {

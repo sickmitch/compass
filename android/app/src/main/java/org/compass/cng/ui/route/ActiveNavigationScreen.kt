@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -168,6 +169,7 @@ internal fun ActiveNavigationScreen(
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
+    onCompleteFuelStop: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
     val navigationView = LocalView.current
@@ -193,6 +195,21 @@ internal fun ActiveNavigationScreen(
             "road_context segment=${state.currentRouteSegmentIndex ?: "unmatched"} " +
                 "speed_limit_kph=${ui.currentSpeedLimitKph ?: "unavailable"}",
         )
+    }
+    LaunchedEffect(
+        ui.nextCngStop?.stationId,
+        ui.nextCngStop?.lifecycle,
+        ui.nextCngStop?.availabilityLabel,
+        ui.nextCngStop?.price,
+    ) {
+        ui.nextCngStop?.let { stop ->
+            Log.i(
+                NAVIGATION_UI_LOG_TAG,
+                "cng_guidance station=${stop.stationId} lifecycle=${stop.lifecycle.name.lowercase()} " +
+                    "availability=${stop.availabilityLabel ?: "hidden"} " +
+                    "price_visible=${stop.price != null} dwell=${stop.dwellDuration}",
+            )
+        }
     }
     val cameraConfig = remember { NavigationCameraConfig() }
     var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
@@ -283,6 +300,7 @@ internal fun ActiveNavigationScreen(
             onDismiss = { showDetails = false },
             onRequestRouteUpdate = onRequestRouteUpdate,
             onReplaceFuelStop = { confirmFuelStopReplacement = true },
+            onCompleteFuelStop = onCompleteFuelStop,
             onOpenDeveloperTools = {
                 showDetails = false
                 showDeveloperTools = true
@@ -321,6 +339,16 @@ internal fun ActiveNavigationScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             )
+            ui.nextCngStop?.let { stop ->
+                CngGuidanceCard(
+                    stop = stop,
+                    onOpenDetails = { showDetails = true },
+                    onCompleteFuelStop = onCompleteFuelStop,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
             AnimatedVisibility(
                 visible = ui.isRouteRecalculationInProgress,
                 enter = fadeIn(),
@@ -400,6 +428,128 @@ internal fun ActiveNavigationScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CngGuidanceCard(
+    stop: NavigationCngUiModel,
+    onOpenDetails: () -> Unit,
+    onCompleteFuelStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .testTag("navigation_next_cng_stop")
+            .clickable(
+                enabled = stop.lifecycle != org.compass.cng.navigation.NavigationFuelStopLifecycle.REFUELING,
+                onClick = onOpenDetails,
+            )
+            .then(
+                if (stop.lifecycle ==
+                    org.compass.cng.navigation.NavigationFuelStopLifecycle.REFUELING
+                ) {
+                    Modifier
+                } else {
+                    Modifier.clearAndSetSemantics {
+                        contentDescription = buildString {
+                            append("Prossima tappa CNG, ${stop.name}, ${stop.distance}")
+                            stop.arrivalTime?.let { append(", arrivo $it") }
+                            stop.availabilityLabel?.let { append(", $it") }
+                            stop.price?.let { append(", prezzo $it") }
+                            append(", ${stop.lifecycleLabel}")
+                        }
+                    }
+                }
+            ),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        tonalElevation = 8.dp,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) {
+                    Text(
+                        text = "CNG",
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stop.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = buildString {
+                            append(stop.distance)
+                            stop.arrivalTime?.let { append(" · arrivo $it") }
+                            append(" · ${stop.lifecycleLabel}")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    stop.availabilityLabel?.let { availability ->
+                        Text(
+                            text = availability,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (stop.availabilityIsWarning) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                        )
+                    }
+                    stop.price?.let { price ->
+                        Text(
+                            text = price,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+            if (stop.lifecycle == org.compass.cng.navigation.NavigationFuelStopLifecycle.REFUELING) {
+                HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 7.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (stop.refuelingPlannedDurationElapsed) {
+                            "Tempo previsto concluso"
+                        } else {
+                            "Rifornimento · ${stop.refuelingRemainingDuration} rimanenti"
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = onCompleteFuelStop,
+                        modifier = Modifier.testTag("navigation_complete_refueling"),
+                    ) {
+                        Text("Completato")
+                    }
                 }
             }
         }
@@ -907,6 +1057,7 @@ private fun NavigationDetailsSheet(
     onDismiss: () -> Unit,
     onRequestRouteUpdate: () -> Unit,
     onReplaceFuelStop: () -> Unit,
+    onCompleteFuelStop: () -> Unit,
     onOpenDeveloperTools: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
@@ -974,28 +1125,71 @@ private fun NavigationDetailsSheet(
                         fontWeight = FontWeight.Bold,
                     )
                 }
-                itemsIndexed(route.fuelStops) { index, stop ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                itemsIndexed(ui.cngStops) { index, stop ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            "${index + 1}. ${stop.displayName()}",
+                            "${index + 1}. ${stop.name}",
                             fontWeight = FontWeight.SemiBold,
                         )
+                        listOfNotNull(stop.operatorLabel, stop.locationLabel)
+                            .joinToString(" · ")
+                            .takeIf(String::isNotBlank)
+                            ?.let { subtitle ->
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         Text(
                             buildString {
-                                append(listOfNotNull(stop.municipality, stop.province).joinToString(" · "))
-                                stop.expectedArrivalAt?.let {
-                                    if (isNotEmpty()) append(" · ")
-                                    append("arrivo ${it.format(DETAIL_CLOCK_FORMATTER)}")
-                                }
+                                append(stop.lifecycleLabel)
+                                append(" · ${stop.distance}")
+                                stop.arrivalTime?.let { append(" · arrivo $it") }
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            "Sosta prevista ${formatDuration(stop.dwellTimeSeconds.toDouble())}",
+                            stop.reason,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            stop.availabilityLabel?.let { availability ->
+                                Text(
+                                    availability,
+                                    color = if (stop.availabilityIsWarning) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    },
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                            stop.price?.let { price ->
+                                Text(price, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        stop.openingHours?.let { hours ->
+                            Text(
+                                hours,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "Sosta prevista ${stop.dwellDuration}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        stop.phone?.let { phone ->
+                            Text(
+                                "Telefono $phone",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                     HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                 }
@@ -1003,10 +1197,32 @@ private fun NavigationDetailsSheet(
                     item {
                         OutlinedButton(
                             onClick = onReplaceFuelStop,
-                            enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
+                            enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS &&
+                                state.activeFuelStopVisit == null,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text("Salta o sostituisci la prossima tappa CNG")
+                        }
+                    }
+                }
+                state.activeFuelStopVisit?.let { visit ->
+                    item {
+                        Button(
+                            onClick = {
+                                onDismiss()
+                                onCompleteFuelStop()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("navigation_details_complete_refueling"),
+                        ) {
+                            Text(
+                                if (visit.plannedDurationElapsed) {
+                                    "Conferma e riprendi il percorso"
+                                } else {
+                                    "Rifornimento completato"
+                                },
+                            )
                         }
                     }
                 }
@@ -1014,7 +1230,8 @@ private fun NavigationDetailsSheet(
             item {
                 OutlinedButton(
                     onClick = onRequestRouteUpdate,
-                    enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
+                    enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS &&
+                        state.activeFuelStopVisit == null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Ricalcola percorso")
@@ -1428,5 +1645,4 @@ private fun FuelStopReplacementDialog(
     )
 }
 
-private val DETAIL_CLOCK_FORMATTER = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
 private const val NAVIGATION_UI_LOG_TAG = "CompassNavigationUi"
