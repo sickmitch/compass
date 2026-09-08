@@ -36,6 +36,7 @@ class RouteUpdateController(
             offRouteEpisodeRequested = true
             return RouteUpdateReason.OFF_ROUTE
         }
+        if (state.offRouteStatus != OffRouteStatus.ON_ROUTE) return null
         val lastSuccess = lastSuccessfulUpdateAtMillis ?: nowEpochMillis
         if (nowEpochMillis - lastSuccess >= policy.trafficRefreshIntervalMillis) {
             return RouteUpdateReason.TRAFFIC_REFRESH

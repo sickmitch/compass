@@ -46,6 +46,7 @@ class NavigationForegroundService : Service(), LocationListener {
     private var replayRunnable: Runnable? = null
     private var routeUpdateJob: Job? = null
     private var updateControllerStarted = false
+    private var lastLoggedOffRouteStatus = OffRouteStatus.ON_ROUTE
     private val gpsLossCheck = object : Runnable {
         override fun run() {
             session.tick(System.currentTimeMillis())
@@ -226,6 +227,17 @@ class NavigationForegroundService : Service(), LocationListener {
 
     private fun processNavigationState(nowEpochMillis: Long) {
         val state = session.state.value
+        if (state.offRouteStatus != lastLoggedOffRouteStatus) {
+            Log.i(
+                LOG_TAG,
+                "off-route state: from=$lastLoggedOffRouteStatus to=${state.offRouteStatus} " +
+                    "distance_m=${state.distanceFromRouteMeters?.toInt() ?: "unavailable"} " +
+                    "match_confidence_percent=${state.routeMatchConfidence?.let {
+                        (it * 100.0).toInt()
+                    } ?: "unavailable"} duration_ms=${state.offRouteDurationMillis}",
+            )
+            lastLoggedOffRouteStatus = state.offRouteStatus
+        }
         maneuverController.nextAnnouncement(state)?.let { announcement ->
             if (state.voiceGuidanceEnabled) {
                 voiceGuidance.speak(announcement)
@@ -418,8 +430,12 @@ class NavigationForegroundService : Service(), LocationListener {
             .setSmallIcon(R.drawable.ic_compass)
             .setContentTitle(getString(R.string.navigation_notification_title))
             .setContentText(
-                session.state.value.currentManeuver?.instruction
-                    ?: getString(R.string.navigation_notification_text),
+                if (session.state.value.reroutingStatus == ReroutingStatus.IN_PROGRESS) {
+                    "Ricalcolo rotta"
+                } else {
+                    session.state.value.currentManeuver?.instruction
+                        ?: getString(R.string.navigation_notification_text)
+                },
             )
             .setOngoing(true)
             .setOnlyAlertOnce(true)

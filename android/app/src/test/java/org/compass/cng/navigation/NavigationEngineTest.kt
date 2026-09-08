@@ -168,6 +168,77 @@ class NavigationEngineTest {
     }
 
     @Test
+    fun rapidPoorFixBurstDoesNotConfirmUntilMinimumDurationHasElapsed() {
+        val engine = testEngine()
+        engine.preview(route())
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0010, 1_000, bearing = 90.0))
+
+        engine.updateLocation(fix(45.0007, 9.0011, 2_000, bearing = 0.0))
+        engine.updateLocation(fix(45.0007, 9.0012, 2_400, bearing = 0.0))
+        engine.updateLocation(fix(45.0007, 9.0013, 2_800, bearing = 0.0))
+
+        assertEquals(OffRouteStatus.SUSPECTED, engine.state.value.offRouteStatus)
+        assertEquals(800L, engine.state.value.offRouteDurationMillis)
+
+        engine.updateLocation(fix(45.0007, 9.0014, 4_100, bearing = 0.0))
+
+        assertEquals(OffRouteStatus.OFF_ROUTE, engine.state.value.offRouteStatus)
+        assertTrue(requireNotNull(engine.state.value.routeMatchConfidence) < 0.5)
+    }
+
+    @Test
+    fun moderateGpsDriftWhileExplicitlyStationaryDoesNotTriggerRerouting() {
+        val engine = testEngine()
+        engine.preview(route())
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0010, 1_000, speed = 0.0))
+
+        engine.updateLocation(fix(45.0004, 9.0011, 2_000, speed = 0.0))
+        engine.updateLocation(fix(45.0004, 9.0012, 3_000, speed = 0.0))
+        engine.updateLocation(fix(45.0004, 9.0013, 4_000, speed = 0.0))
+
+        assertEquals(OffRouteStatus.ON_ROUTE, engine.state.value.offRouteStatus)
+        assertTrue(requireNotNull(engine.state.value.distanceFromRouteMeters) > 20.0)
+    }
+
+    @Test
+    fun confirmedDeviationNeedsTwoReliableFixesToRecover() {
+        val engine = testEngine()
+        engine.preview(route())
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0010, 1_000))
+        engine.updateLocation(fix(45.0007, 9.0011, 2_000))
+        engine.updateLocation(fix(45.0007, 9.0012, 3_000))
+        engine.updateLocation(fix(45.0007, 9.0013, 4_000))
+        assertEquals(OffRouteStatus.OFF_ROUTE, engine.state.value.offRouteStatus)
+
+        engine.updateLocation(fix(45.0, 9.0014, 5_000))
+        assertEquals(OffRouteStatus.OFF_ROUTE, engine.state.value.offRouteStatus)
+
+        engine.updateLocation(fix(45.0, 9.0015, 6_000))
+        assertEquals(OffRouteStatus.ON_ROUTE, engine.state.value.offRouteStatus)
+    }
+
+    @Test
+    fun doubtfulMatchesDoNotAdvanceOldRouteProgressOrFuelPlan() {
+        val engine = testEngine()
+        engine.preview(route())
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0010, 1_000))
+        val reliable = engine.state.value
+
+        engine.updateLocation(fix(45.0007, 9.0024, 2_000))
+        val suspected = engine.state.value
+
+        assertEquals(OffRouteStatus.SUSPECTED, suspected.offRouteStatus)
+        assertEquals(reliable.routeProgressFraction, suspected.routeProgressFraction, 0.0)
+        assertEquals(reliable.currentManeuver, suspected.currentManeuver)
+        assertEquals(reliable.distanceRemainingMeters, suspected.distanceRemainingMeters)
+        assertEquals(reliable.navigationPosition, suspected.navigationPosition)
+    }
+
+    @Test
     fun missingFixMovesSessionToGpsLostAndNextFixRecovers() {
         val engine = testEngine()
         engine.preview(route())

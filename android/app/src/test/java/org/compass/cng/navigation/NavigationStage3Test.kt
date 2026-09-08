@@ -106,6 +106,26 @@ class NavigationStage3Test {
     }
 
     @Test
+    fun suspectedDeviationDefersTrafficRefreshUntilPositionIsReliable() {
+        val controller = RouteUpdateController()
+        val route = route("route_stage_3_suspected")
+        val base = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            navigationPosition = position(route.origin),
+        )
+        controller.navigationStarted(1_000)
+
+        assertNull(
+            controller.nextUpdate(
+                base.copy(offRouteStatus = OffRouteStatus.SUSPECTED),
+                301_000,
+            ),
+        )
+        assertEquals(RouteUpdateReason.TRAFFIC_REFRESH, controller.nextUpdate(base, 301_000))
+    }
+
+    @Test
     fun failedRerouteKeepsDownloadedRouteAndSuccessfulReplacementStaysActive() {
         val original = route("route_stage_3_original")
         val replacement = route("route_stage_3_replacement")
@@ -137,6 +157,38 @@ class NavigationStage3Test {
         assertTrue(engine.state.value.phase != NavigationPhase.ROUTE_PREVIEW)
         assertEquals(3_000L, engine.state.value.lastSuccessfulRouteRefreshEpochMillis)
         assertNull(engine.state.value.routeUpdateNotice)
+    }
+
+    @Test
+    fun failedRerouteReturnsToGuidanceEvenWhenMoreOffRouteFixesArriveInFlight() {
+        val original = route("route_stage_3_inflight_failure")
+        val engine = NavigationEngine(
+            locationFilter = LocationFilter(
+                LocationFilterPolicy(
+                    minimumPositionSmoothingAlpha = 1.0,
+                    maximumPositionSmoothingAlpha = 1.0,
+                ),
+            ),
+        )
+        engine.preview(original)
+        engine.start(nowEpochMillis = 1_000)
+        engine.updateLocation(NavigationLocation(original.geometry[1], 4.0, 10.0, 90.0, 2_000))
+
+        engine.beginRouteUpdate(RouteUpdateReason.OFF_ROUTE)
+        engine.updateLocation(
+            NavigationLocation(
+                coordinate = Coordinate(45.0007, 9.0011),
+                accuracyMeters = 4.0,
+                speedMetersPerSecond = 10.0,
+                bearingDegrees = 0.0,
+                timestampEpochMillis = 3_000,
+            ),
+        )
+        engine.failRouteUpdate()
+
+        assertEquals(ReroutingStatus.FAILED, engine.state.value.reroutingStatus)
+        assertTrue(engine.state.value.phase != NavigationPhase.REROUTING)
+        assertSame(original, engine.state.value.route)
     }
 
     @Test

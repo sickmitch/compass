@@ -10,6 +10,10 @@ data class NavigationEnginePolicy(
     val offRouteMinimumDistanceMeters: Double = 20.0,
     val offRouteAccuracyMultiplier: Double = 1.5,
     val offRouteConsecutiveFixes: Int = 3,
+    val offRouteMinimumDurationMillis: Long = 2_000L,
+    val offRouteRecoveryConsecutiveFixes: Int = 2,
+    val offRouteStationarySpeedMetersPerSecond: Double = 1.2,
+    val offRouteStationaryDistanceMultiplier: Double = 3.0,
     val offRouteHeadingMismatchDegrees: Double = 65.0,
     val offRouteHeadingMinimumSpeedMetersPerSecond: Double = 4.0,
     val offRouteHeadingMinimumDistanceMeters: Double = 10.0,
@@ -26,6 +30,10 @@ data class NavigationEnginePolicy(
         require(offRouteMinimumDistanceMeters > 0.0)
         require(offRouteAccuracyMultiplier > 0.0)
         require(offRouteConsecutiveFixes > 0)
+        require(offRouteMinimumDurationMillis >= 0L)
+        require(offRouteRecoveryConsecutiveFixes > 0)
+        require(offRouteStationarySpeedMetersPerSecond >= 0.0)
+        require(offRouteStationaryDistanceMultiplier > 1.0)
         require(offRouteHeadingMismatchDegrees in 0.0..180.0)
         require(offRouteHeadingMinimumSpeedMetersPerSecond >= 0.0)
         require(offRouteHeadingMinimumDistanceMeters >= 0.0)
@@ -45,6 +53,8 @@ class NavigationEngine(
 
     private var matcher: RouteMatcher? = null
     private var consecutiveOffRouteFixes = 0
+    private var consecutiveRecoveryFixes = 0
+    private var offRouteEpisodeStartedAtMillis: Long? = null
     private var lastAcceptedFixAtMillis: Long? = null
     private var trackingStartedAtMillis: Long? = null
     private var fuelStopDistances = emptyList<Pair<NavigationFuelStop, Double>>()
@@ -93,6 +103,8 @@ class NavigationEngine(
         locationFilter.reset()
         matcher = null
         consecutiveOffRouteFixes = 0
+        consecutiveRecoveryFixes = 0
+        offRouteEpisodeStartedAtMillis = null
         lastAcceptedFixAtMillis = null
         trackingStartedAtMillis = null
         fuelStopDistances = emptyList()
@@ -131,19 +143,54 @@ class NavigationEngine(
             filtered.accuracyMeters * policy.offRouteHeadingAccuracyMultiplier,
         )
         val backwardsConflict = match.progressDeltaMeters < -policy.offRouteBackwardsProgressMeters
-        val poorFix = match.distanceFromRouteMeters > offRouteThreshold ||
+        val explicitlyStationary = filtered.speedMetersPerSecond
+            ?.let { it <= policy.offRouteStationarySpeedMetersPerSecond } == true
+        val lateralConflict = match.distanceFromRouteMeters > offRouteThreshold &&
+            (!explicitlyStationary ||
+                match.distanceFromRouteMeters >
+                offRouteThreshold * policy.offRouteStationaryDistanceMultiplier)
+        val poorFix = lateralConflict ||
             (headingConflict && match.distanceFromRouteMeters > headingConflictDistanceThreshold) ||
             backwardsConflict
         if (poorFix) {
+            if (consecutiveOffRouteFixes == 0) {
+                offRouteEpisodeStartedAtMillis = filtered.timestampEpochMillis
+            }
             consecutiveOffRouteFixes += 1
+            consecutiveRecoveryFixes = 0
         } else {
             consecutiveOffRouteFixes = 0
+            offRouteEpisodeStartedAtMillis = null
+            if (previousState.offRouteStatus == OffRouteStatus.OFF_ROUTE) {
+                consecutiveRecoveryFixes += 1
+            } else {
+                consecutiveRecoveryFixes = 0
+            }
         }
+        val offRouteDurationMillis = offRouteEpisodeStartedAtMillis?.let { startedAt ->
+            (filtered.timestampEpochMillis - startedAt).coerceAtLeast(0L)
+        } ?: 0L
         val offRouteStatus = when {
-            consecutiveOffRouteFixes >= policy.offRouteConsecutiveFixes -> OffRouteStatus.OFF_ROUTE
+            previousState.offRouteStatus == OffRouteStatus.OFF_ROUTE && poorFix ->
+                OffRouteStatus.OFF_ROUTE
+            previousState.offRouteStatus == OffRouteStatus.OFF_ROUTE &&
+                !poorFix &&
+                consecutiveRecoveryFixes < policy.offRouteRecoveryConsecutiveFixes ->
+                OffRouteStatus.OFF_ROUTE
+            consecutiveOffRouteFixes >= policy.offRouteConsecutiveFixes &&
+                offRouteDurationMillis >= policy.offRouteMinimumDurationMillis ->
+                OffRouteStatus.OFF_ROUTE
             consecutiveOffRouteFixes > 0 -> OffRouteStatus.SUSPECTED
             else -> OffRouteStatus.ON_ROUTE
         }
+        val routeMatchConfidence = routeMatchConfidence(
+            distanceFromRouteMeters = match.distanceFromRouteMeters,
+            distanceThresholdMeters = offRouteThreshold,
+            headingDifferenceDegrees = match.headingDifferenceDegrees,
+            headingRelevant = filtered.speedMetersPerSecond
+                ?.let { it >= policy.offRouteHeadingMinimumSpeedMetersPerSecond } == true,
+            backwardsConflict = backwardsConflict,
+        )
 
         val progressFraction = if (match.geometryLengthMeters == 0.0) {
             0.0
@@ -175,13 +222,18 @@ class NavigationEngine(
         }
         val speed = filtered.speedMetersPerSecond ?: 0.0
         val navigationBearing = headingController.update(match.segmentBearingDegrees, speed)
-        val computedPhase = navigationPhase(
+        val progressIsReliable = offRouteStatus == OffRouteStatus.ON_ROUTE
+        val computedPhase = if (progressIsReliable) navigationPhase(
             distanceRemainingMeters = distanceRemaining,
             distanceToManeuverMeters = distanceToManeuver,
             speedMetersPerSecond = speed,
             nextFuelStop = nextFuel,
-        )
-        phaseBehindRouteUpdate = computedPhase
+        ) else previousState.phase.takeUnless {
+            it == NavigationPhase.GPS_LOST || it == NavigationPhase.REROUTING
+        } ?: phaseBehindRouteUpdate
+        if (previousState.reroutingStatus != ReroutingStatus.IN_PROGRESS) {
+            phaseBehindRouteUpdate = computedPhase
+        }
         mutableState.value = previousState.copy(
             phase = if (previousState.reroutingStatus == ReroutingStatus.IN_PROGRESS) {
                 NavigationPhase.REROUTING
@@ -189,25 +241,60 @@ class NavigationEngine(
                 computedPhase
             },
             rawLocation = rawLocation,
-            navigationPosition = NavigationPosition(
-                coordinate = match.snappedCoordinate,
-                routeSegmentIndex = match.segmentIndex,
-                speedMetersPerSecond = speed,
-                bearingDegrees = navigationBearing,
-                horizontalAccuracyMeters = filtered.accuracyMeters,
-                timestampEpochMillis = filtered.timestampEpochMillis,
-            ),
-            currentRoadName = currentManeuver?.streetNames?.firstOrNull(),
-            distanceRemainingMeters = distanceRemaining,
-            drivingDurationRemainingSeconds = drivingRemaining,
-            totalDurationRemainingSeconds = drivingRemaining + remainingDwell,
-            estimatedArrivalAt = now.plusMillis(((drivingRemaining + remainingDwell) * 1_000).toLong()),
-            currentManeuver = currentManeuver,
-            nextManeuver = nextManeuver,
-            distanceToNextManeuverMeters = distanceToManeuver,
-            routeProgressFraction = progressFraction,
-            nextFuelStop = nextFuel,
+            navigationPosition = if (progressIsReliable) {
+                NavigationPosition(
+                    coordinate = match.snappedCoordinate,
+                    routeSegmentIndex = match.segmentIndex,
+                    speedMetersPerSecond = speed,
+                    bearingDegrees = navigationBearing,
+                    horizontalAccuracyMeters = filtered.accuracyMeters,
+                    timestampEpochMillis = filtered.timestampEpochMillis,
+                )
+            } else {
+                previousState.navigationPosition
+            },
+            currentRoadName = if (progressIsReliable) {
+                currentManeuver?.streetNames?.firstOrNull()
+            } else {
+                previousState.currentRoadName
+            },
+            distanceRemainingMeters = if (progressIsReliable) {
+                distanceRemaining
+            } else {
+                previousState.distanceRemainingMeters
+            },
+            drivingDurationRemainingSeconds = if (progressIsReliable) {
+                drivingRemaining
+            } else {
+                previousState.drivingDurationRemainingSeconds
+            },
+            totalDurationRemainingSeconds = if (progressIsReliable) {
+                drivingRemaining + remainingDwell
+            } else {
+                previousState.totalDurationRemainingSeconds
+            },
+            estimatedArrivalAt = if (progressIsReliable) {
+                now.plusMillis(((drivingRemaining + remainingDwell) * 1_000).toLong())
+            } else {
+                previousState.estimatedArrivalAt
+            },
+            currentManeuver = if (progressIsReliable) currentManeuver else previousState.currentManeuver,
+            nextManeuver = if (progressIsReliable) nextManeuver else previousState.nextManeuver,
+            distanceToNextManeuverMeters = if (progressIsReliable) {
+                distanceToManeuver
+            } else {
+                previousState.distanceToNextManeuverMeters
+            },
+            routeProgressFraction = if (progressIsReliable) {
+                progressFraction
+            } else {
+                previousState.routeProgressFraction
+            },
+            nextFuelStop = if (progressIsReliable) nextFuel else previousState.nextFuelStop,
             offRouteStatus = offRouteStatus,
+            distanceFromRouteMeters = match.distanceFromRouteMeters,
+            routeMatchConfidence = routeMatchConfidence,
+            offRouteDurationMillis = offRouteDurationMillis,
             gpsStatus = GpsStatus.ACTIVE,
         )
     }
@@ -310,6 +397,8 @@ class NavigationEngine(
         headingController.reset()
         matcher = RouteMatcher(route.geometry)
         consecutiveOffRouteFixes = 0
+        consecutiveRecoveryFixes = 0
+        offRouteEpisodeStartedAtMillis = null
         lastAcceptedFixAtMillis = null
         trackingStartedAtMillis = null
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
@@ -340,6 +429,28 @@ class NavigationEngine(
             return NavigationPhase.APPROACHING_MANEUVER
         }
         return NavigationPhase.NAVIGATING
+    }
+
+    private fun routeMatchConfidence(
+        distanceFromRouteMeters: Double,
+        distanceThresholdMeters: Double,
+        headingDifferenceDegrees: Double?,
+        headingRelevant: Boolean,
+        backwardsConflict: Boolean,
+    ): Double {
+        val lateralConfidence = (
+            1.0 - distanceFromRouteMeters / (distanceThresholdMeters * 2.0)
+        ).coerceIn(0.0, 1.0)
+        val headingConfidence = if (headingRelevant && headingDifferenceDegrees != null) {
+            (1.0 - headingDifferenceDegrees / 180.0).coerceIn(0.0, 1.0)
+        } else {
+            1.0
+        }
+        return minOf(
+            lateralConfidence,
+            headingConfidence,
+            if (backwardsConflict) 0.0 else 1.0,
+        )
     }
 
     private fun upcomingManeuverIndex(route: NavigationRoute, segmentIndex: Int): Int {

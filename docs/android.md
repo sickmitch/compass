@@ -56,7 +56,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.19.4` (`versionCode=24`).
+Android version is `0.20.0` (`versionCode=25`).
 
 Destination search uses Compass `POST /api/v1/destinations/suggest` after a configurable 300 ms
 debounce and `POST /api/v1/destinations/resolve` only after selection. Results and full Google
@@ -69,6 +69,15 @@ The Google-only destination live gate was accepted on the live backend and a phy
 2026-09-07. Eight applicable manual cases passed. The ninth proposed case—editing the destination
 of an already active CNG/vehicle plan while preserving it—is not exposed by the current UI and was
 explicitly waived by the operator; it is not recorded as a successful on-device test.
+
+Navigation UI Phase 10 adds temporal confirmation and recovery hysteresis to the existing
+accuracy-, heading-, speed- and progress-aware off-route detector. Explicit stationary drift is
+suppressed unless the displacement is gross. While the position is doubtful, obsolete route
+progress, maneuver, ETA and next-stop state are frozen; a confirmed reroute still originates from
+the raw accepted fix and preserves the Compass CNG policy. A compact indeterminate spinner labelled
+`Ricalcolo rotta` appears below the maneuver card and in accessibility semantics for every active
+route update. Failed server updates retain downloaded guidance and expose degraded rerouting. The
+operator accepted the complete live-backend and physical-device gate on 2026-09-08.
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1
@@ -419,13 +428,13 @@ The generated APK is:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To build, install and cold-launch Android `0.19.4` on the single authorized device while preserving
+To build, install and cold-launch Android `0.20.0` on the single authorized device while preserving
 the saved vehicle and server profiles:
 
 ```bash
 export JAVA_HOME=/home/mike/toolchains/jdk17
 export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-bash scripts/install-android-0.19.4.sh
+bash scripts/install-android-0.20.0.sh
 ```
 
 Set `COMPASS_ADB_SERIAL` only if more than one device is connected. This installer intentionally

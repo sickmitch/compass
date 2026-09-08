@@ -29,6 +29,7 @@ internal data class NavigationDrivingUiModel(
     val progress: Float,
     val currentSpeedLimitKph: Int?,
     val nextCngStop: NavigationCngUiModel?,
+    val isRouteRecalculationInProgress: Boolean,
     val statusMessages: List<NavigationStatusUiModel>,
 )
 
@@ -97,6 +98,7 @@ internal fun NavigationState.toDrivingUiModel(): NavigationDrivingUiModel {
                 arrivalTime = fuel.stop.expectedArrivalAt?.format(NAVIGATION_CLOCK_FORMATTER),
             )
         },
+        isRouteRecalculationInProgress = reroutingStatus == ReroutingStatus.IN_PROGRESS,
         statusMessages = buildList {
             add(NavigationStatusUiModel(gpsStatusText(gpsStatus), NavigationStatusLevel.NORMAL))
             if (routeSource == NavigationRouteSource.CACHE) {

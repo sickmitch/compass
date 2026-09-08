@@ -445,6 +445,15 @@ number and Italian accessibility description while over limit. Missing inputs re
 unavailable, and no sound or vibration is emitted. Android version is `0.19.0` (`versionCode=20`).
 See `docs/phases/navigation-ui-phase-9-acceptance.md`.
 
+Navigation UI Phase 10 refines the existing off-route state machine with a minimum episode duration,
+stationary-drift suppression and recovery hysteresis. Suspected/confirmed matches no longer advance
+the old route's maneuver, ETA or CNG progress. Confirmed deviations still re-enter Compass using the
+raw GPS fix and preserve or safely replan the remaining fuel plan; network failure retains local
+guidance. While any replacement is pending, the driving surface shows an accessible spinner with
+`Ricalcolo rotta`. Android version is `0.20.0` (`versionCode=25`). The physical-device gate is
+accepted as of 2026-09-08 and documented in
+[the Phase 10 acceptance record](docs/phases/navigation-ui-phase-10-acceptance.md).
+
 Android patch `0.19.1` (`versionCode=21`) incorporates the first post-Phase-9 road-test correction:
 when a structured junction sign already names the maneuver road, Compass suppresses the redundant
 road subtitle while preserving the instruction and sign. The green sign is centered and sizes to

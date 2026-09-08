@@ -18,6 +18,7 @@ import org.compass.cng.navigation.NavigationRouteSource
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.navigation.RouteUpdateFailure
+import org.compass.cng.navigation.RouteUpdateReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -162,6 +163,23 @@ class NavigationDrivingUiModelTest {
         assertTrue(messages.any { "ricalcolo non disponibile" in it })
         assertTrue(messages.any { "Dati CNG in cache" in it })
         assertTrue(messages.any { "continuo sulla rotta scaricata" in it })
+    }
+
+    @Test
+    fun exposesRouteRecalculationAsPrimaryDrivingFeedback() {
+        val state = sampleState().copy(
+            reroutingStatus = ReroutingStatus.IN_PROGRESS,
+            routeUpdateReason = RouteUpdateReason.OFF_ROUTE,
+        )
+
+        val ui = state.toDrivingUiModel()
+
+        assertTrue(ui.isRouteRecalculationInProgress)
+        assertTrue(ui.statusMessages.any { "Aggiornamento del percorso" in it.text })
+        assertEquals(
+            false,
+            sampleState().toDrivingUiModel().isRouteRecalculationInProgress,
+        )
     }
 
     @Test

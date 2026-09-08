@@ -30,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -179,6 +180,13 @@ internal fun ActiveNavigationScreen(
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
     val ui = state.toDrivingUiModel()
+    LaunchedEffect(ui.isRouteRecalculationInProgress, state.routeUpdateReason) {
+        Log.i(
+            NAVIGATION_UI_LOG_TAG,
+            "route_recalculation_indicator visible=${ui.isRouteRecalculationInProgress} " +
+                "reason=${state.routeUpdateReason ?: "none"}",
+        )
+    }
     LaunchedEffect(ui.currentSpeedLimitKph, state.currentRouteSegmentIndex) {
         Log.i(
             NAVIGATION_UI_LOG_TAG,
@@ -313,6 +321,16 @@ internal fun ActiveNavigationScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             )
+            AnimatedVisibility(
+                visible = ui.isRouteRecalculationInProgress,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                RouteRecalculationIndicator(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
             Spacer(modifier = Modifier.weight(1f))
             Row(
                 modifier = Modifier
@@ -384,6 +402,38 @@ internal fun ActiveNavigationScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RouteRecalculationIndicator(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .testTag("navigation_route_recalculation_indicator")
+            .clearAndSetSemantics { contentDescription = "Ricalcolo rotta in corso" },
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        contentColor = MaterialTheme.colorScheme.primary,
+        tonalElevation = 8.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.dp,
+            )
+            Text(
+                text = "Ricalcolo rotta",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
         }
     }
 }
