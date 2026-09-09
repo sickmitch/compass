@@ -21,7 +21,12 @@ import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.navigation.CachedNavigationRoute
 import org.compass.cng.navigation.NavigationFuelPlan
 import org.compass.cng.navigation.NavigationFuelStop
+import org.compass.cng.navigation.NavigationFuelStopCompletionMode
+import org.compass.cng.navigation.NavigationFuelStopVisit
 import org.compass.cng.navigation.NavigationLeg
+import org.compass.cng.navigation.NavigationLocationMode
+import org.compass.cng.navigation.NavigationPosition
+import org.compass.cng.navigation.NavigationProgressSnapshot
 import org.compass.cng.navigation.NavigationRoute
 import org.compass.cng.navigation.NavigationRouteStore
 
@@ -37,7 +42,11 @@ class SharedPreferencesNavigationRouteStore internal constructor(
 
     override fun load(): CachedNavigationRoute? = codec.decode(preferences.getString(ROUTE_KEY, null))
 
-    override fun save(route: NavigationRoute, navigationWasActive: Boolean) {
+    override fun save(
+        route: NavigationRoute,
+        navigationWasActive: Boolean,
+        progress: NavigationProgressSnapshot?,
+    ) {
         preferences.edit().putString(
             ROUTE_KEY,
             codec.encode(
@@ -45,6 +54,7 @@ class SharedPreferencesNavigationRouteStore internal constructor(
                     route = route,
                     cachedAtEpochMillis = clock(),
                     navigationWasActive = navigationWasActive,
+                    progress = progress,
                 ),
             ),
         ).apply()
@@ -83,27 +93,146 @@ internal class NavigationRouteDocumentCodec(
 
 @Serializable
 private data class StoredNavigationRouteDocument(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val cachedAtEpochMillis: Long,
     val navigationWasActive: Boolean,
     val route: StoredNavigationRoute,
+    val progress: StoredNavigationProgress? = null,
 ) {
     init {
-        require(schemaVersion == 1) { "unsupported navigation cache schema" }
+        require(schemaVersion in 1..2) { "unsupported navigation cache schema" }
         require(cachedAtEpochMillis >= 0) { "invalid navigation cache timestamp" }
     }
 
-    fun toDomain() = CachedNavigationRoute(
-        route = route.toDomain(),
-        cachedAtEpochMillis = cachedAtEpochMillis,
-        navigationWasActive = navigationWasActive,
-    )
+    fun toDomain(): CachedNavigationRoute {
+        val domainRoute = route.toDomain()
+        return CachedNavigationRoute(
+            route = domainRoute,
+            cachedAtEpochMillis = cachedAtEpochMillis,
+            navigationWasActive = navigationWasActive,
+            progress = progress?.toDomain(domainRoute),
+        )
+    }
 
     companion object {
         fun fromDomain(value: CachedNavigationRoute) = StoredNavigationRouteDocument(
             cachedAtEpochMillis = value.cachedAtEpochMillis,
             navigationWasActive = value.navigationWasActive,
             route = StoredNavigationRoute.fromDomain(value.route),
+            progress = value.progress?.let(StoredNavigationProgress::fromDomain),
+        )
+    }
+}
+
+@Serializable
+private data class StoredNavigationPosition(
+    val coordinate: StoredCoordinate,
+    val routeSegmentIndex: Int,
+    val speedMetersPerSecond: Double,
+    val bearingDegrees: Double,
+    val horizontalAccuracyMeters: Double,
+    val timestampEpochMillis: Long,
+) {
+    fun toDomain() = NavigationPosition(
+        coordinate.toDomain(), routeSegmentIndex, speedMetersPerSecond, bearingDegrees,
+        horizontalAccuracyMeters, timestampEpochMillis,
+    )
+
+    companion object {
+        fun fromDomain(value: NavigationPosition) = StoredNavigationPosition(
+            StoredCoordinate.fromDomain(value.coordinate), value.routeSegmentIndex,
+            value.speedMetersPerSecond, value.bearingDegrees, value.horizontalAccuracyMeters,
+            value.timestampEpochMillis,
+        )
+    }
+}
+
+@Serializable
+private data class StoredFuelStopVisit(
+    val stopSequence: Int,
+    val arrivedAtEpochMillis: Long,
+    val plannedCompletionAtEpochMillis: Long,
+    val remainingDwellSeconds: Double,
+    val completionMode: String,
+) {
+    fun toDomain(route: NavigationRoute): NavigationFuelStopVisit? {
+        val stop = route.fuelStops.firstOrNull { it.sequence == stopSequence } ?: return null
+        return NavigationFuelStopVisit(
+            stop, arrivedAtEpochMillis, plannedCompletionAtEpochMillis, remainingDwellSeconds,
+            NavigationFuelStopCompletionMode.valueOf(completionMode),
+        )
+    }
+
+    companion object {
+        fun fromDomain(value: NavigationFuelStopVisit) = StoredFuelStopVisit(
+            value.stop.sequence, value.arrivedAtEpochMillis, value.plannedCompletionAtEpochMillis,
+            value.remainingDwellSeconds, value.completionMode.name,
+        )
+    }
+}
+
+@Serializable
+private data class StoredNavigationProgress(
+    val savedAtEpochMillis: Long,
+    val navigationPosition: StoredNavigationPosition?,
+    val routeProgressFraction: Double,
+    val distanceRemainingMeters: Double?,
+    val drivingDurationRemainingSeconds: Double?,
+    val totalDurationRemainingSeconds: Double?,
+    val estimatedArrivalAtEpochMillis: Long?,
+    val currentRoadName: String?,
+    val currentManeuverIndex: Int?,
+    val nextManeuverIndex: Int?,
+    val distanceToNextManeuverMeters: Double?,
+    val completedFuelStopSequences: Set<Int>,
+    val activeFuelStopVisit: StoredFuelStopVisit?,
+    val lastCompletedFuelStopSequence: Int?,
+    val lastSpokenInstruction: String?,
+    val voiceGuidanceEnabled: Boolean,
+    val lastSuccessfulRouteRefreshEpochMillis: Long?,
+    val locationMode: String = "DEVICE",
+) {
+    fun toDomain(route: NavigationRoute) = NavigationProgressSnapshot(
+        savedAtEpochMillis = savedAtEpochMillis,
+        navigationPosition = navigationPosition?.toDomain(),
+        routeProgressFraction = routeProgressFraction,
+        distanceRemainingMeters = distanceRemainingMeters,
+        drivingDurationRemainingSeconds = drivingDurationRemainingSeconds,
+        totalDurationRemainingSeconds = totalDurationRemainingSeconds,
+        estimatedArrivalAtEpochMillis = estimatedArrivalAtEpochMillis,
+        currentRoadName = currentRoadName,
+        currentManeuverIndex = currentManeuverIndex,
+        nextManeuverIndex = nextManeuverIndex,
+        distanceToNextManeuverMeters = distanceToNextManeuverMeters,
+        completedFuelStopSequences = completedFuelStopSequences,
+        activeFuelStopVisit = activeFuelStopVisit?.toDomain(route),
+        lastCompletedFuelStopSequence = lastCompletedFuelStopSequence,
+        lastSpokenInstruction = lastSpokenInstruction,
+        voiceGuidanceEnabled = voiceGuidanceEnabled,
+        lastSuccessfulRouteRefreshEpochMillis = lastSuccessfulRouteRefreshEpochMillis,
+        locationMode = NavigationLocationMode.valueOf(locationMode),
+    )
+
+    companion object {
+        fun fromDomain(value: NavigationProgressSnapshot) = StoredNavigationProgress(
+            value.savedAtEpochMillis,
+            value.navigationPosition?.let(StoredNavigationPosition::fromDomain),
+            value.routeProgressFraction,
+            value.distanceRemainingMeters,
+            value.drivingDurationRemainingSeconds,
+            value.totalDurationRemainingSeconds,
+            value.estimatedArrivalAtEpochMillis,
+            value.currentRoadName,
+            value.currentManeuverIndex,
+            value.nextManeuverIndex,
+            value.distanceToNextManeuverMeters,
+            value.completedFuelStopSequences,
+            value.activeFuelStopVisit?.let(StoredFuelStopVisit::fromDomain),
+            value.lastCompletedFuelStopSequence,
+            value.lastSpokenInstruction,
+            value.voiceGuidanceEnabled,
+            value.lastSuccessfulRouteRefreshEpochMillis,
+            value.locationMode.name,
         )
     }
 }

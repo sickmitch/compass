@@ -13,8 +13,14 @@ internal class ReplayLifecycleController {
     }
 
     fun simulatedOffRouteStarted() {
-        resumeAfterRouteUpdate = isReplayActive
+        routeUpdateStarted()
+    }
+
+    fun routeUpdateStarted(): Boolean {
+        if (!isReplayActive) return false
+        resumeAfterRouteUpdate = true
         isReplayActive = false
+        return true
     }
 
     /** Returns true exactly once when replay must restart on the updated/downloaded route. */

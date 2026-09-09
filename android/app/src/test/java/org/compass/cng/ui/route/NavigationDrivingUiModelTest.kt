@@ -70,6 +70,18 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
+    fun hidesDynamicCngEvidenceAndLabelsLocalEtaWhileOffline() {
+        val ui = sampleState().copy(
+            connectivity = NavigationConnectivity.OFFLINE,
+        ).toDrivingUiModel()
+
+        assertEquals(null, ui.nextCngStop?.availabilityLabel)
+        assertEquals(null, ui.nextCngStop?.price)
+        assertTrue(ui.statusMessages.any { "guida locale attiva" in it.text })
+        assertTrue(ui.statusMessages.any { "Traffico non aggiornabile" in it.text })
+    }
+
+    @Test
     fun refuellingVisitBecomesTheCurrentIntermediateDestinationWithCountdown() {
         val base = sampleState()
         val stop = requireNotNull(base.nextFuelStop).stop
@@ -255,7 +267,7 @@ class NavigationDrivingUiModelTest {
 
         assertEquals("81,5 km", ui.remainingDistance)
         assertTrue(messages.any { "rotta salvata" in it })
-        assertTrue(messages.any { "Traffico live non disponibile" in it })
+        assertTrue(messages.any { "Traffico non aggiornabile" in it })
         assertTrue(messages.any { "ricalcolo non disponibile" in it })
         assertTrue(messages.any { "Dati CNG in cache" in it })
         assertTrue(messages.any { "continuo sulla rotta scaricata" in it })

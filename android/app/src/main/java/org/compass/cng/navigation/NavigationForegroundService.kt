@@ -12,6 +12,9 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -38,6 +41,7 @@ class NavigationForegroundService : Service(), LocationListener {
     private lateinit var routeRecalculator: NavigationRouteRecalculator
     private lateinit var voiceGuidance: VoiceGuidance
     private lateinit var locationManager: LocationManager
+    private lateinit var connectivityManager: ConnectivityManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val maneuverController = ManeuverController()
     private val routeUpdateController = RouteUpdateController()
@@ -47,6 +51,23 @@ class NavigationForegroundService : Service(), LocationListener {
     private var routeUpdateJob: Job? = null
     private var updateControllerStarted = false
     private var lastLoggedOffRouteStatus = OffRouteStatus.ON_ROUTE
+    private var networkAvailable: Boolean? = null
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = updateNetworkAvailability(
+            connectivityManager.getNetworkCapabilities(network).isValidatedInternet(),
+        )
+
+        override fun onLost(network: Network) = updateNetworkAvailability(
+            connectivityManager.activeNetwork?.let { activeNetwork ->
+                connectivityManager.getNetworkCapabilities(activeNetwork).isValidatedInternet()
+            } == true,
+        )
+
+        override fun onCapabilitiesChanged(
+            network: Network,
+            networkCapabilities: NetworkCapabilities,
+        ) = updateNetworkAvailability(networkCapabilities.isValidatedInternet())
+    }
     private val gpsLossCheck = object : Runnable {
         override fun run() {
             session.tick(System.currentTimeMillis())
@@ -62,6 +83,12 @@ class NavigationForegroundService : Service(), LocationListener {
         routeRecalculator = container.navigationRouteRecalculator
         voiceGuidance = AndroidTextToSpeechVoiceGuidance(this)
         locationManager = getSystemService(LocationManager::class.java)
+        connectivityManager = getSystemService(ConnectivityManager::class.java)
+        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        networkAvailable = connectivityManager.activeNetwork?.let { network ->
+            connectivityManager.getNetworkCapabilities(network).isValidatedInternet()
+        } == true
+        if (networkAvailable == false) session.networkLost() else session.networkRestored()
         createNotificationChannel()
     }
 
@@ -113,10 +140,14 @@ class NavigationForegroundService : Service(), LocationListener {
             routeUpdateController.navigationStarted(System.currentTimeMillis())
             updateControllerStarted = true
         }
-        if (intent?.action == ACTION_START_REPLAY) {
+        val replayRequested = intent?.action == ACTION_START_REPLAY ||
+            session.state.value.locationMode == NavigationLocationMode.DEMO_REPLAY
+        if (replayRequested) {
+            session.setLocationMode(NavigationLocationMode.DEMO_REPLAY)
             replayLifecycle.navigationStarted(replay = true)
             startRouteReplay()
         } else {
+            session.setLocationMode(NavigationLocationMode.DEVICE)
             replayLifecycle.navigationStarted(replay = false)
             startLocationUpdates()
         }
@@ -176,15 +207,38 @@ class NavigationForegroundService : Service(), LocationListener {
         voiceGuidance.shutdown()
         serviceScope.cancel()
         locationManager.removeUpdates(this)
+        connectivityManager.unregisterNetworkCallback(networkCallback)
         super.onDestroy()
+    }
+
+    private fun updateNetworkAvailability(available: Boolean) {
+        handler.post {
+            val previous = networkAvailable
+            if (previous == available) return@post
+            networkAvailable = available
+            if (available) {
+                if (previous == false) {
+                    routeUpdateController.connectivityRestored()
+                    session.networkRestored()
+                    processNavigationState(System.currentTimeMillis())
+                }
+            } else {
+                routeUpdateJob?.cancel()
+                session.networkLost()
+                processNavigationState(System.currentTimeMillis())
+            }
+        }
     }
 
     private fun startRouteReplay() {
         locationManager.removeUpdates(this)
         replayRunnable?.let(handler::removeCallbacks)
         val route = session.state.value.route ?: return
+        val restoredSegmentIndex = session.state.value.currentRouteSegmentIndex
+            ?.coerceIn(0, route.geometry.lastIndex)
+            ?: 0
         val indexes = buildList {
-            var index = 0
+            var index = restoredSegmentIndex
             while (index < route.geometry.lastIndex) {
                 add(index)
                 index += REPLAY_SHAPE_INDEX_STEP
@@ -193,7 +247,8 @@ class NavigationForegroundService : Service(), LocationListener {
         }
         var position = 0
         var virtualTimestamp = System.currentTimeMillis()
-        var previousCoordinate = route.geometry.first()
+        var previousCoordinate = session.state.value.snappedLocation
+            ?: route.geometry[restoredSegmentIndex]
         val runnable = object : Runnable {
             override fun run() {
                 if (position >= indexes.size) return
@@ -265,7 +320,9 @@ class NavigationForegroundService : Service(), LocationListener {
             NOTIFICATION_ID,
             buildNotification(),
         )
-        if (!replayLifecycle.isReplayActive) {
+        if (!replayLifecycle.isReplayActive ||
+            state.connectivity == NavigationConnectivity.RECOVERING
+        ) {
             routeUpdateController.nextUpdate(state, nowEpochMillis)?.let { reason ->
                 requestRouteUpdate(reason, nowEpochMillis)
             }
@@ -276,6 +333,12 @@ class NavigationForegroundService : Service(), LocationListener {
         if (routeUpdateJob?.isActive == true) return
         val snapshot = session.state.value
         if (snapshot.route == null || snapshot.activeFuelStopVisit != null) return
+        if (reason == RouteUpdateReason.CONNECTIVITY_RECOVERY &&
+            replayLifecycle.routeUpdateStarted()
+        ) {
+            replayRunnable?.let(handler::removeCallbacks)
+            replayRunnable = null
+        }
         routeUpdateController.attemptStarted(nowEpochMillis)
         session.beginRouteUpdate(reason)
         Log.i(
@@ -307,7 +370,9 @@ class NavigationForegroundService : Service(), LocationListener {
                 throw error
             } catch (_: Exception) {
                 session.failRouteUpdate()
-                routeUpdateController.updateFailed()
+                routeUpdateController.updateFailed(
+                    retryConnectivityRecovery = reason == RouteUpdateReason.CONNECTIVITY_RECOVERY,
+                )
                 Log.w(LOG_TAG, "route update failed: $reason; continuing downloaded route")
                 resumeReplayAfterRouteUpdateIfNeeded()
                 getSystemService(NotificationManager::class.java).notify(
@@ -500,6 +565,10 @@ class NavigationForegroundService : Service(), LocationListener {
         private const val LOG_TAG = "CompassNavigation"
     }
 }
+
+private fun NetworkCapabilities?.isValidatedInternet(): Boolean =
+    this?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+        hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 
 private fun formatNotificationDuration(seconds: Double): String {
     val roundedMinutes = kotlin.math.ceil(seconds.coerceAtLeast(0.0) / 60.0).toInt()

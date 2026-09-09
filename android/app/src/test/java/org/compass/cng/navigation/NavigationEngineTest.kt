@@ -472,6 +472,56 @@ class NavigationEngineTest {
     }
 
     @Test
+    fun restoredRefuellingVisitKeepsProgressFrozenUntilExplicitCompletion() {
+        val base = route()
+        val stop = NavigationFuelStop(
+            sequence = 1,
+            mimitStationId = "restored-stop",
+            name = "Tappa ripristinata",
+            municipality = null,
+            province = null,
+            location = Coordinate(45.0, 9.0020),
+            expectedArrivalAt = null,
+            dwellTimeSeconds = 60,
+        )
+        val routed = base.copy(fuelStops = listOf(stop))
+        val visit = NavigationFuelStopVisit(stop, 2_000L, 62_000L, 40.0)
+        val engine = testEngine()
+
+        engine.restore(
+            route = routed,
+            progress = NavigationProgressSnapshot(
+                savedAtEpochMillis = 22_000L,
+                navigationPosition = NavigationPosition(
+                    stop.location, 1, 0.0, 90.0, 4.0, 22_000L,
+                ),
+                routeProgressFraction = 0.5,
+                distanceRemainingMeters = 157.0,
+                drivingDurationRemainingSeconds = 15.7,
+                totalDurationRemainingSeconds = 55.7,
+                estimatedArrivalAtEpochMillis = 77_700L,
+                currentRoadName = "Via di prova",
+                currentManeuverIndex = 0,
+                nextManeuverIndex = 1,
+                distanceToNextManeuverMeters = 78.0,
+                completedFuelStopSequences = emptySet(),
+                activeFuelStopVisit = visit,
+                lastCompletedFuelStopSequence = null,
+                lastSpokenInstruction = null,
+                voiceGuidanceEnabled = true,
+                lastSuccessfulRouteRefreshEpochMillis = null,
+            ),
+            cachedAtEpochMillis = 22_000L,
+            nowEpochMillis = 42_000L,
+        )
+
+        assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+        assertEquals(20.0, requireNotNull(engine.state.value.activeFuelStopVisit).remainingDwellSeconds, 0.0)
+        assertTrue(engine.completeFuelStop(43_000L))
+        assertEquals(NavigationFuelStopLifecycle.COMPLETED, engine.state.value.fuelStopProgress.single().lifecycle)
+    }
+
+    @Test
     fun successfulOffRouteReplacementRecordsTheRemainingDurationDifference() {
         val original = route()
         val engine = testEngine()

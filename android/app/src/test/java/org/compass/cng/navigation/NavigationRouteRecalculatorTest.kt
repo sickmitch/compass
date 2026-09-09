@@ -24,7 +24,7 @@ import org.junit.Test
 
 class NavigationRouteRecalculatorTest {
     @Test
-    fun offRouteUsesRawFixWhileTrafficRefreshUsesSnappedPosition() = runTest {
+    fun offRouteUsesRawFixWhileTrafficAndConnectivityRecoveryUseSnappedPosition() = runTest {
         val repository = RecordingRepository()
         val recalculator = CompassNavigationRouteRecalculator(repository)
         val original = repository.route(
@@ -44,6 +44,10 @@ class NavigationRouteRecalculatorTest {
         assertEquals(raw, repository.lastOrigin)
 
         recalculator.recalculate(state, RouteUpdateReason.TRAFFIC_REFRESH)
+        assertEquals(snapped, repository.lastOrigin)
+        assertEquals(original.destination, repository.lastDestination)
+
+        recalculator.recalculate(state, RouteUpdateReason.CONNECTIVITY_RECOVERY)
         assertEquals(snapped, repository.lastOrigin)
         assertEquals(original.destination, repository.lastDestination)
     }

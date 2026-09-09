@@ -196,6 +196,10 @@ class RoutePlannerViewModel(
             restored
         }
     }
+    val shouldResumeRestoredNavigation: Boolean =
+        navigationSession.restoredNavigationWasActive &&
+            restoredNavigation.route != null &&
+            restoredNavigation.phase != org.compass.cng.navigation.NavigationPhase.ROUTE_PREVIEW
     private val initialVehicleProfiles = vehicleProfileRepository.load()
     private val initialServerConnection = serverConnectionRepository.load()
     private val mutableUiState = MutableStateFlow(

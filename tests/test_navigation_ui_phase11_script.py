@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 RUNNER = Path("scripts/run-navigation-ui-phase11-live.sh")
 INSTALLER = Path("scripts/install-android-0.21.0.sh")
 DRIVING_UI = Path(

@@ -140,6 +140,7 @@ internal fun NavigationState.toDrivingUiModel(
         nextCngStop = nextFuelStop?.toCngUiModel(
             activeRoute,
             routeSource,
+            connectivity,
             displayZone,
             activeFuelStopVisit?.takeIf { visit -> visit.stop.sequence == nextFuelStop.stop.sequence },
         ),
@@ -147,6 +148,7 @@ internal fun NavigationState.toDrivingUiModel(
             it.toCngUiModel(
                 activeRoute,
                 routeSource,
+                connectivity,
                 displayZone,
                 activeFuelStopVisit?.takeIf { visit -> visit.stop.sequence == it.stop.sequence },
             )
@@ -175,16 +177,36 @@ internal fun NavigationState.toDrivingUiModel(
                     ),
                 )
             }
-            add(trafficStatusUiModel(activeRoute.timing, displayZone))
-            if (connectivity == NavigationConnectivity.REROUTING_UNAVAILABLE) {
+            if (connectivity == NavigationConnectivity.ONLINE) {
+                add(trafficStatusUiModel(activeRoute.timing, displayZone))
+            } else {
                 add(
                     NavigationStatusUiModel(
-                        "Connessione Compass assente: navigazione locale attiva, ricalcolo non disponibile.",
+                        "Traffico non aggiornabile: durata ed ETA continuano dalla rotta locale.",
                         NavigationStatusLevel.WARNING,
                     ),
                 )
             }
-            if (routeSource == NavigationRouteSource.CACHE && activeRoute.fuelStops.isNotEmpty()) {
+            if (connectivity != NavigationConnectivity.ONLINE) {
+                add(
+                    NavigationStatusUiModel(
+                        when (connectivity) {
+                            NavigationConnectivity.OFFLINE ->
+                                "Rete assente: guida locale attiva sulla rotta scaricata."
+                            NavigationConnectivity.RECOVERING ->
+                                "Connessione ripristinata: aggiorno traffico e percorso in sicurezza…"
+                            NavigationConnectivity.REROUTING_UNAVAILABLE ->
+                                "Compass non raggiungibile: guida locale attiva, ricalcolo non disponibile."
+                            NavigationConnectivity.ONLINE -> error("handled above")
+                        },
+                        NavigationStatusLevel.WARNING,
+                    ),
+                )
+            }
+            if ((routeSource == NavigationRouteSource.CACHE ||
+                    connectivity != NavigationConnectivity.ONLINE) &&
+                activeRoute.fuelStops.isNotEmpty()
+            ) {
                 add(
                     NavigationStatusUiModel(
                         "Dati CNG in cache: prezzi e orari non sono presentati come aggiornati.",
@@ -247,10 +269,12 @@ internal fun NavigationState.toDrivingUiModel(
 private fun NavigationFuelStopProgress.toCngUiModel(
     route: org.compass.cng.navigation.NavigationRoute,
     routeSource: NavigationRouteSource,
+    connectivity: NavigationConnectivity,
     displayZone: ZoneId,
     activeVisit: org.compass.cng.navigation.NavigationFuelStopVisit?,
 ): NavigationCngUiModel {
-    val dynamicDetailsAllowed = routeSource == NavigationRouteSource.LIVE
+    val dynamicDetailsAllowed = routeSource == NavigationRouteSource.LIVE &&
+        connectivity == NavigationConnectivity.ONLINE
     val arrivalForFreshness = estimatedArrivalAt?.atOffset(ZoneOffset.UTC)
         ?: stop.expectedArrivalAt
     val openingIsApplicable = dynamicDetailsAllowed && stop.opening?.let { opening ->

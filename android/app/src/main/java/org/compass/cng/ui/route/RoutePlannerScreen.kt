@@ -1,5 +1,6 @@
 package org.compass.cng.ui.route
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -894,7 +895,11 @@ private fun ActiveNavigationContent(
                     )
                 }
                 Text(
-                    trafficTimingText(state.route.timing),
+                    if (state.connectivity == NavigationConnectivity.ONLINE) {
+                        trafficTimingText(state.route.timing)
+                    } else {
+                        "Traffico non aggiornabile · ETA calcolata sulla rotta locale"
+                    },
                     color = if (state.route.timing.trafficAware) {
                         MaterialTheme.colorScheme.primary
                     } else {
@@ -902,14 +907,25 @@ private fun ActiveNavigationContent(
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (state.connectivity == NavigationConnectivity.REROUTING_UNAVAILABLE) {
+                if (state.connectivity != NavigationConnectivity.ONLINE) {
                     Text(
-                        "Connessione Compass assente: navigazione locale attiva, ricalcolo non disponibile.",
+                        when (state.connectivity) {
+                            NavigationConnectivity.OFFLINE ->
+                                "Rete assente: guida locale attiva sulla rotta scaricata."
+                            NavigationConnectivity.RECOVERING ->
+                                "Connessione ripristinata: aggiornamento sicuro in corso."
+                            NavigationConnectivity.REROUTING_UNAVAILABLE ->
+                                "Compass non raggiungibile: guida locale attiva, ricalcolo non disponibile."
+                            NavigationConnectivity.ONLINE -> error("handled above")
+                        },
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (state.routeSource == NavigationRouteSource.CACHE && state.route.fuelStops.isNotEmpty()) {
+                if ((state.routeSource == NavigationRouteSource.CACHE ||
+                        state.connectivity != NavigationConnectivity.ONLINE) &&
+                    state.route.fuelStops.isNotEmpty()
+                ) {
                     Text(
                         "Dati CNG in cache: prezzi e orari non sono presentati come aggiornati.",
                         color = MaterialTheme.colorScheme.error,
@@ -2114,10 +2130,31 @@ private fun CandidateContent(
     onSelect: (RankedCngStation) -> Unit,
 ) {
     var selectedStationId by remember(rankedStations) { mutableStateOf<String?>(null) }
+    val orderedCandidates = remember(rankedStations.candidates) {
+        orderCngCandidatesForSelection(rankedStations.candidates)
+    }
+    val priceTiers = remember(rankedStations.candidates) {
+        rankVisibleCngPrices(rankedStations.candidates)
+    }
+    LaunchedEffect(orderedCandidates, priceTiers) {
+        Log.i(
+            CNG_CANDIDATE_UI_LOG_TAG,
+            "candidate_order detour_minutes=" +
+                orderedCandidates.joinToString(",") {
+                    "%.3f".format(Locale.ROOT, it.detourMinutes)
+                } +
+                " monotonic=" + orderedCandidates.zipWithNext().all { (first, second) ->
+                    first.detourMinutes <= second.detourMinutes
+                } +
+                " price_tiers=" + CandidatePriceTier.entries.joinToString(",") { tier ->
+                    "${tier.name.lowercase(Locale.ROOT)}:${priceTiers.values.count { it == tier }}"
+                },
+        )
+    }
     Column(modifier = Modifier.fillMaxSize()) {
         RouteMap(
             route = rankedStations.baseRoute,
-            candidateStations = rankedStations.candidates,
+            candidateStations = orderedCandidates,
             selectedCandidateStationId = selectedStationId,
             modifier = Modifier
                 .fillMaxWidth()
@@ -2176,11 +2213,13 @@ private fun CandidateContent(
                     .weight(0.62f),
             ) {
                 itemsIndexed(
-                    items = rankedStations.candidates,
+                    items = orderedCandidates,
                     key = { _, station -> station.mimitStationId },
-                ) { _, station ->
+                ) { index, station ->
                     CandidateCard(
                         station = station,
+                        displayRank = index + 1,
+                        priceTier = priceTiers[station.mimitStationId],
                         predictiveStation = predictiveSuggestion
                             ?.candidates
                             ?.firstOrNull {
@@ -2200,6 +2239,8 @@ private fun CandidateContent(
 @Composable
 private fun CandidateCard(
     station: RankedCngStation,
+    displayRank: Int,
+    priceTier: CandidatePriceTier?,
     predictiveStation: PredictiveCngStation?,
     selecting: Boolean,
     enabled: Boolean,
@@ -2224,7 +2265,7 @@ private fun CandidateCard(
                 verticalAlignment = Alignment.Top,
             ) {
                 Row(modifier = Modifier.weight(1f)) {
-                    RankingBadge(station.ranking.rank)
+                    RankingBadge(displayRank)
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
@@ -2274,7 +2315,10 @@ private fun CandidateCard(
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     station.price?.let { price ->
-                        CandidatePrice(price)
+                        CandidatePrice(
+                            price = price,
+                            tier = priceTier ?: CandidatePriceTier.OTHER,
+                        )
                         Text(
                             "Rilevato ${formatDateTime(price.observedAt)}",
                             style = MaterialTheme.typography.bodySmall,
@@ -2892,10 +2936,15 @@ private fun OpeningBadge(state: OpeningState) {
 }
 
 @Composable
-private fun CandidatePrice(price: CngPrice) {
+private fun CandidatePrice(price: CngPrice, tier: CandidatePriceTier) {
+    val (containerColor, contentColor) = when (tier) {
+        CandidatePriceTier.CHEAPEST -> Color(0xFFCBEBD4) to Color(0xFF174D2B)
+        CandidatePriceTier.SECOND_CHEAPEST -> Color(0xFFFFE9A8) to Color(0xFF594500)
+        CandidatePriceTier.OTHER -> Color(0xFFF4C8CC) to Color(0xFF671E25)
+    }
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        color = containerColor,
+        contentColor = contentColor,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.wrapContentWidth(),
     ) {
@@ -3022,3 +3071,5 @@ private fun predictiveStatusCopy(state: PredictiveSuggestionState): Pair<String,
 }
 
 private fun String.filterPhoneCharacters(): String = filter { it.isDigit() || it == '+' }
+
+private const val CNG_CANDIDATE_UI_LOG_TAG = "CompassCngCandidates"

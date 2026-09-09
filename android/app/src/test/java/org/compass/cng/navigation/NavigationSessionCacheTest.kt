@@ -9,18 +9,32 @@ import org.junit.Test
 
 class NavigationSessionCacheTest {
     @Test
-    fun processRestartRestoresRouteAsCachedPreviewAndExplicitStopClearsIt() {
+    fun processRestartRestoresActiveGuidanceProgressAndExplicitStopClearsIt() {
         val store = MemoryRouteStore()
-        val first = NavigationSession(routeStore = store)
+        var now = 1_000L
+        val first = NavigationSession(routeStore = store, clock = { now })
         first.preview(route())
         first.start()
+        first.setLocationMode(NavigationLocationMode.DEMO_REPLAY)
+        now = 7_000L
+        first.updateLocation(
+            NavigationLocation(
+                Coordinate(45.05, 9.05), 4.0, 12.0, 38.0, 7_000L,
+            ),
+        )
 
-        val restored = NavigationSession(routeStore = store)
+        now = 8_000L
+        val restored = NavigationSession(routeStore = store, clock = { now })
 
-        assertEquals(NavigationPhase.ROUTE_PREVIEW, restored.state.value.phase)
+        assertEquals(NavigationPhase.GPS_LOST, restored.state.value.phase)
         assertEquals(true, restored.restoredNavigationWasActive)
         assertEquals(NavigationRouteSource.CACHE, restored.state.value.routeSource)
+        assertEquals(NavigationConnectivity.REROUTING_UNAVAILABLE, restored.state.value.connectivity)
+        assertEquals(NavigationLocationMode.DEMO_REPLAY, restored.state.value.locationMode)
         assertEquals("offline-route", restored.state.value.route?.routeId)
+        assertEquals(0.5, restored.state.value.routeProgressFraction, 0.03)
+        assertEquals(45.05, requireNotNull(restored.state.value.snappedLocation).latitude, 1e-9)
+        assertEquals(9.05, requireNotNull(restored.state.value.snappedLocation).longitude, 1e-9)
         restored.stopToPreview()
         assertNull(store.cached)
     }
@@ -52,6 +66,31 @@ class NavigationSessionCacheTest {
         assertEquals(NavigationRouteSource.LIVE, session.state.value.routeSource)
     }
 
+    @Test
+    fun networkLossRetainsLocalStateAndRecoveryNeedsASuccessfulReplacement() {
+        val session = NavigationSession()
+        session.preview(route())
+        session.start()
+        session.setLocationMode(NavigationLocationMode.DEMO_REPLAY)
+
+        session.networkLost()
+        assertEquals(NavigationConnectivity.OFFLINE, session.state.value.connectivity)
+        assertEquals("offline-route", session.state.value.route?.routeId)
+
+        session.networkRestored()
+        assertEquals(NavigationConnectivity.RECOVERING, session.state.value.connectivity)
+        assertEquals("offline-route", session.state.value.route?.routeId)
+
+        session.beginRouteUpdate(RouteUpdateReason.CONNECTIVITY_RECOVERY)
+        session.failRouteUpdate()
+        assertEquals(NavigationConnectivity.RECOVERING, session.state.value.connectivity)
+
+        session.replaceRoute(route("recovered-route"), 5_000L, null)
+        assertEquals(NavigationConnectivity.ONLINE, session.state.value.connectivity)
+        assertEquals(NavigationLocationMode.DEMO_REPLAY, session.state.value.locationMode)
+        assertEquals("recovered-route", session.state.value.route?.routeId)
+    }
+
     private fun route(id: String = "offline-route") = RoutePreview(
         origin = Coordinate(45.0, 9.0),
         destination = Coordinate(45.1, 9.1),
@@ -70,8 +109,12 @@ class NavigationSessionCacheTest {
 
         override fun load(): CachedNavigationRoute? = cached
 
-        override fun save(route: NavigationRoute, navigationWasActive: Boolean) {
-            cached = CachedNavigationRoute(route, 1000, navigationWasActive)
+        override fun save(
+            route: NavigationRoute,
+            navigationWasActive: Boolean,
+            progress: NavigationProgressSnapshot?,
+        ) {
+            cached = CachedNavigationRoute(route, 1000, navigationWasActive, progress)
         }
 
         override fun clear() {

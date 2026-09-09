@@ -84,11 +84,94 @@ class NavigationEngine(
         )
     }
 
+    /** Restores only locally derivable guidance state; live freshness is never inferred. */
+    fun restore(
+        route: NavigationRoute,
+        progress: NavigationProgressSnapshot,
+        cachedAtEpochMillis: Long,
+        nowEpochMillis: Long = System.currentTimeMillis(),
+    ) {
+        resetTracking(route)
+        completedFuelStopSequences += progress.completedFuelStopSequences
+        val distanceAlong = progress.navigationPosition?.let { position ->
+            requireNotNull(matcher).match(
+                NavigationLocation(
+                    coordinate = position.coordinate,
+                    accuracyMeters = position.horizontalAccuracyMeters,
+                    speedMetersPerSecond = position.speedMetersPerSecond,
+                    bearingDegrees = position.bearingDegrees,
+                    timestampEpochMillis = position.timestampEpochMillis,
+                ),
+            ).distanceAlongGeometryMeters
+        }
+        lastReliableDistanceAlongGeometryMeters = distanceAlong
+        val activeVisit = progress.activeFuelStopVisit
+        val fuelProgress = fuelStopProgressAt(
+            route = route,
+            distanceAlongGeometryMeters = distanceAlong
+                ?: route.totalDistanceMeters * progress.routeProgressFraction,
+            geometryLengthMeters = requireNotNull(matcher).geometryLengthMeters,
+            now = Instant.ofEpochMilli(nowEpochMillis),
+            activeVisit = activeVisit,
+        )
+        val remainingTotal = progress.totalDurationRemainingSeconds
+        val restored = NavigationState(
+            phase = if (activeVisit != null) {
+                NavigationPhase.AT_FUEL_STOP
+            } else {
+                NavigationPhase.GPS_LOST
+            },
+            route = route,
+            navigationPosition = progress.navigationPosition,
+            currentRoadName = progress.currentRoadName,
+            distanceRemainingMeters = progress.distanceRemainingMeters,
+            drivingDurationRemainingSeconds = progress.drivingDurationRemainingSeconds,
+            totalDurationRemainingSeconds = remainingTotal,
+            estimatedArrivalAt = remainingTotal?.let {
+                Instant.ofEpochMilli(nowEpochMillis).plusMillis((it * 1_000).toLong())
+            },
+            currentManeuver = progress.currentManeuverIndex?.let(route.maneuvers::getOrNull),
+            nextManeuver = progress.nextManeuverIndex?.let(route.maneuvers::getOrNull),
+            distanceToNextManeuverMeters = progress.distanceToNextManeuverMeters,
+            routeProgressFraction = progress.routeProgressFraction,
+            nextFuelStop = fuelProgress.firstOrNull {
+                it.lifecycle != NavigationFuelStopLifecycle.COMPLETED
+            },
+            fuelStopProgress = fuelProgress,
+            activeFuelStopVisit = activeVisit,
+            lastCompletedFuelStop = progress.lastCompletedFuelStopSequence?.let { sequence ->
+                route.fuelStops.firstOrNull { it.sequence == sequence }
+            },
+            gpsStatus = GpsStatus.LOST,
+            lastSuccessfulRouteRefreshEpochMillis =
+                progress.lastSuccessfulRouteRefreshEpochMillis,
+            lastSpokenInstruction = progress.lastSpokenInstruction,
+            voiceGuidanceEnabled = progress.voiceGuidanceEnabled,
+            routeSource = NavigationRouteSource.CACHE,
+            routeCachedAtEpochMillis = cachedAtEpochMillis,
+            connectivity = NavigationConnectivity.REROUTING_UNAVAILABLE,
+            locationMode = progress.locationMode,
+        )
+        mutableState.value = activeVisit?.let {
+            refuellingStateAt(restored, nowEpochMillis)
+        } ?: restored
+        phaseBehindRouteUpdate = if (activeVisit != null) {
+            NavigationPhase.AT_FUEL_STOP
+        } else {
+            NavigationPhase.NAVIGATING
+        }
+        trackingStartedAtMillis = nowEpochMillis
+    }
+
     fun start(nowEpochMillis: Long = System.currentTimeMillis()) {
         val route = mutableState.value.route ?: return
         if (matcher == null) resetTracking(route)
         mutableState.value = mutableState.value.copy(
-            phase = NavigationPhase.NAVIGATING,
+            phase = if (mutableState.value.activeFuelStopVisit != null) {
+                NavigationPhase.AT_FUEL_STOP
+            } else {
+                NavigationPhase.NAVIGATING
+            },
             gpsStatus = GpsStatus.ACQUIRING,
             offRouteStatus = OffRouteStatus.ON_ROUTE,
         )
@@ -411,6 +494,7 @@ class NavigationEngine(
             routeUpdateNotice = updateNotice,
             routeSource = NavigationRouteSource.LIVE,
             connectivity = NavigationConnectivity.ONLINE,
+            locationMode = previousState.locationMode,
         )
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
         currentLocation?.let {
@@ -428,11 +512,41 @@ class NavigationEngine(
             reroutingStatus = ReroutingStatus.FAILED,
             routeUpdateFailure = failure,
             connectivity = if (failure == RouteUpdateFailure.NETWORK_OR_SERVER) {
-                NavigationConnectivity.REROUTING_UNAVAILABLE
+                if (current.routeUpdateReason == RouteUpdateReason.CONNECTIVITY_RECOVERY) {
+                    NavigationConnectivity.RECOVERING
+                } else {
+                    NavigationConnectivity.REROUTING_UNAVAILABLE
+                }
             } else {
                 current.connectivity
             },
         )
+    }
+
+    fun networkLost() {
+        val current = mutableState.value
+        if (current.route == null) return
+        if (current.reroutingStatus == ReroutingStatus.IN_PROGRESS) {
+            mutableState.value = current.copy(
+                phase = phaseBehindRouteUpdate,
+                reroutingStatus = ReroutingStatus.FAILED,
+                routeUpdateFailure = RouteUpdateFailure.NETWORK_OR_SERVER,
+                connectivity = NavigationConnectivity.OFFLINE,
+            )
+        } else {
+            mutableState.value = current.copy(connectivity = NavigationConnectivity.OFFLINE)
+        }
+    }
+
+    fun networkRestored() {
+        val current = mutableState.value
+        if (current.route != null &&
+            (current.connectivity == NavigationConnectivity.OFFLINE ||
+                current.routeSource == NavigationRouteSource.CACHE &&
+                current.connectivity == NavigationConnectivity.REROUTING_UNAVAILABLE)
+        ) {
+            mutableState.value = current.copy(connectivity = NavigationConnectivity.RECOVERING)
+        }
     }
 
     fun recordSpokenInstruction(instruction: String) {
@@ -441,6 +555,10 @@ class NavigationEngine(
 
     fun setVoiceGuidanceEnabled(enabled: Boolean) {
         mutableState.value = mutableState.value.copy(voiceGuidanceEnabled = enabled)
+    }
+
+    fun setLocationMode(mode: NavigationLocationMode) {
+        mutableState.value = mutableState.value.copy(locationMode = mode)
     }
 
     /** Completes only the active visit; GPS proximity alone never resumes navigation. */

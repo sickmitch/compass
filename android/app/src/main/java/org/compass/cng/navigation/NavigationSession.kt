@@ -7,44 +7,59 @@ class NavigationSession(
     private val engine: NavigationEngine = NavigationEngine(),
     private val routeStore: NavigationRouteStore = NoOpNavigationRouteStore,
     private val eventLogger: (String) -> Unit = {},
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     val state: StateFlow<NavigationState> = engine.state
     private val restoredCache = routeStore.load()
     val restoredNavigationWasActive: Boolean = restoredCache?.navigationWasActive == true
+    private var lastCheckpointAtEpochMillis: Long? = null
 
     init {
         restoredCache?.let { cached ->
-            engine.preview(
-                route = cached.route,
-                source = NavigationRouteSource.CACHE,
-                cachedAtEpochMillis = cached.cachedAtEpochMillis,
-            )
+            if (cached.navigationWasActive && cached.progress != null) {
+                engine.restore(
+                    route = cached.route,
+                    progress = cached.progress,
+                    cachedAtEpochMillis = cached.cachedAtEpochMillis,
+                    nowEpochMillis = clock(),
+                )
+                lastCheckpointAtEpochMillis = cached.progress.savedAtEpochMillis
+            } else {
+                engine.preview(
+                    route = cached.route,
+                    source = NavigationRouteSource.CACHE,
+                    cachedAtEpochMillis = cached.cachedAtEpochMillis,
+                )
+            }
             eventLogger(
                 "navigation route restored from cache: active=${cached.navigationWasActive} " +
-                    "fuel_stops=${cached.route.fuelStops.size}",
+                    "progress=${cached.progress != null} fuel_stops=${cached.route.fuelStops.size}",
             )
         }
     }
 
     fun preview(route: NavigationRoute) {
         engine.preview(route)
-        routeStore.save(route, navigationWasActive = false)
+        routeStore.save(route, navigationWasActive = false, progress = null)
         eventLogger("navigation route cached: active=false fuel_stops=${route.fuelStops.size}")
     }
 
     fun start() {
         engine.start()
-        state.value.route?.let { routeStore.save(it, navigationWasActive = true) }
+        persistCheckpoint(force = true)
         eventLogger("navigation route cache marked active")
     }
 
     fun updateLocation(location: NavigationLocation): NavigationState {
+        val hadActiveFuelStop = state.value.activeFuelStopVisit != null
         engine.updateLocation(location)
+        persistCheckpoint(force = hadActiveFuelStop != (state.value.activeFuelStopVisit != null))
         return state.value
     }
 
     fun tick(nowEpochMillis: Long) {
         engine.tick(nowEpochMillis)
+        persistCheckpoint(force = false)
     }
 
     fun stopToPreview() {
@@ -63,36 +78,116 @@ class NavigationSession(
         currentLocation: NavigationLocation?,
     ) {
         engine.replaceRoute(route, refreshedAtEpochMillis, currentLocation)
-        routeStore.save(route, navigationWasActive = true)
+        persistCheckpoint(force = true)
         eventLogger("navigation route cache replaced from live route")
     }
 
     fun failRouteUpdate(
         failure: RouteUpdateFailure = RouteUpdateFailure.NETWORK_OR_SERVER,
     ) {
+        val wasConnectivityRecovery =
+            state.value.routeUpdateReason == RouteUpdateReason.CONNECTIVITY_RECOVERY
         engine.failRouteUpdate(failure)
+        persistCheckpoint(force = true)
         if (failure == RouteUpdateFailure.NETWORK_OR_SERVER) {
-            eventLogger("navigation degraded: cached_route_active=true rerouting_available=false")
+            if (wasConnectivityRecovery) {
+                eventLogger("navigation recovery deferred: downloaded_route_active=true")
+            } else {
+                eventLogger("navigation degraded: cached_route_active=true rerouting_available=false")
+            }
         }
     }
 
     fun recordSpokenInstruction(instruction: String) {
         engine.recordSpokenInstruction(instruction)
+        persistCheckpoint(force = true)
     }
 
     fun setVoiceGuidanceEnabled(enabled: Boolean) {
         engine.setVoiceGuidanceEnabled(enabled)
+        persistCheckpoint(force = true)
         eventLogger("navigation voice guidance enabled=$enabled")
+    }
+
+    fun setLocationMode(mode: NavigationLocationMode) {
+        engine.setLocationMode(mode)
+        persistCheckpoint(force = true)
+        eventLogger("navigation location mode=${mode.name.lowercase()}")
     }
 
     fun completeFuelStop(nowEpochMillis: Long = System.currentTimeMillis()): Boolean =
         engine.completeFuelStop(nowEpochMillis).also { completed ->
-            if (completed) eventLogger("navigation CNG refuelling completed by operator")
+            if (completed) {
+                persistCheckpoint(force = true)
+                eventLogger("navigation CNG refuelling completed by operator")
+            }
         }
+
+    fun networkLost() {
+        val before = state.value.connectivity
+        engine.networkLost()
+        if (state.value.connectivity != before) {
+            persistCheckpoint(force = true)
+            eventLogger("navigation connectivity: offline; downloaded_route_retained=true")
+        }
+    }
+
+    fun networkRestored() {
+        val before = state.value.connectivity
+        engine.networkRestored()
+        if (state.value.connectivity != before) {
+            persistCheckpoint(force = true)
+            eventLogger("navigation connectivity: recovering; downloaded_route_retained=true")
+        }
+    }
 
     fun clear() {
         engine.clear()
         routeStore.clear()
         eventLogger("navigation route cache cleared: reason=session_clear")
+    }
+
+    private fun persistCheckpoint(force: Boolean) {
+        val current = state.value
+        val route = current.route ?: return
+        if (current.phase == NavigationPhase.IDLE || current.phase == NavigationPhase.ROUTE_PREVIEW) {
+            return
+        }
+        val now = clock()
+        val lastCheckpoint = lastCheckpointAtEpochMillis
+        if (!force && lastCheckpoint != null && now - lastCheckpoint < CHECKPOINT_INTERVAL_MILLIS) {
+            return
+        }
+        val progress = current.toProgressSnapshot(now)
+        routeStore.save(route, navigationWasActive = true, progress = progress)
+        lastCheckpointAtEpochMillis = now
+    }
+
+    private fun NavigationState.toProgressSnapshot(savedAtEpochMillis: Long) =
+        NavigationProgressSnapshot(
+            savedAtEpochMillis = savedAtEpochMillis,
+            navigationPosition = navigationPosition,
+            routeProgressFraction = routeProgressFraction,
+            distanceRemainingMeters = distanceRemainingMeters,
+            drivingDurationRemainingSeconds = drivingDurationRemainingSeconds,
+            totalDurationRemainingSeconds = totalDurationRemainingSeconds,
+            estimatedArrivalAtEpochMillis = estimatedArrivalAt?.toEpochMilli(),
+            currentRoadName = currentRoadName,
+            currentManeuverIndex = route?.maneuvers?.indexOf(currentManeuver)?.takeIf { it >= 0 },
+            nextManeuverIndex = route?.maneuvers?.indexOf(nextManeuver)?.takeIf { it >= 0 },
+            distanceToNextManeuverMeters = distanceToNextManeuverMeters,
+            completedFuelStopSequences = fuelStopProgress
+                .filter { it.lifecycle == NavigationFuelStopLifecycle.COMPLETED }
+                .mapTo(linkedSetOf()) { it.stop.sequence },
+            activeFuelStopVisit = activeFuelStopVisit,
+            lastCompletedFuelStopSequence = lastCompletedFuelStop?.sequence,
+            lastSpokenInstruction = lastSpokenInstruction,
+            voiceGuidanceEnabled = voiceGuidanceEnabled,
+            lastSuccessfulRouteRefreshEpochMillis = lastSuccessfulRouteRefreshEpochMillis,
+            locationMode = locationMode,
+        )
+
+    private companion object {
+        const val CHECKPOINT_INTERVAL_MILLIS = 5_000L
     }
 }

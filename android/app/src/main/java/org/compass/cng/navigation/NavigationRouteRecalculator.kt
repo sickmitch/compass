@@ -43,6 +43,7 @@ class CompassNavigationRouteRecalculator(
         val origin = when (reason) {
             RouteUpdateReason.OFF_ROUTE -> state.rawLocation?.coordinate ?: state.snappedLocation
             RouteUpdateReason.TRAFFIC_REFRESH,
+            RouteUpdateReason.CONNECTIVITY_RECOVERY,
             RouteUpdateReason.MANUAL_DEBUG,
             RouteUpdateReason.FUEL_STOP_UNAVAILABLE,
             -> state.snappedLocation ?: state.rawLocation?.coordinate

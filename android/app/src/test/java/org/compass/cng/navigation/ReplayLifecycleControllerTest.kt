@@ -28,4 +28,15 @@ class ReplayLifecycleControllerTest {
         assertFalse(controller.routeUpdateFinished())
         assertFalse(controller.isReplayActive)
     }
+
+    @Test
+    fun connectivityRefreshPausesAndResumesAnActiveReplay() {
+        val controller = ReplayLifecycleController()
+        controller.navigationStarted(replay = true)
+
+        assertTrue(controller.routeUpdateStarted())
+        assertFalse(controller.isReplayActive)
+        assertTrue(controller.routeUpdateFinished())
+        assertTrue(controller.isReplayActive)
+    }
 }

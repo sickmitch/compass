@@ -1,8 +1,8 @@
 from pathlib import Path
 
-
 RUNNER = Path("scripts/run-navigation-ui-phase12-live.sh")
-INSTALLER = Path("scripts/install-android-0.22.0.sh")
+RANKING_RUNNER = Path("scripts/run-navigation-ui-phase12-ranking-live.sh")
+INSTALLER = Path("scripts/install-android-0.22.1.sh")
 ENGINE = Path(
     "android/app/src/main/java/org/compass/cng/navigation/NavigationEngine.kt"
 )
@@ -11,6 +11,12 @@ SERVICE = Path(
 )
 DRIVING_UI = Path(
     "android/app/src/main/java/org/compass/cng/ui/route/ActiveNavigationScreen.kt"
+)
+CANDIDATE_UI = Path(
+    "android/app/src/main/java/org/compass/cng/ui/route/RoutePlannerScreen.kt"
+)
+CANDIDATE_PRESENTATION = Path(
+    "android/app/src/main/java/org/compass/cng/ui/route/CngCandidatePresentation.kt"
 )
 
 
@@ -34,7 +40,7 @@ def test_phase12_installer_builds_replaces_and_cold_launches() -> None:
     assert 'install -r "$apk_path"' in content
     assert "pm clear" not in content
     assert "assembleDebug" in content
-    assert "ANDROID 0.22.0 INSTALLED" in content
+    assert "ANDROID 0.22.1 INSTALLED" in content
 
 
 def test_phase12_visit_is_engine_owned_and_requires_explicit_completion() -> None:
@@ -56,3 +62,30 @@ def test_phase12_driving_surface_exposes_refuelling_feedback_and_action() -> Non
     assert 'Text("Completato")' in content
     assert "refuelingRemainingDuration" in content
     assert 'testTag("navigation_details_complete_refueling")' in content
+
+
+def test_phase12_candidate_order_and_pastel_price_tiers_are_explicit() -> None:
+    presentation = CANDIDATE_PRESENTATION.read_text()
+    ui = CANDIDATE_UI.read_text()
+
+    assert "orderCngCandidatesForSelection" in presentation
+    assert "it.detourMinutes" in presentation
+    assert presentation.index("it.detourMinutes") < presentation.index("it.ranking.rank")
+    assert "CHEAPEST" in presentation
+    assert "SECOND_CHEAPEST" in presentation
+    assert "orderedCandidates" in ui
+    assert "Color(0xFFCBEBD4)" in ui
+    assert "Color(0xFFFFE9A8)" in ui
+    assert "Color(0xFFF4C8CC)" in ui
+
+
+def test_phase12_ranking_gate_is_operator_driven_and_checks_logged_invariant() -> None:
+    content = RANKING_RUNNER.read_text()
+
+    assert 'install -r "$apk_path"' in content
+    assert "pm clear" not in content
+    assert "monotonic=true" in content
+    assert "second_cheapest" in content
+    assert "UIAutomator" in content
+    assert "uiautomator dump" not in content.lower()
+    assert "Do not proceed to Navigation UI Phase 13" in content

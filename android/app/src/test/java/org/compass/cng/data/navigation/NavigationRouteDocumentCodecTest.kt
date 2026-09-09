@@ -22,6 +22,10 @@ import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.navigation.CachedNavigationRoute
+import org.compass.cng.navigation.NavigationFuelStopVisit
+import org.compass.cng.navigation.NavigationLocationMode
+import org.compass.cng.navigation.NavigationPosition
+import org.compass.cng.navigation.NavigationProgressSnapshot
 import org.compass.cng.navigation.toNavigationRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -56,13 +60,56 @@ class NavigationRouteDocumentCodecTest {
     }
 
     @Test
+    fun roundTripPreservesActiveProgressAndRefuellingVisit() {
+        val route = routeWithStop().toNavigationRoute()
+        val visit = NavigationFuelStopVisit(
+            stop = route.fuelStops.single(),
+            arrivedAtEpochMillis = 2_000L,
+            plannedCompletionAtEpochMillis = 1_202_000L,
+            remainingDwellSeconds = 900.0,
+        )
+        val progress = NavigationProgressSnapshot(
+            savedAtEpochMillis = 302_000L,
+            navigationPosition = NavigationPosition(
+                route.geometry[1], 1, 0.0, 90.0, 4.0, 302_000L,
+            ),
+            routeProgressFraction = 0.5,
+            distanceRemainingMeters = 60_000.0,
+            drivingDurationRemainingSeconds = 2_700.0,
+            totalDurationRemainingSeconds = 3_600.0,
+            estimatedArrivalAtEpochMillis = 3_902_000L,
+            currentRoadName = "Verso la destinazione",
+            currentManeuverIndex = 1,
+            nextManeuverIndex = null,
+            distanceToNextManeuverMeters = 500.0,
+            completedFuelStopSequences = emptySet(),
+            activeFuelStopVisit = visit,
+            lastCompletedFuelStopSequence = null,
+            lastSpokenInstruction = "Sei arrivato al rifornimento.",
+            voiceGuidanceEnabled = false,
+            lastSuccessfulRouteRefreshEpochMillis = 1_000L,
+            locationMode = NavigationLocationMode.DEMO_REPLAY,
+        )
+        val cached = CachedNavigationRoute(route, 302_000L, true, progress)
+
+        val restored = requireNotNull(codec.decode(codec.encode(cached)))
+
+        assertEquals(cached, restored)
+        assertEquals("43690", restored.progress?.activeFuelStopVisit?.stop?.mimitStationId)
+        assertEquals(NavigationLocationMode.DEMO_REPLAY, restored.progress?.locationMode)
+        assertEquals(900.0, restored.progress?.activeFuelStopVisit?.remainingDwellSeconds ?: -1.0, 0.0)
+    }
+
+    @Test
     fun cacheWrittenBeforeStructuredGuidanceRemainsReadable() {
         val cached = CachedNavigationRoute(
             routeWithStop().toNavigationRoute(),
             1_725_000_000_000,
             navigationWasActive = true,
         )
-        val legacyDocument = Json.parseToJsonElement(codec.encode(cached))
+        val legacyDocument = Json.parseToJsonElement(
+            codec.encode(cached).replace("\"schemaVersion\":2", "\"schemaVersion\":1"),
+        )
             .withoutStructuredGuidance()
             .withoutSpeedLimitContext()
             .withoutCngNavigationDetails()

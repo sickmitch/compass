@@ -101,7 +101,14 @@ class MainActivity : ComponentActivity() {
                 else routePlannerViewModel.currentLocationUnavailable()
             }
             LaunchedEffect(Unit) {
-                if (routePlannerViewModel.uiState.value.stage == PlannerStage.FOLLOW) {
+                if (routePlannerViewModel.shouldResumeRestoredNavigation) {
+                    if (hasNavigationPermissions()) {
+                        startNavigationService(NavigationForegroundService.ACTION_START)
+                    } else {
+                        pendingStartAction = NavigationForegroundService.ACTION_START
+                        navigationPermissionLauncher.launch(navigationPermissions)
+                    }
+                } else if (routePlannerViewModel.uiState.value.stage == PlannerStage.FOLLOW) {
                     if (hasLocationPermission()) startFollowLocationUpdates()
                     else followPermissionLauncher.launch(locationPermissions)
                 }

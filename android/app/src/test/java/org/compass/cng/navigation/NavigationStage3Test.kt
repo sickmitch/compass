@@ -137,6 +137,57 @@ class NavigationStage3Test {
     }
 
     @Test
+    fun offlineStateSuppressesServerUpdatesAndRecoveryRetriesWithBoundedBackoff() {
+        val controller = RouteUpdateController()
+        val route = route("route_connectivity_recovery")
+        val localState = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            navigationPosition = position(route.origin),
+            connectivity = NavigationConnectivity.OFFLINE,
+        )
+        controller.navigationStarted(1_000L)
+
+        assertNull(controller.nextUpdate(localState, 901_000L))
+
+        controller.connectivityRestored()
+        val recovering = localState.copy(connectivity = NavigationConnectivity.RECOVERING)
+        assertEquals(
+            RouteUpdateReason.CONNECTIVITY_RECOVERY,
+            controller.nextUpdate(recovering, 901_000L),
+        )
+        controller.attemptStarted(901_000L)
+        assertNull(controller.nextUpdate(recovering, 902_000L))
+        controller.updateFailed(retryConnectivityRecovery = true)
+        assertNull(controller.nextUpdate(recovering, 905_999L))
+        assertEquals(
+            RouteUpdateReason.CONNECTIVITY_RECOVERY,
+            controller.nextUpdate(recovering, 906_000L),
+        )
+        controller.attemptStarted(906_000L)
+        controller.updateFailed(retryConnectivityRecovery = true)
+        assertNull(controller.nextUpdate(recovering, 920_999L))
+        assertEquals(
+            RouteUpdateReason.CONNECTIVITY_RECOVERY,
+            controller.nextUpdate(recovering, 921_000L),
+        )
+        controller.attemptStarted(921_000L)
+        controller.updateFailed(retryConnectivityRecovery = true)
+        assertNull(controller.nextUpdate(recovering, 980_999L))
+        assertEquals(
+            RouteUpdateReason.CONNECTIVITY_RECOVERY,
+            controller.nextUpdate(recovering, 981_000L),
+        )
+        controller.attemptStarted(981_000L)
+        controller.updateFailed(retryConnectivityRecovery = true)
+        assertNull(controller.nextUpdate(recovering, 1_040_999L))
+        assertEquals(
+            RouteUpdateReason.CONNECTIVITY_RECOVERY,
+            controller.nextUpdate(recovering, 1_041_000L),
+        )
+    }
+
+    @Test
     fun failedRerouteKeepsDownloadedRouteAndSuccessfulReplacementStaysActive() {
         val original = route("route_stage_3_original")
         val replacement = route("route_stage_3_replacement")

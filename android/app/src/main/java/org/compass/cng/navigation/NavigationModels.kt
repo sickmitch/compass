@@ -178,6 +178,7 @@ data class NavigationState(
     val routeSource: NavigationRouteSource = NavigationRouteSource.LIVE,
     val routeCachedAtEpochMillis: Long? = null,
     val connectivity: NavigationConnectivity = NavigationConnectivity.ONLINE,
+    val locationMode: NavigationLocationMode = NavigationLocationMode.DEVICE,
 ) {
     val snappedLocation: Coordinate?
         get() = navigationPosition?.coordinate
@@ -201,6 +202,11 @@ data class NavigationState(
         get() = navigationPosition?.bearingDegrees
 }
 
+enum class NavigationLocationMode {
+    DEVICE,
+    DEMO_REPLAY,
+}
+
 enum class NavigationRouteSource {
     LIVE,
     CACHE,
@@ -208,6 +214,8 @@ enum class NavigationRouteSource {
 
 enum class NavigationConnectivity {
     ONLINE,
+    OFFLINE,
+    RECOVERING,
     REROUTING_UNAVAILABLE,
 }
 
@@ -220,6 +228,7 @@ enum class ReroutingStatus {
 enum class RouteUpdateReason {
     OFF_ROUTE,
     TRAFFIC_REFRESH,
+    CONNECTIVITY_RECOVERY,
     MANUAL_DEBUG,
     FUEL_STOP_UNAVAILABLE,
 }

@@ -1,6 +1,7 @@
 # Navigation UI upgrade — Phase 12 acceptance record
 
-Status: implemented and validated locally; physical-device/live gate pending.
+Status: complete. Refuelling gate accepted on 2026-09-08; candidate-order supplement accepted on
+the physical Android device on 2026-09-09.
 
 ## Scope
 
@@ -47,15 +48,32 @@ Voice guidance announces station approach and arrival once as before, then annou
 `Rifornimento completato. Riprendi il percorso.` once after confirmation. Demo replay pauses at the
 station and resumes only through the same production completion action.
 
-Android version is `0.22.0` (`versionCode=27`). No backend schema, API, Docker configuration or new
+Android version is `0.22.1` (`versionCode=28`). No backend schema, API, Docker configuration or new
 secret is required.
+
+## Candidate-order supplement
+
+The operator's gate screenshot exposed that the backend's multi-factor rank could put a `+1,2 min`
+station before a `+0,1 min` station. The backend score remains available for explanation, but the
+selection presentation now applies a separate deterministic policy:
+
+1. finite `detourMinutes`, strictly ascending, is the absolute primary key;
+2. the backend rank breaks exact detour ties;
+3. MIMIT ID is the final stable tie-breaker;
+4. the displayed `#1`, `#2`, … badges reflect this selection order.
+
+Prices visible in the same result set receive a dense rank based on their displayed three-decimal
+value within the same currency/unit. The cheapest distinct value uses pastel green, the second
+pastel yellow, and all later values pastel red. Equal displayed prices share a tier. A missing price
+has no coloured price panel. Price never changes the station order.
 
 ## Repository-local validation
 
 From the repository root:
 
 ```bash
-bash -n scripts/install-android-0.22.0.sh scripts/run-navigation-ui-phase12-live.sh
+bash -n scripts/install-android-0.22.1.sh scripts/run-navigation-ui-phase12-live.sh \
+  scripts/run-navigation-ui-phase12-ranking-live.sh
 .venv/bin/pytest -q tests/test_navigation_ui_phase12_script.py
 git diff --check
 ```
@@ -98,4 +116,26 @@ checks. If a check fails, also return:
 /tmp/compass-navigation-ui-phase12-service.txt
 ```
 
-Do not proceed to Navigation UI Phase 13 until this gate is accepted.
+The operator reported all six refuelling checks successful on 2026-09-08. That original gate is
+accepted. After installing `0.22.1`, validate only the candidate-order supplement with:
+
+```bash
+cd /home/mike/NAS/tech/projects/compass
+export JAVA_HOME=/home/mike/toolchains/jdk17
+export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
+export COMPASS_API_BASE_URL=https://compass.sickmitch.cc/
+export COMPASS_CHECK_USER=<existing-api-user>
+export COMPASS_CHECK_PASSWORD=<existing-api-password>
+bash scripts/run-navigation-ui-phase12-ranking-live.sh
+```
+
+Return its output and four pass/fail notes. On failure, also return
+`/tmp/compass-navigation-ui-phase12-ranking-ui.txt` and
+`/tmp/compass-navigation-ui-phase12-ranking-fatal.txt`.
+
+## Final acceptance evidence
+
+On 2026-09-09 the operator reported a green result for the reduced `0.22.1` candidate-order gate.
+Together with the previously accepted six refuelling checks, this confirms strict detour ordering,
+renumbered badges, dense pastel price tiers and unchanged selection/map behavior on the physical
+device. Navigation UI Phase 12 is complete.

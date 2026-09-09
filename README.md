@@ -468,9 +468,24 @@ Navigation UI Phase 12 turns arrival at a CNG waypoint into an explicit refuelli
 navigation engine freezes matched progress and maneuver advancement at the station, counts down
 the routed dwell time, keeps final ETA correct for early or late completion, and resumes only after
 driver confirmation from the CNG card, details or foreground notification. Demo replay follows the
-same pause/resume boundary. Android version is `0.22.0` (`versionCode=27`); the physical-device gate
-is pending and documented in
+same pause/resume boundary. Its live gate was accepted on 2026-09-08. The `0.22.1` supplement orders
+the stop selector strictly by increasing detour and applies pastel green/yellow/red price tiers to
+the cheapest, second-cheapest and later displayed prices. Android version is `0.22.1`
+(`versionCode=28`); both physical-device gates were accepted by 2026-09-09 and are documented in
 [the Phase 12 acceptance record](docs/phases/navigation-ui-phase-12-acceptance.md).
+
+Navigation UI Phase 13 makes the already downloaded route a durable active guidance session rather
+than restoring it only as a preview. A versioned private checkpoint preserves matched progress,
+maneuver position, remaining values, voice preference and CNG stop/refuelling lifecycle; process
+recreation resumes the foreground service and waits for a fresh GPS fix without returning to route
+origin. Android network loss now produces an explicit offline state, suppresses server updates and
+unverifiable dynamic CNG/traffic claims, while route, voice and waypoint guidance continue locally.
+Connectivity return performs a reason-labelled refresh through the existing CNG-aware recalculator;
+failed recovery attempts retain local guidance and retry after 5, 15 and then 60 seconds. An active
+debug replay also survives process recreation and resumes from its checkpoint instead of switching
+to stationary device GPS.
+Android version is `0.23.1` (`versionCode=30`); the physical-device gate is pending and documented in
+[the Navigation UI Phase 13 acceptance record](docs/phases/navigation-ui-phase-13-acceptance.md).
 
 Android patch `0.19.1` (`versionCode=21`) incorporates the first post-Phase-9 road-test correction:
 when a structured junction sign already names the maneuver road, Compass suppresses the redundant
