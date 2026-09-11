@@ -11,7 +11,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import org.compass.cng.R
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraMode
@@ -120,7 +119,9 @@ fun FollowMap(
                 filterMapPoisForNavigation(style)
                 style.addImage(
                     FOLLOW_VEHICLE_IMAGE,
-                    requireNotNull(mapView.context.getDrawable(R.drawable.ic_navigation_vehicle)),
+                    requireNotNull(
+                        mapView.context.getDrawable(appearance.navigationPuckDrawableRes()),
+                    ),
                 )
                 style.addSource(
                     GeoJsonSource(
@@ -134,7 +135,7 @@ fun FollowMap(
                 style.addLayer(
                     SymbolLayer(FOLLOW_PUCK_LAYER, FOLLOW_PUCK_SOURCE).withProperties(
                         iconImage(FOLLOW_VEHICLE_IMAGE),
-                        iconSize(NAVIGATION_PUCK_ICON_SCALE),
+                        iconSize(navigationPuckScaleExpression()),
                         iconPitchAlignment(ICON_PITCH_ALIGNMENT_VIEWPORT),
                         iconAnchor(ICON_ANCHOR_CENTER),
                         iconRotate(0f),

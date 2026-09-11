@@ -9,6 +9,7 @@ import org.compass.cng.data.api.ApiOpeningEvaluation
 import org.compass.cng.data.api.ApiCngPrice
 import org.compass.cng.data.api.ApiRankedCandidate
 import org.compass.cng.data.api.ApiRoute
+import org.compass.cng.data.api.ApiRouteLeg
 import org.compass.cng.data.api.ApiRouteSpeedLimit
 import org.compass.cng.data.api.ApiNavigationTiming
 import org.compass.cng.data.api.CompassApiClient
@@ -56,6 +57,8 @@ import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RankingBreakdown
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteWithIntermediateStop
+import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
@@ -195,6 +198,62 @@ class HttpRoutingRepository(
         destination: Coordinate,
     ): RoutePreview = mapFailures {
         apiClient.getRoute(origin, destination).toRoutePreview(origin, destination)
+    }
+
+    override suspend fun routeWithIntermediateStop(
+        origin: Coordinate,
+        intermediateStop: Coordinate,
+        destination: Coordinate,
+    ): RouteWithIntermediateStop = mapFailures {
+        val response = apiClient.getRouteWithIntermediateStop(
+            origin,
+            intermediateStop,
+            destination,
+        )
+        RouteWithIntermediateStop(
+            stop = response.intermediateStop,
+            distanceMeters = response.distanceMeters,
+            durationSeconds = response.durationSeconds,
+            legs = response.legs.mapIndexed { index, leg ->
+                leg.toRoutePreview(
+                    provider = response.provider,
+                    navigation = response.navigation.toLegNavigationTiming(
+                        sequence = index + 1,
+                        durationSeconds = leg.durationSeconds,
+                    ),
+                )
+            },
+            provider = response.provider,
+            navigation = response.navigation.toNavigationTiming(),
+        )
+    }
+
+    override suspend fun routeWithIntermediateStops(
+        origin: Coordinate,
+        intermediateStops: List<Coordinate>,
+        destination: Coordinate,
+    ): RouteWithIntermediateStops = mapFailures {
+        val response = apiClient.getRouteWithIntermediateStops(
+            origin,
+            intermediateStops,
+            destination,
+        )
+        RouteWithIntermediateStops(
+            stops = response.intermediateStops,
+            distanceMeters = response.distanceMeters,
+            durationSeconds = response.durationSeconds,
+            legs = response.legs.mapIndexed { index, leg ->
+                leg.toRoutePreview(
+                    provider = response.provider,
+                    navigation = response.navigation.toLegNavigationTiming(
+                        sequence = index + 1,
+                        durationSeconds = leg.durationSeconds,
+                    ),
+                )
+            },
+            provider = response.provider,
+            navigation = response.navigation.toNavigationTiming(),
+        )
     }
 
     override suspend fun rankedCngStations(
@@ -589,6 +648,22 @@ private fun ApiRoute.toRoutePreview(
     maneuvers = maneuvers.map(ApiManeuver::toManeuver),
     provider = provider,
     navigation = navigation.toNavigationTiming(),
+    speedLimits = speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
+    speedLimitSource = speedLimitSource,
+)
+
+private fun ApiRouteLeg.toRoutePreview(
+    provider: String,
+    navigation: NavigationTiming,
+): RoutePreview = RoutePreview(
+    origin = Coordinate(originLatitude, originLongitude),
+    destination = Coordinate(destinationLatitude, destinationLongitude),
+    distanceMeters = distanceMeters,
+    durationSeconds = durationSeconds,
+    geometry = Polyline6Decoder.decode(encodedPolyline),
+    maneuvers = maneuvers.map(ApiManeuver::toManeuver),
+    provider = provider,
+    navigation = navigation,
     speedLimits = speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
     speedLimitSource = speedLimitSource,
 )

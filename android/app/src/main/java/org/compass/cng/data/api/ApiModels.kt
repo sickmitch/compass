@@ -91,6 +91,24 @@ data class ApiRoute(
     val speedLimitSource: String? = null,
 )
 
+data class ApiRouteWithIntermediateStop(
+    val intermediateStop: Coordinate,
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val legs: List<ApiRouteLeg>,
+    val provider: String,
+    val navigation: ApiNavigationTiming,
+)
+
+data class ApiRouteWithIntermediateStops(
+    val intermediateStops: List<Coordinate>,
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val legs: List<ApiRouteLeg>,
+    val provider: String,
+    val navigation: ApiNavigationTiming,
+)
+
 data class ApiRouteSpeedLimit(
     val beginShapeIndex: Int,
     val endShapeIndex: Int,

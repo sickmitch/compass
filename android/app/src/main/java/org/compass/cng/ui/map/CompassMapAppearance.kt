@@ -3,6 +3,7 @@ package org.compass.cng.ui.map
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import org.compass.cng.BuildConfig
+import org.compass.cng.R
 
 internal enum class CompassMapTheme {
     DAY,
@@ -72,4 +73,9 @@ internal fun mapStyleSource(styleUrl: String): String = when {
     styleUrl.startsWith("asset://") -> "bundled"
     styleUrl.startsWith("https://") -> "remote_https"
     else -> "custom"
+}
+
+internal fun CompassMapAppearance.navigationPuckDrawableRes(): Int = when (theme) {
+    CompassMapTheme.DAY -> R.drawable.ic_navigation_vehicle
+    CompassMapTheme.NIGHT -> R.drawable.ic_navigation_vehicle_night
 }

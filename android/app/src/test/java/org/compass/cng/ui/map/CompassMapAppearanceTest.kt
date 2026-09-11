@@ -1,5 +1,6 @@
 package org.compass.cng.ui.map
 
+import org.compass.cng.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -37,5 +38,26 @@ class CompassMapAppearanceTest {
     @Test
     fun navigationPuckUsesTheDoubledIconScale() {
         assertEquals(1.10f, NAVIGATION_PUCK_ICON_SCALE)
+        assertEquals(0.55f, NAVIGATION_PUCK_MIN_ICON_SCALE)
+        assertEquals(NAVIGATION_PUCK_ICON_SCALE * 0.5f, NAVIGATION_PUCK_MIN_ICON_SCALE)
+        assert(NAVIGATION_PUCK_MIN_SCALE_ZOOM < NAVIGATION_PUCK_FULL_SCALE_ZOOM)
+    }
+
+    @Test
+    fun navigationPuckUsesMaterialDayAndNightAssets() {
+        val day = resolveCompassMapAppearance(
+            theme = CompassMapTheme.DAY,
+            dayStyleUrl = "asset://day.json",
+            nightStyleUrl = "asset://night.json",
+        )
+        val night = resolveCompassMapAppearance(
+            theme = CompassMapTheme.NIGHT,
+            dayStyleUrl = "asset://day.json",
+            nightStyleUrl = "asset://night.json",
+        )
+
+        assertEquals(R.drawable.ic_navigation_vehicle, day.navigationPuckDrawableRes())
+        assertEquals(R.drawable.ic_navigation_vehicle_night, night.navigationPuckDrawableRes())
+        assertNotEquals(day.navigationPuckDrawableRes(), night.navigationPuckDrawableRes())
     }
 }

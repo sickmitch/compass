@@ -5,7 +5,9 @@ import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -16,9 +18,11 @@ import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.Coordinate
 import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
@@ -46,6 +50,8 @@ fun RouteMap(
     candidateStations: List<RankedCngStation> = emptyList(),
     selectedCandidateStationId: String? = null,
     cngStops: List<Coordinate> = emptyList(),
+    intermediateStops: List<Coordinate> = emptyList(),
+    highlightedIntermediateStop: Coordinate? = null,
 ) {
     val mapView = rememberMapViewWithLifecycle()
     val appearance = compassMapAppearance()
@@ -62,6 +68,8 @@ fun RouteMap(
         candidateStations,
         selectedCandidateStationId,
         cngStops,
+        intermediateStops,
+        highlightedIntermediateStop,
     ) {
         mapView.getMapAsync { map ->
             map.setStyle(Style.Builder().fromUri(appearance.styleUrl)) { style ->
@@ -153,6 +161,26 @@ fun RouteMap(
                         strokeColor = appearance.palette.markerStroke,
                     )
                 }
+                intermediateStops.forEachIndexed { index, stop ->
+                    addEndpointLayer(
+                        style = style,
+                        idPrefix = "intermediate-stop-$index",
+                        coordinate = stop,
+                        color = appearance.palette.selectedCng,
+                        strokeColor = appearance.palette.markerStroke,
+                    )
+                }
+                highlightedIntermediateStop?.let { stop ->
+                    addEndpointLayer(
+                        style = style,
+                        idPrefix = "highlighted-intermediate-stop",
+                        coordinate = stop,
+                        color = appearance.palette.selectedCng,
+                        strokeColor = appearance.palette.markerStroke,
+                        radius = 11f,
+                        strokeWidth = 3f,
+                    )
+                }
 
                 val boundsBuilder = LatLngBounds.Builder()
                     .include(LatLng(route.origin.latitude, route.origin.longitude))
@@ -166,9 +194,89 @@ fun RouteMap(
                 cngStops.forEach { stop ->
                     boundsBuilder.include(LatLng(stop.latitude, stop.longitude))
                 }
+                intermediateStops.forEach { stop ->
+                    boundsBuilder.include(LatLng(stop.latitude, stop.longitude))
+                }
+                highlightedIntermediateStop?.let { stop ->
+                    boundsBuilder.include(LatLng(stop.latitude, stop.longitude))
+                }
                 map.animateCamera(
                     CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 72),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun RoutePointPickerMap(
+    initialCoordinate: Coordinate,
+    selectedCoordinate: Coordinate?,
+    onCoordinateSelected: (Coordinate) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val mapView = rememberMapViewWithLifecycle()
+    val appearance = compassMapAppearance()
+    val currentSelectionHandler by rememberUpdatedState(onCoordinateSelected)
+
+    AndroidView(factory = { mapView }, modifier = modifier)
+
+    DisposableEffect(mapView) {
+        var mapReference: MapLibreMap? = null
+        val listener = MapLibreMap.OnMapClickListener { point ->
+            currentSelectionHandler(Coordinate(point.latitude, point.longitude))
+            true
+        }
+        mapView.getMapAsync { map ->
+            mapReference = map
+            map.addOnMapClickListener(listener)
+        }
+        onDispose { mapReference?.removeOnMapClickListener(listener) }
+    }
+
+    LaunchedEffect(mapView, appearance) {
+        mapView.getMapAsync { map ->
+            map.setStyle(Style.Builder().fromUri(appearance.styleUrl)) { style ->
+                selectedCoordinate?.let { coordinate ->
+                    addEndpointLayer(
+                        style = style,
+                        idPrefix = POINT_PICKER_ID_PREFIX,
+                        coordinate = coordinate,
+                        color = appearance.palette.selectedCng,
+                        strokeColor = appearance.palette.markerStroke,
+                        radius = 10f,
+                        strokeWidth = 3f,
+                    )
+                }
+                map.cameraPosition = CameraPosition.Builder()
+                    .target(LatLng(initialCoordinate.latitude, initialCoordinate.longitude))
+                    .zoom(13.0)
+                    .build()
+            }
+        }
+    }
+
+    LaunchedEffect(mapView, selectedCoordinate) {
+        val coordinate = selectedCoordinate ?: return@LaunchedEffect
+        mapView.getMapAsync { map ->
+            map.style?.let { style ->
+                val source = style.getSourceAs<GeoJsonSource>("$POINT_PICKER_ID_PREFIX-source")
+                val feature = Feature.fromGeometry(
+                    Point.fromLngLat(coordinate.longitude, coordinate.latitude),
+                )
+                if (source == null) {
+                    addEndpointLayer(
+                        style = style,
+                        idPrefix = POINT_PICKER_ID_PREFIX,
+                        coordinate = coordinate,
+                        color = appearance.palette.selectedCng,
+                        strokeColor = appearance.palette.markerStroke,
+                        radius = 10f,
+                        strokeWidth = 3f,
+                    )
+                } else {
+                    source.setGeoJson(feature)
+                }
             }
         }
     }
@@ -180,6 +288,8 @@ private fun addEndpointLayer(
     coordinate: Coordinate,
     color: Int,
     strokeColor: Int,
+    radius: Float = 7f,
+    strokeWidth: Float = 2f,
 ) {
     val sourceId = "$idPrefix-source"
     style.addSource(
@@ -190,13 +300,15 @@ private fun addEndpointLayer(
     )
     style.addLayer(
         CircleLayer("$idPrefix-layer", sourceId).withProperties(
-            circleRadius(7f),
+            circleRadius(radius),
             circleColor(color),
             circleStrokeColor(strokeColor),
-            circleStrokeWidth(2f),
+            circleStrokeWidth(strokeWidth),
         ),
     )
 }
+
+private const val POINT_PICKER_ID_PREFIX = "point-picker"
 
 @Composable
 internal fun rememberMapViewWithLifecycle(): MapView {

@@ -49,6 +49,10 @@ class CompassApiClient(
 
     private val apiBaseUrl: HttpUrl get() = connectionProvider().baseUrl.toHttpUrl()
     private val routeUrl: HttpUrl get() = resolve("api/v1/routes")
+    private val routeWithIntermediateStopUrl: HttpUrl
+        get() = resolve("api/v1/routes/with-intermediate-stop")
+    private val routeWithIntermediateStopsUrl: HttpUrl
+        get() = resolve("api/v1/routes/with-intermediate-stops")
     private val placeSearchUrl: HttpUrl get() = resolve("api/v1/places/search")
     private val destinationSuggestUrl: HttpUrl get() = resolve("api/v1/destinations/suggest")
     private val destinationResolveUrl: HttpUrl get() = resolve("api/v1/destinations/resolve")
@@ -125,6 +129,53 @@ class CompassApiClient(
             }
         } catch (error: IllegalArgumentException) {
             eventLogger("route rejected: kind=invalid_response cause=${error.causesForLog()}")
+            throw ApiClientException.InvalidResponse(error)
+        }
+    }
+
+    suspend fun getRouteWithIntermediateStop(
+        origin: Coordinate,
+        intermediateStop: Coordinate,
+        destination: Coordinate,
+    ): ApiRouteWithIntermediateStop {
+        val payload = RouteWithIntermediateStopRequestDto(
+            origin = origin.toDto(),
+            intermediateStop = intermediateStop.toDto(),
+            destination = destination.toDto(),
+            costing = "auto",
+            language = "it-IT",
+        )
+        val response = post<RouteWithIntermediateStopResponseDto>(
+            routeWithIntermediateStopUrl,
+            json.encodeToString(payload),
+        )
+        return try {
+            response.toApiRouteWithIntermediateStop()
+        } catch (error: IllegalArgumentException) {
+            throw ApiClientException.InvalidResponse(error)
+        }
+    }
+
+    suspend fun getRouteWithIntermediateStops(
+        origin: Coordinate,
+        intermediateStops: List<Coordinate>,
+        destination: Coordinate,
+    ): ApiRouteWithIntermediateStops {
+        require(intermediateStops.size in 1..8) { "between one and eight stops are required" }
+        val payload = RouteWithIntermediateStopsRequestDto(
+            origin = origin.toDto(),
+            intermediateStops = intermediateStops.map(Coordinate::toDto),
+            destination = destination.toDto(),
+            costing = "auto",
+            language = "it-IT",
+        )
+        val response = post<RouteWithIntermediateStopsResponseDto>(
+            routeWithIntermediateStopsUrl,
+            json.encodeToString(payload),
+        )
+        return try {
+            response.toApiRouteWithIntermediateStops()
+        } catch (error: IllegalArgumentException) {
             throw ApiClientException.InvalidResponse(error)
         }
     }
@@ -385,10 +436,26 @@ private data class DestinationSuggestRequestDto(
             query = value.query,
             sessionId = value.sessionId,
             revision = value.revision,
-            context = value.context.location?.let { coordinate ->
+            context = value.context.takeIf {
+                it.location != null || it.routeBounds != null
+            }?.let { context ->
                 DestinationContextDto(
-                    location = CoordinateDto(coordinate.latitude, coordinate.longitude),
-                    biasRadiusMeters = value.context.biasRadiusMeters,
+                    location = context.location?.let {
+                        CoordinateDto(it.latitude, it.longitude)
+                    },
+                    biasRadiusMeters = context.biasRadiusMeters,
+                    routeBounds = context.routeBounds?.let {
+                        DestinationBoundsDto(
+                            southWest = CoordinateDto(
+                                it.southWest.latitude,
+                                it.southWest.longitude,
+                            ),
+                            northEast = CoordinateDto(
+                                it.northEast.latitude,
+                                it.northEast.longitude,
+                            ),
+                        )
+                    },
                 )
             },
         )
@@ -397,8 +464,15 @@ private data class DestinationSuggestRequestDto(
 
 @Serializable
 private data class DestinationContextDto(
-    val location: CoordinateDto,
+    val location: CoordinateDto? = null,
     @SerialName("bias_radius_meters") val biasRadiusMeters: Double? = null,
+    @SerialName("route_bounds") val routeBounds: DestinationBoundsDto? = null,
+)
+
+@Serializable
+private data class DestinationBoundsDto(
+    @SerialName("south_west") val southWest: CoordinateDto,
+    @SerialName("north_east") val northEast: CoordinateDto,
 )
 
 @Serializable
@@ -522,6 +596,24 @@ private data class CoordinateDto(
 @Serializable
 private data class RouteRequestDto(
     val origin: CoordinateDto,
+    val destination: CoordinateDto,
+    val costing: String,
+    val language: String,
+)
+
+@Serializable
+private data class RouteWithIntermediateStopRequestDto(
+    val origin: CoordinateDto,
+    @SerialName("intermediate_stop") val intermediateStop: CoordinateDto,
+    val destination: CoordinateDto,
+    val costing: String,
+    val language: String,
+)
+
+@Serializable
+private data class RouteWithIntermediateStopsRequestDto(
+    val origin: CoordinateDto,
+    @SerialName("intermediate_stops") val intermediateStops: List<CoordinateDto>,
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
@@ -980,6 +1072,7 @@ private data class SelectedCngStopDto(
 
 @Serializable
 private data class RouteLegDto(
+    val sequence: Int? = null,
     val kind: String,
     val origin: CoordinateDto,
     val destination: CoordinateDto,
@@ -994,6 +1087,26 @@ private data class RouteLegDto(
 @Serializable
 private data class RouteWithCngStopResponseDto(
     @SerialName("selected_stop") val selectedStop: SelectedCngStopDto,
+    @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("duration_seconds") val durationSeconds: Double,
+    val legs: List<RouteLegDto>,
+    val provider: String,
+    val navigation: NavigationTimingDto? = null,
+)
+
+@Serializable
+private data class RouteWithIntermediateStopResponseDto(
+    @SerialName("intermediate_stop") val intermediateStop: CoordinateDto,
+    @SerialName("distance_meters") val distanceMeters: Double,
+    @SerialName("duration_seconds") val durationSeconds: Double,
+    val legs: List<RouteLegDto>,
+    val provider: String,
+    val navigation: NavigationTimingDto? = null,
+)
+
+@Serializable
+private data class RouteWithIntermediateStopsResponseDto(
+    @SerialName("intermediate_stops") val intermediateStops: List<CoordinateDto>,
     @SerialName("distance_meters") val distanceMeters: Double,
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<RouteLegDto>,
@@ -1452,6 +1565,84 @@ private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCng
         },
         provider = provider,
         navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 1),
+    )
+}
+
+private fun RouteWithIntermediateStopResponseDto.toApiRouteWithIntermediateStop():
+    ApiRouteWithIntermediateStop {
+    require(provider == "valhalla") { "unsupported routing provider" }
+    require(distanceMeters >= 0 && durationSeconds >= 0) { "negative route cost" }
+    require(legs.size == 2) { "intermediate-stop route must contain exactly two legs" }
+    require(
+        legs.map(RouteLegDto::kind) == listOf(
+            "origin_to_intermediate_stop",
+            "intermediate_stop_to_destination",
+        ),
+    ) { "unexpected intermediate-stop leg order" }
+    return ApiRouteWithIntermediateStop(
+        intermediateStop = Coordinate(intermediateStop.latitude, intermediateStop.longitude),
+        distanceMeters = distanceMeters,
+        durationSeconds = durationSeconds,
+        legs = legs.map { leg ->
+            require(leg.geometry.format == "polyline6") { "unsupported route geometry format" }
+            require(leg.distanceMeters >= 0 && leg.durationSeconds >= 0) {
+                "negative route cost"
+            }
+            ApiRouteLeg(
+                kind = leg.kind,
+                originLatitude = leg.origin.latitude,
+                originLongitude = leg.origin.longitude,
+                destinationLatitude = leg.destination.latitude,
+                destinationLongitude = leg.destination.longitude,
+                distanceMeters = leg.distanceMeters,
+                durationSeconds = leg.durationSeconds,
+                encodedPolyline = leg.geometry.encodedPolyline,
+                maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
+                speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
+                speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
+            )
+        },
+        provider = provider,
+        navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
+    )
+}
+
+private fun RouteWithIntermediateStopsResponseDto.toApiRouteWithIntermediateStops():
+    ApiRouteWithIntermediateStops {
+    require(provider == "valhalla") { "unsupported routing provider" }
+    require(intermediateStops.size in 1..8) { "invalid intermediate-stop count" }
+    require(legs.size == intermediateStops.size + 1) {
+        "intermediate-stop route leg count does not reconcile"
+    }
+    require(legs.map(RouteLegDto::sequence) == (1..legs.size).toList()) {
+        "intermediate-stop route leg sequence is not contiguous"
+    }
+    require(distanceMeters >= 0 && durationSeconds >= 0) { "negative route cost" }
+    return ApiRouteWithIntermediateStops(
+        intermediateStops = intermediateStops.map { Coordinate(it.latitude, it.longitude) },
+        distanceMeters = distanceMeters,
+        durationSeconds = durationSeconds,
+        legs = legs.map { leg ->
+            require(leg.geometry.format == "polyline6") { "unsupported route geometry format" }
+            require(leg.distanceMeters >= 0 && leg.durationSeconds >= 0) {
+                "negative route cost"
+            }
+            ApiRouteLeg(
+                kind = leg.kind,
+                originLatitude = leg.origin.latitude,
+                originLongitude = leg.origin.longitude,
+                destinationLatitude = leg.destination.latitude,
+                destinationLongitude = leg.destination.longitude,
+                distanceMeters = leg.distanceMeters,
+                durationSeconds = leg.durationSeconds,
+                encodedPolyline = leg.geometry.encodedPolyline,
+                maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
+                speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
+                speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
+            )
+        },
+        provider = provider,
+        navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
     )
 }
 

@@ -552,6 +552,68 @@ class NavigationEngineTest {
         assertEquals(5_000L, notice.createdAtEpochMillis)
     }
 
+    @Test
+    fun intermediateStopPausesWithoutDwellAndResumesByConfirmation() {
+        val base = route()
+        val stop = NavigationIntermediateStop(1, Coordinate(45.0, 9.0020))
+        val engine = testEngine()
+        engine.preview(base.copy(intermediateStops = listOf(stop)))
+        engine.start()
+
+        engine.updateLocation(fix(45.0, 9.0020, 2_000, 90.0), Instant.ofEpochMilli(2_000))
+
+        val waiting = engine.state.value
+        assertEquals(NavigationPhase.AT_INTERMEDIATE_STOP, waiting.phase)
+        assertEquals(0.0, requireNotNull(waiting.nextIntermediateStop).distanceRemainingMeters, 0.0)
+        assertEquals(
+            NavigationIntermediateStopLifecycle.ARRIVED,
+            waiting.nextIntermediateStop?.lifecycle,
+        )
+        val drivingRemaining = requireNotNull(waiting.drivingDurationRemainingSeconds)
+        assertEquals(drivingRemaining, waiting.totalDurationRemainingSeconds ?: -1.0, 0.0)
+
+        assertTrue(engine.completeIntermediateStop(nowEpochMillis = 5_000))
+        assertEquals(null, engine.state.value.activeIntermediateStopVisit)
+        assertEquals(null, engine.state.value.nextIntermediateStop)
+        assertEquals(
+            NavigationIntermediateStopCompletionMode.USER_CONFIRMATION,
+            engine.state.value.lastIntermediateStopCompletionMode,
+        )
+        assertEquals(
+            Instant.ofEpochMilli(5_000).plusMillis((drivingRemaining * 1_000).toLong()),
+            engine.state.value.estimatedArrivalAt,
+        )
+    }
+
+    @Test
+    fun intermediateStopResumesAfterTwoReliableDepartureFixes() {
+        val base = route()
+        val engine = testEngine()
+        engine.preview(
+            base.copy(
+                intermediateStops = listOf(
+                    NavigationIntermediateStop(1, Coordinate(45.0, 9.0020)),
+                ),
+            ),
+        )
+        engine.start()
+        engine.updateLocation(fix(45.0, 9.0020, 2_000, 90.0), Instant.ofEpochMilli(2_000))
+
+        engine.updateLocation(fix(45.0, 9.0030, 3_000, 90.0), Instant.ofEpochMilli(3_000))
+        assertEquals(NavigationPhase.AT_INTERMEDIATE_STOP, engine.state.value.phase)
+        engine.updateLocation(fix(45.0, 9.0040, 4_000, 90.0), Instant.ofEpochMilli(4_000))
+
+        assertEquals(null, engine.state.value.activeIntermediateStopVisit)
+        assertEquals(
+            NavigationIntermediateStopLifecycle.COMPLETED,
+            engine.state.value.intermediateStopProgress.single().lifecycle,
+        )
+        assertEquals(
+            NavigationIntermediateStopCompletionMode.GPS_DEPARTURE,
+            engine.state.value.lastIntermediateStopCompletionMode,
+        )
+    }
+
     private fun testEngine(
         policy: NavigationEnginePolicy = NavigationEnginePolicy(),
     ) = NavigationEngine(

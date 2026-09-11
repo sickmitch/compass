@@ -201,6 +201,50 @@ class NavigationCameraControllerTest {
         assertEquals(400.0, followTopPaddingPixels(1_000, 0.75, 200), 0.0)
     }
 
+    @Test
+    fun orientationToggleKeepsTrackingAndRecenterAlwaysReturnsToHeadingUp() {
+        assertEquals(
+            NavigationCameraMode.NORTH_UP,
+            NavigationCameraMode.FOLLOW.toggleOrientation(),
+        )
+        assertEquals(
+            NavigationCameraMode.FOLLOW,
+            NavigationCameraMode.NORTH_UP.toggleOrientation(),
+        )
+        assertEquals(
+            NavigationCameraMode.FOLLOW,
+            NavigationCameraMode.OVERVIEW.toggleOrientation(),
+        )
+        assertTrue(NavigationCameraMode.FOLLOW.tracksVehiclePosition)
+        assertTrue(NavigationCameraMode.NORTH_UP.tracksVehiclePosition)
+    }
+
+    @Test
+    fun orientationPolicyUsesHeadingUpForFollowAndNorthUpForOverview() {
+        assertEquals(87.0, NavigationCameraMode.FOLLOW.resolvedBearingDegrees(447.0)!!, 0.0)
+        assertEquals(0.0, NavigationCameraMode.NORTH_UP.resolvedBearingDegrees(87.0)!!, 0.0)
+        assertEquals(0.0, NavigationCameraMode.OVERVIEW.resolvedBearingDegrees(87.0)!!, 0.0)
+        assertEquals(null, NavigationCameraMode.FREE.resolvedBearingDegrees(87.0))
+    }
+
+    @Test
+    fun mapControlsAvoidCompetingActionsOutsidePositionTracking() {
+        val follow = NavigationCameraMode.FOLLOW.mapControlPolicy()
+        assertTrue(follow.showOrientationToggle)
+        assertTrue(follow.showOverview)
+        assertEquals(false, follow.showRecenter)
+
+        val overview = NavigationCameraMode.OVERVIEW.mapControlPolicy()
+        assertEquals(false, overview.showOrientationToggle)
+        assertEquals(false, overview.showOverview)
+        assertTrue(overview.showRecenter)
+
+        val free = NavigationCameraMode.FREE.mapControlPolicy()
+        assertEquals(false, free.showOrientationToggle)
+        assertEquals(false, free.showOverview)
+        assertTrue(free.showRecenter)
+    }
+
     private fun maneuver(distanceMeters: Double) = Maneuver(
         type = 10,
         instruction = "Svolta a destra.",

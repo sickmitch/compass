@@ -1,6 +1,15 @@
 package org.compass.cng.ui.route
 
 import android.util.Log
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.AddRoad
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.Route
+import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -25,22 +34,20 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -53,6 +60,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -71,11 +79,16 @@ import org.compass.cng.BuildConfig
 import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraMode
+import org.compass.cng.navigation.mapControlPolicy
+import org.compass.cng.navigation.toggleOrientation
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.ui.map.NavigationMap
 import org.compass.cng.ui.map.FollowMap
+import org.compass.cng.ui.theme.CompassButton
+import org.compass.cng.ui.theme.CompassOutlinedButton
+import org.compass.cng.ui.theme.CompassTextButton
 
 /** GPS-follow surface shown when no destination or route exists. */
 @Composable
@@ -130,30 +143,38 @@ internal fun RouteFreeFollowScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Surface(
-                shape = CircleShape,
+                shape = MaterialTheme.shapes.extraLarge,
                 tonalElevation = 6.dp,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
             ) {
-                TextButton(
+                CompassTextButton(
                     onClick = onCreateTrip,
                     modifier = Modifier.testTag("follow_create_trip"),
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.primary,
                     ),
-                ) { Text("Crea viaggio") }
+                ) {
+                    Icon(Icons.Rounded.AddRoad, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Crea viaggio")
+                }
             }
             if (cameraMode != NavigationCameraMode.FOLLOW) {
                 Surface(
-                    shape = CircleShape,
+                    shape = MaterialTheme.shapes.extraLarge,
                     tonalElevation = 6.dp,
                     color = MaterialTheme.colorScheme.primary,
                 ) {
-                    TextButton(
+                    CompassTextButton(
                         onClick = { cameraMode = NavigationCameraMode.FOLLOW },
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onPrimary,
                         ),
-                    ) { Text("Ricentra") }
+                    ) {
+                        Icon(Icons.Rounded.MyLocation, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Ricentra")
+                    }
                 }
             }
         }
@@ -170,6 +191,7 @@ internal fun ActiveNavigationScreen(
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
     onCompleteFuelStop: () -> Unit,
+    onCompleteIntermediateStop: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
     val navigationView = LocalView.current
@@ -218,6 +240,7 @@ internal fun ActiveNavigationScreen(
     var showDetails by rememberSaveable { mutableStateOf(false) }
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
+    var confirmStopNavigation by rememberSaveable { mutableStateOf(false) }
     var tripSummaryHeightPixels by remember { mutableIntStateOf(0) }
     var routeUpdateNoticeHeightPixels by remember { mutableIntStateOf(0) }
     var routeUpdateNoticeVisible by remember { mutableStateOf(false) }
@@ -282,6 +305,19 @@ internal fun ActiveNavigationScreen(
             },
         )
     }
+    if (confirmStopNavigation) {
+        NavigationStopConfirmationDialog(
+            onDismiss = {
+                confirmStopNavigation = false
+                Log.i(NAVIGATION_UI_LOG_TAG, "navigation_stop confirmed=false navigation_active=true")
+            },
+            onConfirm = {
+                confirmStopNavigation = false
+                Log.i(NAVIGATION_UI_LOG_TAG, "navigation_stop confirmed=true source=map_control")
+                onStopNavigation()
+            },
+        )
+    }
     if (showDeveloperTools) {
         NavigationDeveloperScreen(
             state = state,
@@ -301,6 +337,7 @@ internal fun ActiveNavigationScreen(
             onRequestRouteUpdate = onRequestRouteUpdate,
             onReplaceFuelStop = { confirmFuelStopReplacement = true },
             onCompleteFuelStop = onCompleteFuelStop,
+            onCompleteIntermediateStop = onCompleteIntermediateStop,
             onOpenDeveloperTools = {
                 showDetails = false
                 showDeveloperTools = true
@@ -349,6 +386,48 @@ internal fun ActiveNavigationScreen(
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
+            state.nextIntermediateStop?.let { stop ->
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = if (state.activeIntermediateStopVisit != null) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("navigation_intermediate_stop_card"),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(
+                                if (state.activeIntermediateStopVisit != null) {
+                                    "Tappa raggiunta"
+                                } else {
+                                    "Tappa intermedia"
+                                },
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (state.activeIntermediateStopVisit == null) {
+                                Text(
+                                    stop.distanceRemainingMeters.navigationDistanceLabel(),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                        if (state.activeIntermediateStopVisit != null) {
+                            CompassButton(onClick = onCompleteIntermediateStop) {
+                                Text("Termina tappa")
+                            }
+                        }
+                    }
+                }
+            }
             AnimatedVisibility(
                 visible = ui.isRouteRecalculationInProgress,
                 enter = fadeIn(),
@@ -385,9 +464,24 @@ internal fun ActiveNavigationScreen(
                         Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=follow reason=recenter")
                         cameraMode = NavigationCameraMode.FOLLOW
                     },
+                    onToggleOrientation = {
+                        val nextMode = cameraMode.toggleOrientation()
+                        Log.i(
+                            NAVIGATION_UI_LOG_TAG,
+                            "camera_mode=${nextMode.name.lowercase()} reason=orientation_control",
+                        )
+                        cameraMode = nextMode
+                    },
                     onShowTripSummary = {
                         showTripSummary = true
                         Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=true")
+                    },
+                    onStopNavigation = {
+                        confirmStopNavigation = true
+                        Log.i(
+                            NAVIGATION_UI_LOG_TAG,
+                            "navigation_stop confirmation_visible=true source=map_control",
+                        )
                     },
                 )
             }
@@ -465,7 +559,7 @@ private fun CngGuidanceCard(
                     }
                 }
             ),
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
         tonalElevation = 8.dp,
     ) {
@@ -475,7 +569,7 @@ private fun CngGuidanceCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = MaterialTheme.shapes.extraSmall,
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
@@ -544,7 +638,7 @@ private fun CngGuidanceCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Button(
+                    CompassButton(
                         onClick = onCompleteFuelStop,
                         modifier = Modifier.testTag("navigation_complete_refueling"),
                     ) {
@@ -597,7 +691,7 @@ private fun RouteUpdateNoticeCard(
         modifier = modifier
             .testTag("navigation_route_update_notice")
             .clearAndSetSemantics { contentDescription = notice.accessibilityDescription },
-        shape = RoundedCornerShape(22.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
         ),
@@ -675,14 +769,17 @@ private fun VoiceGuidanceToggle(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(
-                text = "Voce",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
+            Icon(
+                imageVector = if (enabled) {
+                    Icons.AutoMirrored.Rounded.VolumeUp
+                } else {
+                    Icons.AutoMirrored.Rounded.VolumeOff
+                },
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
             )
             Text(
-                text = if (enabled) "ON" else "OFF",
+                text = if (enabled) "Voce" else "Muta",
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
             )
@@ -694,7 +791,7 @@ private fun VoiceGuidanceToggle(
 private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.testTag("navigation_maneuver_card"),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         ),
@@ -768,7 +865,7 @@ private fun PrimaryManeuverIcon(
 ) {
     Surface(
         modifier = modifier.size(62.dp),
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
@@ -821,7 +918,7 @@ private fun JunctionSignPanel(
     ) {
         Surface(
             modifier = Modifier.testTag("navigation_junction_sign"),
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.small,
             color = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ) {
@@ -859,9 +956,12 @@ private fun MapModeControls(
     tripSummaryVisible: Boolean,
     onOverview: () -> Unit,
     onRecenter: () -> Unit,
+    onToggleOrientation: () -> Unit,
     onShowTripSummary: () -> Unit,
+    onStopNavigation: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val policy = cameraMode.mapControlPolicy()
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!tripSummaryVisible) {
             Surface(
@@ -869,7 +969,7 @@ private fun MapModeControls(
                 tonalElevation = 6.dp,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
             ) {
-                TextButton(
+                CompassTextButton(
                     onClick = onShowTripSummary,
                     modifier = Modifier.testTag("navigation_trip_toggle"),
                     colors = ButtonDefaults.textButtonColors(
@@ -878,27 +978,43 @@ private fun MapModeControls(
                 ) { Text("Viaggio") }
             }
         }
-        Surface(
-            shape = CircleShape,
-            tonalElevation = 6.dp,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        ) {
-            TextButton(
-                onClick = onOverview,
-                modifier = Modifier.testTag("navigation_overview"),
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary,
-                ),
-            ) { Text("Panoramica") }
+        if (policy.showOrientationToggle) {
+            MapIconControlButton(
+                testTag = "navigation_orientation",
+                contentDescription = if (cameraMode == NavigationCameraMode.NORTH_UP) {
+                    "Orientamento nord in alto. Tocca per seguire la direzione di marcia"
+                } else {
+                    "Orientamento direzione di marcia. Tocca per mantenere il nord in alto"
+                },
+                onClick = onToggleOrientation,
+            ) {
+                Icon(
+                    imageVector = if (cameraMode == NavigationCameraMode.NORTH_UP) {
+                        Icons.Rounded.Explore
+                    } else {
+                        Icons.Rounded.Navigation
+                    },
+                    contentDescription = null,
+                )
+            }
         }
-        if (cameraMode != NavigationCameraMode.FOLLOW) {
+        if (policy.showOverview) {
+            MapIconControlButton(
+                testTag = "navigation_overview",
+                contentDescription = "Mostra la panoramica del percorso rimanente",
+                onClick = onOverview,
+            ) {
+                Icon(Icons.Rounded.Route, contentDescription = null)
+            }
+        }
+        if (policy.showRecenter) {
             Surface(
                 shape = CircleShape,
                 tonalElevation = 6.dp,
                 color = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
-                TextButton(
+                CompassTextButton(
                     onClick = onRecenter,
                     modifier = Modifier.testTag("navigation_recenter"),
                     colors = ButtonDefaults.textButtonColors(
@@ -907,6 +1023,106 @@ private fun MapModeControls(
                 ) { Text("Ricentra") }
             }
         }
+        MapIconControlButton(
+            testTag = "navigation_stop",
+            contentDescription = "Termina navigazione",
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.96f),
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            onClick = onStopNavigation,
+        ) {
+            Icon(Icons.Rounded.StopCircle, contentDescription = null)
+        }
+    }
+}
+
+@Composable
+private fun MapIconControlButton(
+    testTag: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+    containerColor: androidx.compose.ui.graphics.Color =
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+    contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .size(52.dp)
+            .testTag(testTag)
+            .clearAndSetSemantics { this.contentDescription = contentDescription },
+        shape = CircleShape,
+        tonalElevation = 6.dp,
+        color = containerColor,
+        contentColor = contentColor,
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun OrientationGlyph(northUp: Boolean) {
+    if (northUp) {
+        Text(
+            text = "N",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+        )
+        return
+    }
+    val color = LocalContentColor.current
+    Canvas(modifier = Modifier.size(24.dp)) {
+        val tip = Offset(size.width / 2f, size.height * 0.18f)
+        drawLine(
+            color,
+            Offset(size.width / 2f, size.height * 0.82f),
+            tip,
+            3.dp.toPx(),
+            StrokeCap.Round,
+        )
+        drawLine(
+            color,
+            tip,
+            Offset(size.width * 0.28f, size.height * 0.42f),
+            3.dp.toPx(),
+            StrokeCap.Round,
+        )
+        drawLine(
+            color,
+            tip,
+            Offset(size.width * 0.72f, size.height * 0.42f),
+            3.dp.toPx(),
+            StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun RouteOverviewGlyph() {
+    val color = LocalContentColor.current
+    Canvas(modifier = Modifier.size(25.dp)) {
+        val start = Offset(size.width * 0.20f, size.height * 0.78f)
+        val bend = Offset(size.width * 0.43f, size.height * 0.42f)
+        val end = Offset(size.width * 0.80f, size.height * 0.20f)
+        drawLine(color, start, bend, 3.dp.toPx(), StrokeCap.Round)
+        drawLine(color, bend, end, 3.dp.toPx(), StrokeCap.Round)
+        drawCircle(color, 3.5.dp.toPx(), start)
+        drawCircle(color, 3.5.dp.toPx(), end)
+    }
+}
+
+@Composable
+private fun StopNavigationGlyph() {
+    val color = LocalContentColor.current
+    Canvas(modifier = Modifier.size(24.dp)) {
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(size.width * 0.22f, size.height * 0.22f),
+            size = androidx.compose.ui.geometry.Size(size.width * 0.56f, size.height * 0.56f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+        )
     }
 }
 
@@ -919,7 +1135,7 @@ private fun TripBottomBar(
 ) {
     Card(
         modifier = modifier.testTag("navigation_bottom_bar"),
-        shape = RoundedCornerShape(22.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
         ),
@@ -944,7 +1160,7 @@ private fun TripBottomBar(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.testTag("navigation_cng_badge"),
-                        shape = RoundedCornerShape(7.dp),
+                        shape = MaterialTheme.shapes.extraSmall,
                         color = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     ) {
@@ -979,13 +1195,13 @@ private fun TripBottomBar(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                TextButton(
+                CompassTextButton(
                     onClick = onHide,
                     modifier = Modifier.testTag("navigation_trip_toggle"),
                 ) {
                     TripPanelActionLabel("Nascondi", pointsUp = false)
                 }
-                TextButton(
+                CompassTextButton(
                     onClick = onOpenDetails,
                     modifier = Modifier.testTag("navigation_details_button"),
                 ) {
@@ -1058,6 +1274,7 @@ private fun NavigationDetailsSheet(
     onRequestRouteUpdate: () -> Unit,
     onReplaceFuelStop: () -> Unit,
     onCompleteFuelStop: () -> Unit,
+    onCompleteIntermediateStop: () -> Unit,
     onOpenDeveloperTools: () -> Unit,
     onStopNavigation: () -> Unit,
 ) {
@@ -1195,7 +1412,7 @@ private fun NavigationDetailsSheet(
                 }
                 state.nextFuelStop?.let {
                     item {
-                        OutlinedButton(
+                        CompassOutlinedButton(
                             onClick = onReplaceFuelStop,
                             enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS &&
                                 state.activeFuelStopVisit == null,
@@ -1207,7 +1424,7 @@ private fun NavigationDetailsSheet(
                 }
                 state.activeFuelStopVisit?.let { visit ->
                     item {
-                        Button(
+                        CompassButton(
                             onClick = {
                                 onDismiss()
                                 onCompleteFuelStop()
@@ -1226,12 +1443,28 @@ private fun NavigationDetailsSheet(
                         }
                     }
                 }
+                state.activeIntermediateStopVisit?.let {
+                    item {
+                        CompassButton(
+                            onClick = {
+                                onDismiss()
+                                onCompleteIntermediateStop()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("navigation_details_complete_intermediate_stop"),
+                        ) {
+                            Text("Termina tappa e riprendi")
+                        }
+                    }
+                }
             }
             item {
-                OutlinedButton(
+                CompassOutlinedButton(
                     onClick = onRequestRouteUpdate,
                     enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS &&
-                        state.activeFuelStopVisit == null,
+                        state.activeFuelStopVisit == null &&
+                        state.activeIntermediateStopVisit == null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Ricalcola percorso")
@@ -1239,7 +1472,7 @@ private fun NavigationDetailsSheet(
             }
             if (BuildConfig.DEBUG) {
                 item {
-                    TextButton(
+                    CompassTextButton(
                         onClick = onOpenDeveloperTools,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1250,7 +1483,7 @@ private fun NavigationDetailsSheet(
                 }
             }
             item {
-                OutlinedButton(
+                CompassOutlinedButton(
                     onClick = onStopNavigation,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -1259,6 +1492,12 @@ private fun NavigationDetailsSheet(
             }
         }
     }
+}
+
+private fun Double.navigationDistanceLabel(): String = if (this >= 1_000.0) {
+    String.format(java.util.Locale.ITALIAN, "%.1f km", this / 1_000.0)
+} else {
+    "${(this / 10.0).toInt() * 10} m"
 }
 
 @Composable
@@ -1321,7 +1560,7 @@ private fun NavigationDeveloperScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
-                        TextButton(onClick = onClose) { Text("Chiudi") }
+                        CompassTextButton(onClick = onClose) { Text("Chiudi") }
                     }
                 }
                 item {
@@ -1359,7 +1598,7 @@ private fun NavigationDeveloperScreen(
                     }
                 }
                 item {
-                    OutlinedButton(
+                    CompassOutlinedButton(
                         onClick = { showManeuverGallery = true },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1369,7 +1608,7 @@ private fun NavigationDeveloperScreen(
                     }
                 }
                 item {
-                    OutlinedButton(
+                    CompassOutlinedButton(
                         onClick = { showJunctionSignGallery = true },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1379,7 +1618,7 @@ private fun NavigationDeveloperScreen(
                     }
                 }
                 item {
-                    OutlinedButton(
+                    CompassOutlinedButton(
                         onClick = onRequestRouteUpdate,
                         enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
                         modifier = Modifier.fillMaxWidth(),
@@ -1388,7 +1627,7 @@ private fun NavigationDeveloperScreen(
                     }
                 }
                 item {
-                    OutlinedButton(
+                    CompassOutlinedButton(
                         onClick = onSimulateOffRoute,
                         enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
                         modifier = Modifier.fillMaxWidth(),
@@ -1444,7 +1683,7 @@ private fun NavigationManeuverGallery(onClose: () -> Unit) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        TextButton(onClick = onClose) { Text("Chiudi") }
+                        CompassTextButton(onClick = onClose) { Text("Chiudi") }
                     }
                 }
                 itemsIndexed(
@@ -1458,7 +1697,7 @@ private fun NavigationManeuverGallery(onClose: () -> Unit) {
                         ) {
                             Surface(
                                 modifier = Modifier.size(50.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = MaterialTheme.shapes.small,
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
                             ) {
@@ -1583,7 +1822,7 @@ private fun NavigationJunctionSignGallery(onClose: () -> Unit) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        TextButton(onClick = onClose) { Text("Chiudi") }
+                        CompassTextButton(onClick = onClose) { Text("Chiudi") }
                     }
                 }
                 itemsIndexed(junctionSignSamples) { _, sample ->
@@ -1637,10 +1876,30 @@ private fun FuelStopReplacementDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Cerca alternativa") }
+            CompassTextButton(onClick = onConfirm) { Text("Cerca alternativa") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Annulla") }
+            CompassTextButton(onClick = onDismiss) { Text("Annulla") }
+        },
+    )
+}
+
+@Composable
+private fun NavigationStopConfirmationDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Terminare la navigazione?") },
+        text = {
+            Text("Il percorso attivo verrà chiuso e Compass tornerà a seguire la posizione GPS.")
+        },
+        confirmButton = {
+            CompassTextButton(onClick = onConfirm) { Text("Termina") }
+        },
+        dismissButton = {
+            CompassTextButton(onClick = onDismiss) { Text("Continua") }
         },
     )
 }

@@ -103,6 +103,45 @@ def test_google_autocomplete_contract_and_exact_place_id_deduplication() -> None
     assert "locationRestriction" not in payload
 
 
+def test_google_autocomplete_restricts_results_to_route_rectangle() -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"suggestions": []})
+
+    request = DestinationSuggestRequest(
+        query="farmacia",
+        session_id=str(uuid4()),
+        revision=1,
+        context=DestinationSearchContext(
+            location=Coordinate(45.4, 10.9),
+            route_bounds=(Coordinate(44.9, 10.3), Coordinate(45.8, 11.7)),
+        ),
+    )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GooglePlacesNewDestinationProvider(
+                base_url="https://places.googleapis.com/v1",
+                api_key="secret",
+                timeout_seconds=2,
+                client=client,
+            )
+            await provider.suggest(request, "provider-session")
+
+    asyncio.run(run())
+    payload = json.loads(captured[0].content)
+    assert payload["origin"] == {"latitude": 45.4, "longitude": 10.9}
+    assert payload["locationRestriction"] == {
+        "rectangle": {
+            "low": {"latitude": 44.9, "longitude": 10.3},
+            "high": {"latitude": 45.8, "longitude": 11.7},
+        }
+    }
+    assert "locationBias" not in payload
+
+
 def test_google_details_resolves_selected_id_and_components_by_type() -> None:
     captured: list[httpx.Request] = []
 

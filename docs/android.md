@@ -111,7 +111,46 @@ return a `CONNECTIVITY_RECOVERY` update re-enters the existing CNG-aware route r
 recovery attempts keep the local route and retry after 5, 15 and then 60 seconds. An active debug
 replay is persisted as the position source and resumes from its saved segment after process
 recreation. The ambient MapLibre cache covers only already visited resources. Android `0.23.1`
-(`versionCode=30`) is ready for the device gate in `scripts/run-navigation-ui-phase13-live.sh`.
+(`versionCode=30`) passed the physical-device gate on 2026-09-09.
+
+Navigation UI Phase 14 adds a compact, map-native interaction cluster. The direction control toggles
+between heading-up tracking and north-up tracking without releasing the puck anchor. `Panoramica`
+continues to fit only the remaining route, always at bearing and pitch zero; `Ricentra` returns from
+overview or manual free mode to heading-up tracking. Automatic speed/maneuver zoom remains the
+default and pinch zoom remains available, avoiding permanent +/- controls. Voice and trip controls
+stay visible, while a dedicated stop control requires confirmation before it clears navigation and
+returns to route-free GPS follow. Android `0.24.0` (`versionCode=31`) is ready for the device gate in
+`scripts/run-navigation-ui-phase14-live.sh`.
+
+The operator explicitly advanced to Phase 15 on 2026-09-09 without returning the Phase 14 device
+runner output; Phase 14 therefore remains recorded as implemented locally rather than falsely
+reported as device-accepted.
+
+Navigation UI Phase 15 adds up to eight ordered ordinary waypoints between departure and
+destination. The waypoint selector reuses all endpoint acquisition modes. Google POI/address suggestions are
+restricted to a route-derived rectangle and remain on the mapless search screen; selection still
+resolves one Place ID only. The ViewModel then asks Valhalla for the direct route and the exact
+origin→waypoint→destination route, accepting the waypoint only when the latter's added road distance
+does not exceed the chosen kilometre limit. The default is 30% of direct-route length.
+
+The waypoint enters navigation as a Compass-owned neutral `Tappa intermedia`, never as persisted
+Google display text. A selected result first receives an exact-route MapLibre preview with a
+highlighted neutral marker and is committed only by `Scegli`. On arrival, guidance and demo replay
+pause without adding dwell seconds. The operator can resume explicitly; during real GPS guidance
+two moving fixes beyond the departure radius complete the waypoint automatically. ETA is rebuilt
+from the completion time and remaining driving/CNG dwell.
+
+Trip creation now follows one animated endpoint → personalization → common-summary flow. Ordinary
+stops are reordered by long-press drag, vehicle list/form replace the lower CNG planning panel, and
+the common summary edits or removes individual planned stops inline. Manual and predictive CNG
+selections enter that overview directly; it presents distance,
+driving/total duration, fuel-stop dwell, traffic and warnings without route IDs or internal cache
+diagnostics. Puck icon size interpolates with MapLibre zoom from the established full size to a
+lower bound of exactly 50%. Android `0.25.3` (`versionCode=35`) adds a uniform branded Material 3
+presentation across every non-map phase and dedicated day/night Material puck artwork, without
+changing the accepted route-creation or navigation behavior. The operator reported the
+`scripts/run-navigation-ui-phase15-live.sh` physical-device gate green on 2026-09-11; Phase 15 is
+complete.
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1

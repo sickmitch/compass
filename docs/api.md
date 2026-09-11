@@ -140,6 +140,34 @@ fuel plan changes. Selected stops expose `expected_arrival_at` and `dwell_time_s
 `traffic_delay_state=unavailable` pairs with a null delay when no defensible separate live-delay
 estimate exists; the client must not turn that into zero delay.
 
+## Route through ordinary intermediate waypoints
+
+`POST /api/v1/routes/with-intermediate-stops` accepts WGS84 departure, one to eight ordered ordinary
+waypoints and destination. It asks the existing Valhalla adapter for one waypoint route and returns
+one sequenced leg more than the stop count. The outer kinds are `origin_to_intermediate_stop` and
+`intermediate_stop_to_destination`; inner legs are `intermediate_stop_to_intermediate_stop`.
+Navigation timing has `refueling_stop_count=0` and no added dwell. Traffic refresh uses the same
+waypoint-route path as other Compass routes. The singular endpoint remains for older clients.
+
+```json
+{
+  "origin": {"latitude": 45.4642, "longitude": 9.19},
+  "intermediate_stops": [
+    {"latitude": 45.4384, "longitude": 10.9916},
+    {"latitude": 45.5416, "longitude": 10.2118}
+  ],
+  "destination": {"latitude": 45.0703, "longitude": 7.6869},
+  "costing": "auto",
+  "language": "it-IT"
+}
+```
+
+The endpoint returns route costs; it does not decide the Android search corridor. During Phase 15,
+Android first calculates the direct route and compares its distance with the waypoint route. The
+accepted maximum added distance defaults to 30% of the direct route and can be overridden for the
+current stop-list search. Google suggestions receive only a route-derived rectangular restriction;
+the final eligibility decision is always the Valhalla road-distance comparison.
+
 When a current provider snapshot and native Valhalla overlay are both usable, `navigation` also
 contains `traffic_state=fresh`, `traffic_aware=true`, `traffic_observed_at` and
 `traffic_delay_state=estimated`. The numeric `traffic_delay_seconds` is the non-negative difference

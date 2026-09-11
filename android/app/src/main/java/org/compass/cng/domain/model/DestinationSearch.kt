@@ -10,6 +10,12 @@ enum class DestinationKind {
 data class DestinationSearchContext(
     val location: Coordinate? = null,
     val biasRadiusMeters: Double? = null,
+    val routeBounds: DestinationSearchBounds? = null,
+)
+
+data class DestinationSearchBounds(
+    val southWest: Coordinate,
+    val northEast: Coordinate,
 )
 
 data class DestinationSuggestRequest(

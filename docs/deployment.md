@@ -1088,54 +1088,22 @@ overridden at build time with Gradle properties of the same names.
 Use the full operator procedure in
 [`android-0.19.4-google-destination-search-acceptance.md`](phases/android-0.19.4-google-destination-search-acceptance.md).
 
-Keep the key only in the server `.env`; it is never an Android build setting. Configure:
-
-```dotenv
-GEOCODING_PROVIDER=nominatim_google
-GOOGLE_PLACES_API_KEY=replace-with-a-server-restricted-key
-GOOGLE_PLACES_URL=https://places.googleapis.com/v1
-GOOGLE_PLACES_REGION_CODE=IT
-GOOGLE_PLACES_CORROBORATION_RADIUS_METERS=75
-```
-
-The key must have Places API (New) enabled and should be restricted to the server and that API.
-Recreate the API after changing environment values:
+Do not restore the obsolete `GEOCODING_PROVIDER=nominatim_google` corroboration configuration from
+pre-0.19.4 deployments. It is deliberately incompatible with the active Google-only registry and
+causes startup validation to fail. Keep the key only in the server `.env`; it is never an Android
+build setting. Recreate the API after changing the configuration:
 
 ```bash
 cd ~/docker/compass
 docker compose build api
 docker compose up -d --force-recreate api
-docker compose exec -T api python -c 'from compass.config import get_settings; s=get_settings(); print({"provider": s.geocoding_provider, "google_key_configured": bool(s.google_places_api_key.get_secret_value()), "radius_m": s.google_places_corroboration_radius_meters})'
+docker compose exec -T api python -c 'from compass.config import get_settings; s=get_settings(); print({"providers": s.destination_search_providers, "legacy_geocoder": s.geocoding_provider, "google_enabled": s.google_places_enabled, "contract_regime": s.google_places_contract_regime, "tomtom_search": s.tomtom_search_enabled, "traffic_provider": s.traffic_provider, "google_key_configured": bool(s.google_places_api_key.get_secret_value())})'
 ```
 
-The command prints only whether a key exists. Test an address and a POI through the authenticated
-public API:
-
-```bash
-curl --fail --silent --show-error --get \
-  --user "$COMPASS_CHECK_USER:$COMPASS_CHECK_PASSWORD" \
-  --data-urlencode 'q=Via Cappafredda, 12, Roverchiara' \
-  --data 'limit=8' \
-  https://compass.sickmitch.cc/api/v1/places/search | jq
-
-curl --fail --silent --show-error --get \
-  --user "$COMPASS_CHECK_USER:$COMPASS_CHECK_PASSWORD" \
-  --data-urlencode 'q=Duomo di Milano' \
-  --data 'limit=8' \
-  https://compass.sickmitch.cc/api/v1/places/search | jq
-```
-
-Both responses must have `cacheable=false`; every visible result must have
-`provider="nominatim"`. The address result must never present a civic explicitly different from
-`12`. A successful request logs `Place corroboration completed` with result counts only. If
-corroboration fails, search still returns Nominatim results and the API log contains the bounded
-warning `Place corroborator unavailable` without a key or upstream payload. Inspect only those
-events with:
-
-```bash
-docker compose logs --since=10m --no-color api | \
-  grep -E 'Place corroboration completed|Place corroborator unavailable'
-```
+The command reports only whether the key exists, never its value. The expected active values are
+`providers=google_places_new`, `legacy_geocoder=none`, `google_enabled=true`,
+`contract_regime=eea` and `tomtom_search=false`. `traffic_provider=tomtom` remains valid because the
+destination-search and traffic flags are independent.
 
 ## Phase 13 degraded/offline navigation validation
 

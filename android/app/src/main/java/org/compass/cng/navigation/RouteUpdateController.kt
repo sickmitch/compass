@@ -32,7 +32,9 @@ class RouteUpdateController(
     fun nextUpdate(state: NavigationState, nowEpochMillis: Long): RouteUpdateReason? {
         if (state.route == null || state.reroutingStatus == ReroutingStatus.IN_PROGRESS ||
             state.phase == NavigationPhase.IDLE || state.phase == NavigationPhase.ROUTE_PREVIEW ||
-            state.phase == NavigationPhase.AT_FUEL_STOP || state.phase == NavigationPhase.ARRIVED
+            state.phase == NavigationPhase.AT_FUEL_STOP ||
+            state.phase == NavigationPhase.AT_INTERMEDIATE_STOP ||
+            state.phase == NavigationPhase.ARRIVED
         ) {
             return null
         }

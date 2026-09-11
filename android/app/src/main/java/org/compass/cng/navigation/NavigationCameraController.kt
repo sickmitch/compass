@@ -4,9 +4,42 @@ import org.compass.cng.domain.model.Coordinate
 
 enum class NavigationCameraMode {
     FOLLOW,
+    NORTH_UP,
     OVERVIEW,
     FREE,
 }
+
+val NavigationCameraMode.tracksVehiclePosition: Boolean
+    get() = this == NavigationCameraMode.FOLLOW || this == NavigationCameraMode.NORTH_UP
+
+data class NavigationMapControlPolicy(
+    val showOrientationToggle: Boolean,
+    val showOverview: Boolean,
+    val showRecenter: Boolean,
+)
+
+fun NavigationCameraMode.mapControlPolicy() = NavigationMapControlPolicy(
+    showOrientationToggle = tracksVehiclePosition,
+    showOverview = tracksVehiclePosition,
+    showRecenter = !tracksVehiclePosition,
+)
+
+fun NavigationCameraMode.toggleOrientation(): NavigationCameraMode = when (this) {
+    NavigationCameraMode.FOLLOW -> NavigationCameraMode.NORTH_UP
+    NavigationCameraMode.NORTH_UP -> NavigationCameraMode.FOLLOW
+    NavigationCameraMode.OVERVIEW,
+    NavigationCameraMode.FREE,
+    -> NavigationCameraMode.FOLLOW
+}
+
+internal fun NavigationCameraMode.resolvedBearingDegrees(followBearingDegrees: Double): Double? =
+    when (this) {
+        NavigationCameraMode.FOLLOW -> normalizeBearing(followBearingDegrees)
+        NavigationCameraMode.NORTH_UP,
+        NavigationCameraMode.OVERVIEW,
+        -> 0.0
+        NavigationCameraMode.FREE -> null
+    }
 
 data class NavigationCameraInstruction(
     val target: Coordinate,

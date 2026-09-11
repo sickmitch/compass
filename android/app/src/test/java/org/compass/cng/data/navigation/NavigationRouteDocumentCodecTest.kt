@@ -23,6 +23,8 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.navigation.CachedNavigationRoute
 import org.compass.cng.navigation.NavigationFuelStopVisit
+import org.compass.cng.navigation.NavigationIntermediateStop
+import org.compass.cng.navigation.NavigationIntermediateStopVisit
 import org.compass.cng.navigation.NavigationLocationMode
 import org.compass.cng.navigation.NavigationPosition
 import org.compass.cng.navigation.NavigationProgressSnapshot
@@ -101,6 +103,43 @@ class NavigationRouteDocumentCodecTest {
     }
 
     @Test
+    fun roundTripPreservesIntermediateStopAndPausedVisit() {
+        val stop = NavigationIntermediateStop(1, Coordinate(44.7, 10.3))
+        val route = routeWithStop().toNavigationRoute().copy(
+            fuelStops = emptyList(),
+            intermediateStops = listOf(stop),
+        )
+        val visit = NavigationIntermediateStopVisit(stop, arrivedAtEpochMillis = 5_000L)
+        val progress = NavigationProgressSnapshot(
+            savedAtEpochMillis = 6_000L,
+            navigationPosition = null,
+            routeProgressFraction = 0.4,
+            distanceRemainingMeters = 72_000.0,
+            drivingDurationRemainingSeconds = 3_240.0,
+            totalDurationRemainingSeconds = 3_240.0,
+            estimatedArrivalAtEpochMillis = 3_246_000L,
+            currentRoadName = null,
+            currentManeuverIndex = 0,
+            nextManeuverIndex = 1,
+            distanceToNextManeuverMeters = 0.0,
+            completedFuelStopSequences = emptySet(),
+            activeFuelStopVisit = null,
+            lastCompletedFuelStopSequence = null,
+            lastSpokenInstruction = null,
+            voiceGuidanceEnabled = true,
+            lastSuccessfulRouteRefreshEpochMillis = null,
+            activeIntermediateStopVisit = visit,
+        )
+        val cached = CachedNavigationRoute(route, 6_000L, true, progress)
+
+        val restored = requireNotNull(codec.decode(codec.encode(cached)))
+
+        assertEquals(cached, restored)
+        assertEquals(stop, restored.route.intermediateStops.single())
+        assertEquals(visit, restored.progress?.activeIntermediateStopVisit)
+    }
+
+    @Test
     fun cacheWrittenBeforeStructuredGuidanceRemainsReadable() {
         val cached = CachedNavigationRoute(
             routeWithStop().toNavigationRoute(),
@@ -108,7 +147,7 @@ class NavigationRouteDocumentCodecTest {
             navigationWasActive = true,
         )
         val legacyDocument = Json.parseToJsonElement(
-            codec.encode(cached).replace("\"schemaVersion\":2", "\"schemaVersion\":1"),
+            codec.encode(cached).replace("\"schemaVersion\":3", "\"schemaVersion\":1"),
         )
             .withoutStructuredGuidance()
             .withoutSpeedLimitContext()

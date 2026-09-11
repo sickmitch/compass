@@ -52,9 +52,25 @@ class NavigationSession(
 
     fun updateLocation(location: NavigationLocation): NavigationState {
         val hadActiveFuelStop = state.value.activeFuelStopVisit != null
+        val hadActiveIntermediateStop = state.value.activeIntermediateStopVisit != null
+        val previousIntermediateCompletion = state.value.lastIntermediateStopCompletionMode
         engine.updateLocation(location)
-        persistCheckpoint(force = hadActiveFuelStop != (state.value.activeFuelStopVisit != null))
-        return state.value
+        val current = state.value
+        persistCheckpoint(
+            force = hadActiveFuelStop != (current.activeFuelStopVisit != null) ||
+                hadActiveIntermediateStop != (current.activeIntermediateStopVisit != null),
+        )
+        if (!hadActiveIntermediateStop && current.activeIntermediateStopVisit != null) {
+            eventLogger("navigation intermediate stop reached; guidance_paused=true dwell_seconds=0")
+        }
+        if (
+            previousIntermediateCompletion != current.lastIntermediateStopCompletionMode &&
+            current.lastIntermediateStopCompletionMode ==
+            NavigationIntermediateStopCompletionMode.GPS_DEPARTURE
+        ) {
+            eventLogger("navigation intermediate stop completed by GPS departure; eta_recalculated=true")
+        }
+        return current
     }
 
     fun tick(nowEpochMillis: Long) {
@@ -123,6 +139,14 @@ class NavigationSession(
             }
         }
 
+    fun completeIntermediateStop(nowEpochMillis: Long = System.currentTimeMillis()): Boolean =
+        engine.completeIntermediateStop(nowEpochMillis = nowEpochMillis).also { completed ->
+            if (completed) {
+                persistCheckpoint(force = true)
+                eventLogger("navigation intermediate stop completed by operator")
+            }
+        }
+
     fun networkLost() {
         val before = state.value.connectivity
         engine.networkLost()
@@ -185,6 +209,11 @@ class NavigationSession(
             voiceGuidanceEnabled = voiceGuidanceEnabled,
             lastSuccessfulRouteRefreshEpochMillis = lastSuccessfulRouteRefreshEpochMillis,
             locationMode = locationMode,
+            completedIntermediateStopSequences = intermediateStopProgress
+                .filter { it.lifecycle == NavigationIntermediateStopLifecycle.COMPLETED }
+                .mapTo(linkedSetOf()) { it.stop.sequence },
+            activeIntermediateStopVisit = activeIntermediateStopVisit,
+            lastCompletedIntermediateStopSequence = lastCompletedIntermediateStop?.sequence,
         )
 
     private companion object {

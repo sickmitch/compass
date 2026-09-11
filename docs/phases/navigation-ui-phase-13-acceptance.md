@@ -1,6 +1,6 @@
 # Navigation UI upgrade — Phase 13 acceptance record
 
-Status: repository-local implementation complete; physical-device outage/recovery gate pending.
+Status: complete; physical-device outage/recovery gate accepted on 2026-09-09.
 
 This record is for **Navigation UI Phase 13**. The older backend/mobile delivery milestone named
 `phase-13` remains documented separately in `phase-13-acceptance.md`.
@@ -100,8 +100,11 @@ inspection. The operator validates three visible invariants: continued local gui
 radio outage, automatic active-session/foreground-service recovery after process recreation, and one
 safe CNG-aware refresh after connectivity returns.
 
-Return the runner's complete output plus pass/fail notes for checks A-C. Do not proceed to Navigation
-UI Phase 14 until this gate is accepted or explicitly waived.
+The operator ran the gate on a physical device. The first `0.23.0` recovery attempt exposed two
+real defects: process recreation lost the demo-replay position source and a failed early recovery
+did not resume progress. Version `0.23.1` persists that source, waits for validated connectivity and
+retries recovery with bounded backoff. The repeated checks A-C and automated log gate then passed;
+the operator explicitly gave the green light on 2026-09-09.
 
 ## Failure diagnostics
 

@@ -66,7 +66,13 @@ class CompassNavigationRouteRecalculator(
         origin: Coordinate,
         remainingStops: List<NavigationFuelStop>,
     ): NavigationRoute = when (remainingStops.size) {
-            0 -> routingRepository.previewRoute(origin, route.destination).toNavigationRoute(
+            0 -> state.nextIntermediateStop?.stop?.let { stop ->
+                routingRepository.routeWithIntermediateStop(
+                    origin = origin,
+                    intermediateStop = stop.location,
+                    destination = route.destination,
+                ).toNavigationRoute()
+            } ?: routingRepository.previewRoute(origin, route.destination).toNavigationRoute(
                 gasolineFallback = route.gasolineFallback,
             )
             1 -> route.fuelPlan?.let { plan ->

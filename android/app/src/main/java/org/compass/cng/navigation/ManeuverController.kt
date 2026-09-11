@@ -65,6 +65,26 @@ class ManeuverController(
                 ),
             )?.let { return it }
         }
+        state.lastCompletedIntermediateStop?.let { stop ->
+            emitOnce(
+                VoiceAnnouncement(
+                    id = "${route.routeId}:intermediate:${stop.sequence}:completed",
+                    text = "Tappa terminata. Riprendi il percorso.",
+                    stage = AnnouncementStage.NOW,
+                    kind = AnnouncementKind.ARRIVAL,
+                ),
+            )?.let { return it }
+        }
+        state.activeIntermediateStopVisit?.let { visit ->
+            return emitOnce(
+                VoiceAnnouncement(
+                    id = "${route.routeId}:intermediate:${visit.stop.sequence}:arrived",
+                    text = "Tappa intermedia raggiunta.",
+                    stage = AnnouncementStage.NOW,
+                    kind = AnnouncementKind.ARRIVAL,
+                ),
+            )
+        }
         state.nextFuelStop?.let { fuel ->
             if (state.phase == NavigationPhase.AT_FUEL_STOP) {
                 emitOnce(

@@ -135,6 +135,15 @@ class NavigationForegroundService : Service(), LocationListener {
             }
             return START_STICKY
         }
+        if (intent?.action == ACTION_COMPLETE_INTERMEDIATE_STOP) {
+            val completed = session.completeIntermediateStop(System.currentTimeMillis())
+            if (completed) {
+                Log.i(LOG_TAG, "intermediate stop completed by operator; navigation resumed")
+                replayRunnable?.let(handler::post)
+                processNavigationState(System.currentTimeMillis())
+            }
+            return START_STICKY
+        }
         session.start()
         if (!updateControllerStarted) {
             routeUpdateController.navigationStarted(System.currentTimeMillis())
@@ -283,6 +292,10 @@ class NavigationForegroundService : Service(), LocationListener {
                     )
                     return
                 }
+                if (session.state.value.activeIntermediateStopVisit != null) {
+                    Log.i(LOG_TAG, "demo replay paused at intermediate stop")
+                    return
+                }
                 position += 1
                 if (position < indexes.size) handler.postDelayed(this, REPLAY_INTERVAL_MILLIS)
             }
@@ -332,7 +345,10 @@ class NavigationForegroundService : Service(), LocationListener {
     private fun requestRouteUpdate(reason: RouteUpdateReason, nowEpochMillis: Long) {
         if (routeUpdateJob?.isActive == true) return
         val snapshot = session.state.value
-        if (snapshot.route == null || snapshot.activeFuelStopVisit != null) return
+        if (
+            snapshot.route == null || snapshot.activeFuelStopVisit != null ||
+            snapshot.activeIntermediateStopVisit != null
+        ) return
         if (reason == RouteUpdateReason.CONNECTIVITY_RECOVERY &&
             replayLifecycle.routeUpdateStarted()
         ) {
@@ -510,12 +526,15 @@ class NavigationForegroundService : Service(), LocationListener {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val refuelling = session.state.value.activeFuelStopVisit
+        val intermediateStop = session.state.value.activeIntermediateStopVisit
         val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_compass)
             .setContentTitle(getString(R.string.navigation_notification_title))
             .setContentText(
                 if (refuelling != null) {
                     "Rifornimento CNG · ${formatNotificationDuration(refuelling.remainingDwellSeconds)}"
+                } else if (intermediateStop != null) {
+                    "Tappa intermedia raggiunta"
                 } else if (session.state.value.reroutingStatus == ReroutingStatus.IN_PROGRESS) {
                     "Ricalcolo rotta"
                 } else {
@@ -539,6 +558,18 @@ class NavigationForegroundService : Service(), LocationListener {
             )
             builder.addAction(0, "Rifornimento completato", pendingComplete)
         }
+        if (intermediateStop != null) {
+            val completeIntent = Intent(this, NavigationForegroundService::class.java).apply {
+                action = ACTION_COMPLETE_INTERMEDIATE_STOP
+            }
+            val pendingComplete = PendingIntent.getService(
+                this,
+                3,
+                completeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(0, "Termina tappa", pendingComplete)
+        }
         return builder.build()
     }
 
@@ -553,6 +584,8 @@ class NavigationForegroundService : Service(), LocationListener {
             "org.compass.cng.navigation.SET_VOICE_GUIDANCE"
         const val ACTION_COMPLETE_FUEL_STOP =
             "org.compass.cng.navigation.COMPLETE_FUEL_STOP"
+        const val ACTION_COMPLETE_INTERMEDIATE_STOP =
+            "org.compass.cng.navigation.COMPLETE_INTERMEDIATE_STOP"
         const val EXTRA_VOICE_GUIDANCE_ENABLED = "voice_guidance_enabled"
         const val ACTION_STOP = "org.compass.cng.navigation.STOP"
         private const val NOTIFICATION_CHANNEL_ID = "compass_navigation"

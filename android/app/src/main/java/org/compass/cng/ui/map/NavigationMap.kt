@@ -12,13 +12,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import org.compass.cng.R
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraController
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.followTopPaddingPixels
+import org.compass.cng.navigation.resolvedBearingDegrees
 import org.compass.cng.navigation.routePortions
+import org.compass.cng.navigation.tracksVehiclePosition
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -31,6 +32,10 @@ import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.expressions.Expression.get
+import org.maplibre.android.style.expressions.Expression.interpolate
+import org.maplibre.android.style.expressions.Expression.linear
+import org.maplibre.android.style.expressions.Expression.stop
+import org.maplibre.android.style.expressions.Expression.zoom
 import org.maplibre.android.style.layers.Property.LINE_CAP_ROUND
 import org.maplibre.android.style.layers.Property.LINE_JOIN_ROUND
 import org.maplibre.android.style.layers.Property.ICON_ANCHOR_CENTER
@@ -94,7 +99,7 @@ fun NavigationMap(
         val scaleListener = object : MapLibreMap.OnScaleListener {
             override fun onScaleBegin(detector: StandardScaleGestureDetector) {
                 scaleGestureActive.value = true
-                if (currentCameraMode == NavigationCameraMode.FOLLOW) {
+                if (currentCameraMode.tracksVehiclePosition) {
                     registeredMap?.let { map ->
                         map.uiSettings.focalPoint = followPuckFocalPoint(
                             map,
@@ -110,7 +115,7 @@ fun NavigationMap(
 
             override fun onScaleEnd(detector: StandardScaleGestureDetector) {
                 scaleGestureActive.value = false
-                if (currentCameraMode == NavigationCameraMode.FOLLOW) {
+                if (currentCameraMode.tracksVehiclePosition) {
                     registeredMap?.let { map ->
                         manualFollowZoom.value = map.cameraPosition.zoom
                         Log.i(
@@ -121,7 +126,7 @@ fun NavigationMap(
                         updateCamera(
                             map = map,
                             state = currentNavigationState,
-                            cameraMode = NavigationCameraMode.FOLLOW,
+                            cameraMode = currentCameraMode,
                             cameraController = cameraController,
                             density = density,
                             viewportHeightPixels = mapView.height,
@@ -211,7 +216,9 @@ fun NavigationMap(
                     ?: cameraController.instruction(state).bearingDegrees
                 style.addImage(
                     NAVIGATION_VEHICLE_IMAGE,
-                    requireNotNull(mapView.context.getDrawable(R.drawable.ic_navigation_vehicle)),
+                    requireNotNull(
+                        mapView.context.getDrawable(appearance.navigationPuckDrawableRes()),
+                    ),
                 )
                 style.addSource(
                     GeoJsonSource(
@@ -222,7 +229,7 @@ fun NavigationMap(
                 state.navigationPosition?.let(puckAnimator::reset)
                 val vehicleLayer = SymbolLayer(PUCK_LAYER, PUCK_SOURCE).withProperties(
                         iconImage(NAVIGATION_VEHICLE_IMAGE),
-                        iconSize(NAVIGATION_PUCK_ICON_SCALE),
+                        iconSize(navigationPuckScaleExpression()),
                         iconPitchAlignment(ICON_PITCH_ALIGNMENT_VIEWPORT),
                         iconAnchor(ICON_ANCHOR_CENTER),
                         iconAllowOverlap(true),
@@ -259,9 +266,41 @@ fun NavigationMap(
                         textIgnorePlacement(true),
                     ),
                 )
+                val intermediateStopFeatures = route.intermediateStops.map { stop ->
+                    Feature.fromGeometry(
+                        Point.fromLngLat(stop.location.longitude, stop.location.latitude),
+                    )
+                }
+                style.addSource(
+                    GeoJsonSource(
+                        INTERMEDIATE_STOPS_SOURCE,
+                        FeatureCollection.fromFeatures(intermediateStopFeatures),
+                    ),
+                )
+                style.addLayer(
+                    CircleLayer(INTERMEDIATE_STOPS_LAYER, INTERMEDIATE_STOPS_SOURCE).withProperties(
+                        circleRadius(11f),
+                        circleColor(appearance.palette.selectedCng),
+                        circleStrokeColor(appearance.palette.markerStroke),
+                        circleStrokeWidth(2f),
+                    ),
+                )
+                style.addLayer(
+                    SymbolLayer(
+                        INTERMEDIATE_STOPS_TEXT_LAYER,
+                        INTERMEDIATE_STOPS_SOURCE,
+                    ).withProperties(
+                        textField("T"),
+                        textFont(arrayOf("Noto Sans Regular")),
+                        textSize(9f),
+                        textColor(appearance.palette.markerText),
+                        textAllowOverlap(true),
+                        textIgnorePlacement(true),
+                    ),
+                )
                 Log.i(
                     NAVIGATION_MAP_LOG_TAG,
-                    "map_symbols vehicle=arrow cng=badge " +
+                    "map_symbols vehicle=arrow cng=badge intermediate_stop=badge " +
                         "vehicle_alignment=${vehicleAlignment(cameraMode)}",
                 )
 
@@ -280,7 +319,7 @@ fun NavigationMap(
 
     LaunchedEffect(mapView, cameraMode, route.routeId, bottomObstructionPixels) {
         mapView.getMapAsync { map ->
-            if (cameraMode != NavigationCameraMode.FOLLOW) {
+            if (!cameraMode.tracksVehiclePosition) {
                 manualFollowZoom.value = null
             }
             configureNavigationGestures(
@@ -319,7 +358,7 @@ fun NavigationMap(
                 lineFeature(portions.remaining.map(::point)),
             )
             val cameraDrivenByPuck =
-                state.navigationPosition != null && cameraMode == NavigationCameraMode.FOLLOW
+                state.navigationPosition != null && cameraMode.tracksVehiclePosition
             state.navigationPosition?.let { position ->
                 puckAnimator.moveTo(
                     position = position,
@@ -337,7 +376,7 @@ fun NavigationMap(
                         navigationPuckFeature(pose.coordinate, pose.bearingDegrees),
                     )
                     if (
-                        currentCameraMode == NavigationCameraMode.FOLLOW &&
+                        currentCameraMode.tracksVehiclePosition &&
                         !scaleGestureActive.value
                     ) {
                         updateCamera(
@@ -348,7 +387,7 @@ fun NavigationMap(
                                     bearingDegrees = pose.bearingDegrees,
                                 ),
                             ),
-                            cameraMode = NavigationCameraMode.FOLLOW,
+                            cameraMode = currentCameraMode,
                             cameraController = cameraController,
                             density = density,
                             viewportHeightPixels = mapView.height,
@@ -425,14 +464,22 @@ private fun updateCamera(
                 )
             }
         }
-        NavigationCameraMode.FOLLOW -> {
+        NavigationCameraMode.FOLLOW,
+        NavigationCameraMode.NORTH_UP,
+        -> {
             val camera = cameraController.instruction(state)
             val bottomPaddingPixels = bottomObstructionPixels
                 .coerceIn(0, viewportHeightPixels)
-            val bearing = if (followImmediately) {
+            val followBearing = if (followImmediately) {
                 state.vehicleBearingDegrees ?: camera.bearingDegrees
             } else {
                 camera.bearingDegrees
+            }
+            val bearing = requireNotNull(cameraMode.resolvedBearingDegrees(followBearing))
+            val pitch = if (cameraMode == NavigationCameraMode.NORTH_UP) {
+                0.0
+            } else {
+                camera.pitchDegrees
             }
             map.uiSettings.focalPoint = followPuckFocalPoint(
                 map,
@@ -443,7 +490,7 @@ private fun updateCamera(
                 CameraPosition.Builder()
                     .target(LatLng(camera.target.latitude, camera.target.longitude))
                     .bearing(bearing)
-                    .tilt(camera.pitchDegrees)
+                    .tilt(pitch)
                     .zoom(zoomOverride ?: camera.zoom)
                     .padding(
                         0.0,
@@ -462,8 +509,8 @@ private fun updateCamera(
             } else {
                 Log.i(
                     NAVIGATION_MAP_LOG_TAG,
-                    "camera_instruction mode=follow bearing=${camera.bearingDegrees.toInt()} " +
-                        "pitch=${camera.pitchDegrees.toInt()} zoom=${camera.zoom} " +
+                    "camera_instruction mode=${cameraMode.name.lowercase()} " +
+                        "bearing=${bearing.toInt()} pitch=${pitch.toInt()} zoom=${camera.zoom} " +
                         "next_maneuver_spacing=${state.nextManeuver?.distanceMeters} " +
                         "target_alignment=puck_anchor",
                 )
@@ -479,7 +526,7 @@ private fun configureNavigationGestures(
     cameraConfig: NavigationCameraConfig,
     bottomObstructionPixels: Int,
 ) {
-    val following = cameraMode == NavigationCameraMode.FOLLOW
+    val following = cameraMode.tracksVehiclePosition
     map.uiSettings.apply {
         isRotateGesturesEnabled = !following
         isTiltGesturesEnabled = !following
@@ -587,5 +634,18 @@ private const val NAVIGATION_VEHICLE_IMAGE = "compass-navigation-vehicle"
 private const val FUEL_STOPS_SOURCE = "navigation-fuel-stops-source"
 private const val FUEL_STOPS_LAYER = "navigation-fuel-stops-layer"
 private const val FUEL_STOPS_TEXT_LAYER = "navigation-fuel-stops-text-layer"
+private const val INTERMEDIATE_STOPS_SOURCE = "navigation-intermediate-stops-source"
+private const val INTERMEDIATE_STOPS_LAYER = "navigation-intermediate-stops-layer"
+private const val INTERMEDIATE_STOPS_TEXT_LAYER = "navigation-intermediate-stops-text-layer"
 private const val NAVIGATION_MAP_LOG_TAG = "CompassNavigationUi"
 internal const val NAVIGATION_PUCK_ICON_SCALE = 1.10f
+internal const val NAVIGATION_PUCK_MIN_ICON_SCALE = NAVIGATION_PUCK_ICON_SCALE * 0.5f
+internal const val NAVIGATION_PUCK_MIN_SCALE_ZOOM = 10f
+internal const val NAVIGATION_PUCK_FULL_SCALE_ZOOM = 16f
+
+internal fun navigationPuckScaleExpression() = interpolate(
+    linear(),
+    zoom(),
+    stop(NAVIGATION_PUCK_MIN_SCALE_ZOOM, NAVIGATION_PUCK_MIN_ICON_SCALE),
+    stop(NAVIGATION_PUCK_FULL_SCALE_ZOOM, NAVIGATION_PUCK_ICON_SCALE),
+)

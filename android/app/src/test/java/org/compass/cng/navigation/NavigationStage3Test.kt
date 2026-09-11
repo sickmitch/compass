@@ -93,6 +93,34 @@ class NavigationStage3Test {
     }
 
     @Test
+    fun intermediateStopPausesManeuverSpeechUntilCompletion() {
+        val route = route("route_intermediate_voice")
+        val stop = NavigationIntermediateStop(1, route.geometry[1])
+        val visit = NavigationIntermediateStopVisit(stop, arrivedAtEpochMillis = 1_000L)
+        val controller = ManeuverController()
+        val paused = NavigationState(
+            phase = NavigationPhase.AT_INTERMEDIATE_STOP,
+            route = route.copy(intermediateStops = listOf(stop)),
+            currentManeuver = route.maneuvers.first(),
+            distanceToNextManeuverMeters = 10.0,
+            activeIntermediateStopVisit = visit,
+        )
+
+        assertEquals("Tappa intermedia raggiunta.", controller.nextAnnouncement(paused)?.text)
+        assertNull(controller.nextAnnouncement(paused))
+
+        val resumed = paused.copy(
+            phase = NavigationPhase.NAVIGATING,
+            activeIntermediateStopVisit = null,
+            lastCompletedIntermediateStop = stop,
+        )
+        assertEquals(
+            "Tappa terminata. Riprendi il percorso.",
+            controller.nextAnnouncement(resumed)?.text,
+        )
+    }
+
+    @Test
     fun updateControllerRefreshesAtFiveMinutesAndDeduplicatesOffRouteEpisode() {
         val controller = RouteUpdateController()
         val route = route("route_stage_3_refresh")

@@ -10,10 +10,18 @@ DestinationKind = Literal["business", "address", "locality", "unknown"]
 class DestinationSearchContext:
     location: Coordinate | None = None
     bias_radius_meters: float | None = None
+    route_bounds: tuple[Coordinate, Coordinate] | None = None
 
     def __post_init__(self) -> None:
         if self.bias_radius_meters is not None and not 1 <= self.bias_radius_meters <= 50_000:
             raise ValueError("destination bias radius must be between 1 and 50000 metres")
+        if self.route_bounds is not None:
+            south_west, north_east = self.route_bounds
+            if (
+                south_west.latitude > north_east.latitude
+                or south_west.longitude > north_east.longitude
+            ):
+                raise ValueError("destination route bounds are inverted")
 
 
 @dataclass(frozen=True, slots=True)

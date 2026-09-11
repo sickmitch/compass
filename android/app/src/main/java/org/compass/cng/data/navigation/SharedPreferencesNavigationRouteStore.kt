@@ -23,6 +23,8 @@ import org.compass.cng.navigation.NavigationFuelPlan
 import org.compass.cng.navigation.NavigationFuelStop
 import org.compass.cng.navigation.NavigationFuelStopCompletionMode
 import org.compass.cng.navigation.NavigationFuelStopVisit
+import org.compass.cng.navigation.NavigationIntermediateStop
+import org.compass.cng.navigation.NavigationIntermediateStopVisit
 import org.compass.cng.navigation.NavigationLeg
 import org.compass.cng.navigation.NavigationLocationMode
 import org.compass.cng.navigation.NavigationPosition
@@ -93,14 +95,14 @@ internal class NavigationRouteDocumentCodec(
 
 @Serializable
 private data class StoredNavigationRouteDocument(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val cachedAtEpochMillis: Long,
     val navigationWasActive: Boolean,
     val route: StoredNavigationRoute,
     val progress: StoredNavigationProgress? = null,
 ) {
     init {
-        require(schemaVersion in 1..2) { "unsupported navigation cache schema" }
+        require(schemaVersion in 1..3) { "unsupported navigation cache schema" }
         require(cachedAtEpochMillis >= 0) { "invalid navigation cache timestamp" }
     }
 
@@ -172,6 +174,24 @@ private data class StoredFuelStopVisit(
 }
 
 @Serializable
+private data class StoredIntermediateStopVisit(
+    val stopSequence: Int,
+    val arrivedAtEpochMillis: Long,
+) {
+    fun toDomain(route: NavigationRoute): NavigationIntermediateStopVisit? =
+        route.intermediateStops.firstOrNull { it.sequence == stopSequence }?.let {
+            NavigationIntermediateStopVisit(it, arrivedAtEpochMillis)
+        }
+
+    companion object {
+        fun fromDomain(value: NavigationIntermediateStopVisit) = StoredIntermediateStopVisit(
+            value.stop.sequence,
+            value.arrivedAtEpochMillis,
+        )
+    }
+}
+
+@Serializable
 private data class StoredNavigationProgress(
     val savedAtEpochMillis: Long,
     val navigationPosition: StoredNavigationPosition?,
@@ -191,6 +211,9 @@ private data class StoredNavigationProgress(
     val voiceGuidanceEnabled: Boolean,
     val lastSuccessfulRouteRefreshEpochMillis: Long?,
     val locationMode: String = "DEVICE",
+    val completedIntermediateStopSequences: Set<Int> = emptySet(),
+    val activeIntermediateStopVisit: StoredIntermediateStopVisit? = null,
+    val lastCompletedIntermediateStopSequence: Int? = null,
 ) {
     fun toDomain(route: NavigationRoute) = NavigationProgressSnapshot(
         savedAtEpochMillis = savedAtEpochMillis,
@@ -211,6 +234,9 @@ private data class StoredNavigationProgress(
         voiceGuidanceEnabled = voiceGuidanceEnabled,
         lastSuccessfulRouteRefreshEpochMillis = lastSuccessfulRouteRefreshEpochMillis,
         locationMode = NavigationLocationMode.valueOf(locationMode),
+        completedIntermediateStopSequences = completedIntermediateStopSequences,
+        activeIntermediateStopVisit = activeIntermediateStopVisit?.toDomain(route),
+        lastCompletedIntermediateStopSequence = lastCompletedIntermediateStopSequence,
     )
 
     companion object {
@@ -233,6 +259,9 @@ private data class StoredNavigationProgress(
             value.voiceGuidanceEnabled,
             value.lastSuccessfulRouteRefreshEpochMillis,
             value.locationMode.name,
+            value.completedIntermediateStopSequences,
+            value.activeIntermediateStopVisit?.let(StoredIntermediateStopVisit::fromDomain),
+            value.lastCompletedIntermediateStopSequence,
         )
     }
 }
@@ -460,6 +489,23 @@ private data class StoredFuelStop(
 }
 
 @Serializable
+private data class StoredIntermediateStop(
+    val sequence: Int,
+    val location: StoredCoordinate,
+    val mapLabel: String = "Tappa intermedia",
+) {
+    fun toDomain() = NavigationIntermediateStop(sequence, location.toDomain(), mapLabel)
+
+    companion object {
+        fun fromDomain(value: NavigationIntermediateStop) = StoredIntermediateStop(
+            value.sequence,
+            StoredCoordinate.fromDomain(value.location),
+            value.mapLabel,
+        )
+    }
+}
+
+@Serializable
 private data class StoredOpeningAtEta(
     val state: String,
     val validation: String,
@@ -571,6 +617,7 @@ private data class StoredNavigationRoute(
     val legs: List<StoredNavigationLeg>,
     val maneuvers: List<StoredManeuver>,
     val fuelStops: List<StoredFuelStop>,
+    val intermediateStops: List<StoredIntermediateStop> = emptyList(),
     val fuelPlan: StoredFuelPlan?,
     val timing: StoredNavigationTiming,
     val provider: String,
@@ -579,12 +626,23 @@ private data class StoredNavigationRoute(
     val speedLimitSource: String? = null,
 ) {
     fun toDomain() = NavigationRoute(
-        routeId, origin.toDomain(), destination.toDomain(), totalDistanceMeters,
-        drivingDurationSeconds, totalTripDurationSeconds,
-        geometry.map(StoredCoordinate::toDomain), legs.map(StoredNavigationLeg::toDomain),
-        maneuvers.map(StoredManeuver::toDomain), fuelStops.map(StoredFuelStop::toDomain),
-        fuelPlan?.toDomain(), timing.toDomain(), provider, gasolineFallback?.toDomain(),
-        speedLimits.map(StoredRouteSpeedLimit::toDomain), speedLimitSource,
+        routeId = routeId,
+        origin = origin.toDomain(),
+        destination = destination.toDomain(),
+        totalDistanceMeters = totalDistanceMeters,
+        drivingDurationSeconds = drivingDurationSeconds,
+        totalTripDurationSeconds = totalTripDurationSeconds,
+        geometry = geometry.map(StoredCoordinate::toDomain),
+        legs = legs.map(StoredNavigationLeg::toDomain),
+        maneuvers = maneuvers.map(StoredManeuver::toDomain),
+        fuelStops = fuelStops.map(StoredFuelStop::toDomain),
+        intermediateStops = intermediateStops.map(StoredIntermediateStop::toDomain),
+        fuelPlan = fuelPlan?.toDomain(),
+        timing = timing.toDomain(),
+        provider = provider,
+        gasolineFallback = gasolineFallback?.toDomain(),
+        speedLimits = speedLimits.map(StoredRouteSpeedLimit::toDomain),
+        speedLimitSource = speedLimitSource,
     )
 
     companion object {
@@ -595,7 +653,9 @@ private data class StoredNavigationRoute(
             value.geometry.map(StoredCoordinate::fromDomain),
             value.legs.map(StoredNavigationLeg::fromDomain),
             value.maneuvers.map(StoredManeuver::fromDomain),
-            value.fuelStops.map(StoredFuelStop::fromDomain), value.fuelPlan?.let(StoredFuelPlan::fromDomain),
+            value.fuelStops.map(StoredFuelStop::fromDomain),
+            value.intermediateStops.map(StoredIntermediateStop::fromDomain),
+            value.fuelPlan?.let(StoredFuelPlan::fromDomain),
             StoredNavigationTiming.fromDomain(value.timing), value.provider,
             value.gasolineFallback?.let(StoredGasolineFallback::fromDomain),
             value.speedLimits.map(StoredRouteSpeedLimit::fromDomain), value.speedLimitSource,

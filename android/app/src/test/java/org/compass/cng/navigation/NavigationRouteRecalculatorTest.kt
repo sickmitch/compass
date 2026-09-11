@@ -17,6 +17,7 @@ import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithCngStop
+import org.compass.cng.domain.model.RouteWithIntermediateStop
 import org.compass.cng.domain.model.SelectedCngStop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -50,6 +51,40 @@ class NavigationRouteRecalculatorTest {
         recalculator.recalculate(state, RouteUpdateReason.CONNECTIVITY_RECOVERY)
         assertEquals(snapped, repository.lastOrigin)
         assertEquals(original.destination, repository.lastDestination)
+    }
+
+    @Test
+    fun reroutePreservesPendingIntermediateStopWithoutAddingDwellTime() = runTest {
+        val repository = RecordingRepository()
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val intermediate = Coordinate(44.5, 10.0)
+        val destination = Coordinate(44.0, 11.0)
+        val original = repository.routeWithIntermediateStop(
+            origin,
+            intermediate,
+            destination,
+        ).toNavigationRoute()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = original,
+            rawLocation = NavigationLocation(origin, 5.0, 10.0, 90.0, 1_000),
+            navigationPosition = position(origin),
+            nextIntermediateStop = NavigationIntermediateStopProgress(
+                stop = original.intermediateStops.single(),
+                distanceRemainingMeters = 1_000.0,
+            ),
+        )
+
+        val recalculated = recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
+
+        assertEquals(intermediate, repository.lastIntermediateStop)
+        assertEquals(listOf(intermediate), recalculated.intermediateStops.map { it.location })
+        assertEquals(
+            recalculated.drivingDurationSeconds,
+            recalculated.totalTripDurationSeconds,
+            0.0,
+        )
     }
 
     @Test
@@ -259,6 +294,7 @@ class NavigationRouteRecalculatorTest {
         var lastReserveRangeKm: Double? = null
         var lastMaximumDetourMinutes: Double? = null
         var lastExcludedIds: Set<String>? = null
+        var lastIntermediateStop: Coordinate? = null
         var failNextItinerary: Boolean = false
 
         override suspend fun previewRoute(
@@ -279,6 +315,39 @@ class NavigationRouteRecalculatorTest {
             maneuvers = emptyList(),
             provider = "valhalla",
         )
+
+        override suspend fun routeWithIntermediateStop(
+            origin: Coordinate,
+            intermediateStop: Coordinate,
+            destination: Coordinate,
+        ): RouteWithIntermediateStop {
+            lastOrigin = origin
+            lastIntermediateStop = intermediateStop
+            lastDestination = destination
+            val legs = listOf(
+                route(origin, intermediateStop),
+                route(intermediateStop, destination),
+            )
+            return RouteWithIntermediateStop(
+                stop = intermediateStop,
+                distanceMeters = legs.sumOf(RoutePreview::distanceMeters),
+                durationSeconds = legs.sumOf(RoutePreview::durationSeconds),
+                legs = legs,
+                provider = "valhalla",
+                navigation = NavigationTiming(
+                    routeId = "intermediate",
+                    drivingDurationSeconds = 200.0,
+                    remainingDrivingDurationSeconds = 200.0,
+                    refuelingStopCount = 0,
+                    dwellSecondsPerRefuelingStop = 1_200,
+                    totalRefuelingDwellSeconds = 0.0,
+                    totalTripDurationSeconds = 200.0,
+                    departureAt = null,
+                    drivingArrivalAt = null,
+                    tripArrivalAt = null,
+                ),
+            )
+        }
 
         override suspend fun rankedCngStations(
             origin: Coordinate,

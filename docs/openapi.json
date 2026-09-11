@@ -693,6 +693,23 @@
         "title": "DataSourceFreshnessResponse",
         "type": "object"
       },
+      "DestinationBoundsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "north_east": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          },
+          "south_west": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          }
+        },
+        "required": [
+          "south_west",
+          "north_east"
+        ],
+        "title": "DestinationBoundsRequest",
+        "type": "object"
+      },
       "DestinationContextRequest": {
         "additionalProperties": false,
         "properties": {
@@ -713,6 +730,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/SearchCoordinateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route_bounds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DestinationBoundsRequest"
               },
               {
                 "type": "null"
@@ -1452,6 +1479,267 @@
           "traffic"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "IntermediateStopRouteLegResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/RouteGeometry"
+          },
+          "kind": {
+            "enum": [
+              "origin_to_intermediate_stop",
+              "intermediate_stop_to_destination"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "maneuvers": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverResponse"
+            },
+            "title": "Maneuvers",
+            "type": "array"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "speed_limit_source": {
+            "anyOf": [
+              {
+                "const": "valhalla_graph",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Source"
+          },
+          "speed_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSpeedLimitResponse"
+            },
+            "title": "Speed Limits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "origin",
+          "destination",
+          "distance_meters",
+          "duration_seconds",
+          "geometry",
+          "maneuvers",
+          "speed_limits",
+          "speed_limit_source"
+        ],
+        "title": "IntermediateStopRouteLegResponse",
+        "type": "object"
+      },
+      "IntermediateStopRouteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "title": "Departure At"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "intermediate_stop": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "intermediate_stop"
+        ],
+        "title": "IntermediateStopRouteRequest",
+        "type": "object"
+      },
+      "IntermediateStopsRouteLegResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/RouteGeometry"
+          },
+          "kind": {
+            "enum": [
+              "origin_to_intermediate_stop",
+              "intermediate_stop_to_intermediate_stop",
+              "intermediate_stop_to_destination"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "maneuvers": {
+            "items": {
+              "$ref": "#/components/schemas/ManeuverResponse"
+            },
+            "title": "Maneuvers",
+            "type": "array"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "speed_limit_source": {
+            "anyOf": [
+              {
+                "const": "valhalla_graph",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Source"
+          },
+          "speed_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSpeedLimitResponse"
+            },
+            "title": "Speed Limits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sequence",
+          "kind",
+          "origin",
+          "destination",
+          "distance_meters",
+          "duration_seconds",
+          "geometry",
+          "maneuvers",
+          "speed_limits",
+          "speed_limit_source"
+        ],
+        "title": "IntermediateStopsRouteLegResponse",
+        "type": "object"
+      },
+      "IntermediateStopsRouteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "costing": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Costing",
+            "type": "string"
+          },
+          "departure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "title": "Departure At"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "intermediate_stops": {
+            "items": {
+              "$ref": "#/components/schemas/CoordinateRequest"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Intermediate Stops",
+            "type": "array"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}(-[A-Za-z]{2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCP 47 language tag used for maneuver instructions.",
+            "title": "Language"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "intermediate_stops"
+        ],
+        "title": "IntermediateStopsRouteRequest",
         "type": "object"
       },
       "ManeuverResponse": {
@@ -4032,6 +4320,102 @@
         "title": "RouteWithCngStopResponse",
         "type": "object"
       },
+      "RouteWithIntermediateStopResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "intermediate_stop": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/IntermediateStopRouteLegResponse"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Legs",
+            "type": "array"
+          },
+          "navigation": {
+            "$ref": "#/components/schemas/NavigationTimingResponse"
+          },
+          "provider": {
+            "const": "valhalla",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intermediate_stop",
+          "distance_meters",
+          "duration_seconds",
+          "legs",
+          "provider",
+          "navigation"
+        ],
+        "title": "RouteWithIntermediateStopResponse",
+        "type": "object"
+      },
+      "RouteWithIntermediateStopsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "intermediate_stops": {
+            "items": {
+              "$ref": "#/components/schemas/CoordinateRequest"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Intermediate Stops",
+            "type": "array"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/IntermediateStopsRouteLegResponse"
+            },
+            "maxItems": 9,
+            "minItems": 2,
+            "title": "Legs",
+            "type": "array"
+          },
+          "navigation": {
+            "$ref": "#/components/schemas/NavigationTimingResponse"
+          },
+          "provider": {
+            "const": "valhalla",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intermediate_stops",
+          "distance_meters",
+          "duration_seconds",
+          "legs",
+          "provider",
+          "navigation"
+        ],
+        "title": "RouteWithIntermediateStopsResponse",
+        "type": "object"
+      },
       "SearchCoordinateResponse": {
         "additionalProperties": false,
         "properties": {
@@ -6041,6 +6425,158 @@
         "summary": "Route With Cng Stop",
         "tags": [
           "stations"
+        ]
+      }
+    },
+    "/api/v1/routes/with-intermediate-stop": {
+      "post": {
+        "operationId": "route_with_intermediate_stop_api_v1_routes_with_intermediate_stop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntermediateStopRouteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteWithIntermediateStopResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No route was found through the stop."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Routing provider unavailable."
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Route With Intermediate Stop",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/routes/with-intermediate-stops": {
+      "post": {
+        "operationId": "route_with_intermediate_stops_api_v1_routes_with_intermediate_stops_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntermediateStopsRouteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteWithIntermediateStopsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No route was found through the stops."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid routing provider response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Routing provider unavailable."
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Route With Intermediate Stops",
+        "tags": [
+          "routing"
         ]
       }
     },

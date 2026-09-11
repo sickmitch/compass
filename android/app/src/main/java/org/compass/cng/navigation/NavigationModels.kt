@@ -10,6 +10,8 @@ import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithCngStop
+import org.compass.cng.domain.model.RouteWithIntermediateStop
+import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.model.SelectedCngStop
 import java.time.Instant
 
@@ -20,6 +22,7 @@ enum class NavigationPhase {
     APPROACHING_MANEUVER,
     APPROACHING_FUEL_STOP,
     AT_FUEL_STOP,
+    AT_INTERMEDIATE_STOP,
     REROUTING,
     GPS_LOST,
     ARRIVED,
@@ -40,6 +43,19 @@ data class NavigationFuelStop(
     val operator: String? = null,
     val price: CngPrice? = null,
 )
+
+data class NavigationIntermediateStop(
+    val sequence: Int,
+    val location: Coordinate,
+    val mapLabel: String = "Tappa intermedia",
+)
+
+enum class NavigationIntermediateStopLifecycle {
+    PLANNED,
+    APPROACHING,
+    ARRIVED,
+    COMPLETED,
+}
 
 enum class NavigationFuelStopLifecycle {
     PLANNED,
@@ -95,6 +111,7 @@ data class NavigationRoute(
     val legs: List<NavigationLeg>,
     val maneuvers: List<Maneuver>,
     val fuelStops: List<NavigationFuelStop>,
+    val intermediateStops: List<NavigationIntermediateStop> = emptyList(),
     val fuelPlan: NavigationFuelPlan? = null,
     val timing: NavigationTiming,
     val provider: String,
@@ -162,6 +179,11 @@ data class NavigationState(
     val fuelStopProgress: List<NavigationFuelStopProgress> = emptyList(),
     val activeFuelStopVisit: NavigationFuelStopVisit? = null,
     val lastCompletedFuelStop: NavigationFuelStop? = null,
+    val nextIntermediateStop: NavigationIntermediateStopProgress? = null,
+    val intermediateStopProgress: List<NavigationIntermediateStopProgress> = emptyList(),
+    val activeIntermediateStopVisit: NavigationIntermediateStopVisit? = null,
+    val lastCompletedIntermediateStop: NavigationIntermediateStop? = null,
+    val lastIntermediateStopCompletionMode: NavigationIntermediateStopCompletionMode? = null,
     val offRouteStatus: OffRouteStatus = OffRouteStatus.ON_ROUTE,
     val distanceFromRouteMeters: Double? = null,
     val routeMatchConfidence: Double? = null,
@@ -278,6 +300,28 @@ data class NavigationFuelStopProgress(
     val estimatedArrivalAt: Instant? = null,
 )
 
+data class NavigationIntermediateStopProgress(
+    val stop: NavigationIntermediateStop,
+    val distanceRemainingMeters: Double,
+    val lifecycle: NavigationIntermediateStopLifecycle =
+        NavigationIntermediateStopLifecycle.PLANNED,
+    val estimatedArrivalAt: Instant? = null,
+)
+
+enum class NavigationIntermediateStopCompletionMode {
+    USER_CONFIRMATION,
+    GPS_DEPARTURE,
+}
+
+data class NavigationIntermediateStopVisit(
+    val stop: NavigationIntermediateStop,
+    val arrivedAtEpochMillis: Long,
+) {
+    init {
+        require(arrivedAtEpochMillis >= 0L)
+    }
+}
+
 enum class NavigationFuelStopCompletionMode {
     USER_CONFIRMATION,
 }
@@ -339,10 +383,31 @@ fun RouteWithCngItinerary.toNavigationRoute(
     excludedMimitStationIds = excludedMimitStationIds,
 )
 
+fun RouteWithIntermediateStop.toNavigationRoute(): NavigationRoute = buildNavigationRoute(
+    route = asRoutePreview(),
+    sourceLegs = legs,
+    stops = emptyList(),
+    intermediateStops = listOf(
+        NavigationIntermediateStop(sequence = 1, location = stop),
+    ),
+    rangeLegs = emptyList(),
+)
+
+fun RouteWithIntermediateStops.toNavigationRoute(): NavigationRoute = buildNavigationRoute(
+    route = asRoutePreview(),
+    sourceLegs = legs,
+    stops = emptyList(),
+    intermediateStops = stops.mapIndexed { index, stop ->
+        NavigationIntermediateStop(sequence = index + 1, location = stop)
+    },
+    rangeLegs = emptyList(),
+)
+
 private fun buildNavigationRoute(
     route: RoutePreview,
     sourceLegs: List<RoutePreview>,
     stops: List<SelectedCngStop>,
+    intermediateStops: List<NavigationIntermediateStop> = emptyList(),
     rangeLegs: List<NavigationRangeLeg>,
     maximumDetourMinutes: Double? = null,
     excludedMimitStationIds: Set<String> = emptySet(),
@@ -396,6 +461,7 @@ private fun buildNavigationRoute(
         legs = navigationLegs,
         maneuvers = navigationLegs.flatMap(NavigationLeg::maneuvers),
         fuelStops = stops.mapIndexed { index, stop -> stop.toNavigationFuelStop(index + 1) },
+        intermediateStops = intermediateStops,
         fuelPlan = rangeLegs.firstOrNull()?.let { first ->
             NavigationFuelPlan(
                 effectiveCngRangeKm = rangeLegs.drop(1)

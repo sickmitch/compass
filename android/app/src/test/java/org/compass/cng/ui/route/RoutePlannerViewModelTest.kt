@@ -44,6 +44,9 @@ import org.compass.cng.domain.model.RankingBreakdown
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
+import org.compass.cng.domain.model.RouteWithIntermediateStop
+import org.compass.cng.domain.model.RouteWithIntermediateStops
+import org.compass.cng.domain.model.asMultiple
 import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.domain.server.InMemoryServerConnectionRepository
 import org.compass.cng.domain.server.ServerConnection
@@ -210,7 +213,7 @@ class RoutePlannerViewModelTest {
         assertEquals(1, repository.previewCalls)
         assertEquals(searchedOrigin.location, repository.lastPreviewOrigin)
         assertEquals(currentDestination, repository.lastPreviewDestination)
-        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
         assertFalse(viewModel.uiState.value.routeInputsDirty)
     }
 
@@ -233,6 +236,238 @@ class RoutePlannerViewModelTest {
 
         viewModel.openPredictiveRange()
         assertEquals(PlannerStage.CONFIGURE_PREDICTIVE, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun intermediateStopDefaultsToThirtyPercentAndUsesWaypointRouting() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0)
+        val stop = Coordinate(45.0, 10.0)
+        val via = RouteWithIntermediateStop(
+            stop = stop,
+            distanceMeters = 125_000.0,
+            durationSeconds = 4_000.0,
+            legs = listOf(
+                sampleRoute(
+                    origin = direct.origin,
+                    destination = stop,
+                    distanceMeters = 50_000.0,
+                    durationSeconds = 1_600.0,
+                ),
+                sampleRoute(
+                    origin = stop,
+                    destination = direct.destination,
+                    distanceMeters = 75_000.0,
+                    durationSeconds = 2_400.0,
+                ),
+            ),
+            provider = "valhalla",
+            navigation = direct.navigation.copy(
+                routeId = "route_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                drivingDurationSeconds = 4_000.0,
+                remainingDrivingDurationSeconds = 4_000.0,
+                totalTripDurationSeconds = 4_000.0,
+            ),
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            intermediateRouteResult = Result.success(via),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openRouteConfiguration()
+
+        viewModel.addIntermediateStop()
+        assertEquals("30,0", viewModel.uiState.value.intermediateStopMaximumDeviationKmInput)
+        viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.updateMapPickerCoordinate(stop)
+        viewModel.confirmMapPointPicker()
+        viewModel.chooseIntermediateStop()
+
+        assertEquals(1, repository.intermediateRouteCalls)
+        assertEquals(stop, repository.lastIntermediateStop)
+        assertEquals(via.asMultiple(), viewModel.uiState.value.intermediateStopsRoute)
+        assertEquals(listOf(stop), viewModel.uiState.value.plannedIntermediateStops.map { it.location })
+        assertFalse(viewModel.uiState.value.routeInputsDirty)
+    }
+
+    @Test
+    fun intermediateStopSearchUsesRouteBoundsWithoutPointBias() = runTest {
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute(distanceMeters = 100_000.0)),
+        )
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.addIntermediateStop()
+        viewModel.openPlaceSearch(RouteEndpoint.INTERMEDIATE_STOP)
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, emptyList()),
+        )
+
+        viewModel.updatePlaceSearchQuery("farmacia")
+        viewModel.searchDestinations()
+
+        val context = requireNotNull(repository.lastDestinationSuggestRequest).context
+        assertNull(context.biasRadiusMeters)
+        val bounds = requireNotNull(context.routeBounds)
+        assertTrue(bounds.southWest.latitude < sampleRoute().geometry.minOf { it.latitude })
+        assertTrue(bounds.northEast.longitude > sampleRoute().geometry.maxOf { it.longitude })
+    }
+
+    @Test
+    fun searchedIntermediateStopIsPreviewedOnMapBeforeExplicitChoice() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0)
+        val suggestion = destinationSuggestion()
+        val resolved = resolvedDestination(suggestion)
+        val stop = resolved.navigationTarget.location
+        val via = RouteWithIntermediateStop(
+            stop = stop,
+            distanceMeters = 112_000.0,
+            durationSeconds = 4_200.0,
+            legs = listOf(
+                sampleRoute(
+                    origin = direct.origin,
+                    destination = stop,
+                    distanceMeters = 38_000.0,
+                    durationSeconds = 1_400.0,
+                ),
+                sampleRoute(
+                    origin = stop,
+                    destination = direct.destination,
+                    distanceMeters = 74_000.0,
+                    durationSeconds = 2_800.0,
+                ),
+            ),
+            provider = "valhalla",
+            navigation = direct.navigation.copy(
+                routeId = "route_cccccccccccccccccccccccccccccccc",
+                drivingDurationSeconds = 4_200.0,
+                remainingDrivingDurationSeconds = 4_200.0,
+                totalTripDurationSeconds = 4_200.0,
+            ),
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            intermediateRouteResult = Result.success(via),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openRouteConfiguration()
+        viewModel.addIntermediateStop()
+        viewModel.openPlaceSearch(RouteEndpoint.INTERMEDIATE_STOP)
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, listOf(suggestion)),
+        )
+        repository.resolvedDestinationResult = Result.success(resolved.copy(sessionId = session))
+        viewModel.updatePlaceSearchQuery("Duomo di Milano")
+        viewModel.searchDestinations()
+
+        viewModel.selectDestinationSuggestion(suggestion)
+
+        val preview = viewModel.uiState.value
+        assertEquals(PlannerStage.INTERMEDIATE_STOP_PREVIEW, preview.stage)
+        assertEquals(via.asMultiple(), preview.pendingIntermediateStopsRoute)
+        assertEquals("Non selezionata", preview.intermediateStopDisplayName)
+        assertTrue(preview.destinationSuggestions.isEmpty())
+
+        viewModel.chooseIntermediateStop()
+
+        val chosen = viewModel.uiState.value
+        assertEquals(PlannerStage.INTERMEDIATE_STOPS, chosen.stage)
+        assertEquals(listOf(stop), chosen.plannedIntermediateStops.map { it.location })
+        assertEquals(via.asMultiple(), chosen.intermediateStopsRoute)
+        assertEquals(direct, chosen.baseRoute)
+        assertFalse(chosen.routeInputsDirty)
+        assertNull(chosen.pendingIntermediateStopsRoute)
+    }
+
+    @Test
+    fun intermediateStopOverExactRoadDeviationIsRejected() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0)
+        val stop = Coordinate(45.0, 10.0)
+        val via = RouteWithIntermediateStop(
+            stop = stop,
+            distanceMeters = 140_000.0,
+            durationSeconds = 4_000.0,
+            legs = listOf(
+                sampleRoute(
+                    origin = direct.origin,
+                    destination = stop,
+                    distanceMeters = 70_000.0,
+                ),
+                sampleRoute(
+                    origin = stop,
+                    destination = direct.destination,
+                    distanceMeters = 70_000.0,
+                ),
+            ),
+            provider = "valhalla",
+            navigation = direct.navigation.copy(
+                routeId = "route_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                drivingDurationSeconds = 4_000.0,
+                remainingDrivingDurationSeconds = 4_000.0,
+                totalTripDurationSeconds = 4_000.0,
+            ),
+        )
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(
+                baseResult = Result.success(direct),
+                intermediateRouteResult = Result.success(via),
+            ),
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.addIntermediateStop()
+        viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.updateMapPickerCoordinate(stop)
+        viewModel.confirmMapPointPicker()
+
+        assertNull(viewModel.uiState.value.intermediateStopsRoute)
+        assertTrue(viewModel.uiState.value.plannedIntermediateStops.isEmpty())
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("40,0 km"))
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("30,0 km"))
+    }
+
+    @Test
+    fun multipleIntermediateStopsCanBeReorderedBeforeTheCommonSummary() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0)
+        val first = Coordinate(45.1, 10.1)
+        val second = Coordinate(45.2, 10.2)
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            multipleIntermediateRouteFactory = { stops ->
+                val points = listOf(direct.origin) + stops + direct.destination
+                RouteWithIntermediateStops(
+                    stops = stops,
+                    distanceMeters = 110_000.0 + stops.size * 1_000.0,
+                    durationSeconds = 4_000.0 + stops.size * 60.0,
+                    legs = points.zipWithNext().map { (origin, destination) ->
+                        sampleRoute(origin = origin, destination = destination)
+                    },
+                    provider = "valhalla",
+                    navigation = direct.navigation,
+                )
+            },
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.addIntermediateStop()
+
+        listOf(first, second).forEach { coordinate ->
+            viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
+            viewModel.updateMapPickerCoordinate(coordinate)
+            viewModel.confirmMapPointPicker()
+            viewModel.chooseIntermediateStop()
+        }
+        viewModel.moveIntermediateStop(1, 0)
+        viewModel.calculateIntermediateStopsRoute()
+
+        assertEquals(listOf(second, first), repository.lastIntermediateStops)
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(
+            listOf(second, first),
+            viewModel.navigationState.value.route?.intermediateStops?.map { it.location },
+        )
     }
 
     @Test
@@ -448,7 +683,7 @@ class RoutePlannerViewModelTest {
         assertEquals(florence, viewModel.uiState.value.baseRoute?.destination)
         assertEquals("41.902800", viewModel.uiState.value.originLatitudeInput)
         assertEquals("11.255800", viewModel.uiState.value.destinationLongitudeInput)
-        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
         assertFalse(viewModel.uiState.value.routeInputsDirty)
         assertNull(viewModel.uiState.value.rankedStations)
         assertNull(viewModel.uiState.value.selectedRoute)
@@ -630,7 +865,7 @@ class RoutePlannerViewModelTest {
         assertEquals(current, repository.lastPreviewOrigin)
         assertEquals(current, viewModel.uiState.value.baseRoute?.origin)
         assertEquals("Posizione attuale", viewModel.uiState.value.originDisplayName)
-        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
         assertFalse(viewModel.uiState.value.routeInputsDirty)
     }
 
@@ -868,7 +1103,8 @@ class RoutePlannerViewModelTest {
         assertEquals(100.0, repository.lastItineraryEffectiveRangeKm, 0.0)
         assertEquals(65.0, repository.lastRemainingRangeKm, 0.0)
         assertEquals(30.0, repository.lastReserveRangeKm, 0.0)
-        assertEquals(PlannerStage.SELECTED_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(NavigationPhase.ROUTE_PREVIEW, viewModel.navigationState.value.phase)
         assertEquals(routed.selectedStops.map { it.mimitStationId }, viewModel.uiState.value
             .selectedItineraryRoute?.selectedStops?.map { it.mimitStationId })
         assertEquals(
@@ -964,7 +1200,8 @@ class RoutePlannerViewModelTest {
         assertEquals("43690", repository.lastSelectedStationId)
         assertEquals(sampleRoute().origin, repository.lastSelectedOrigin)
         assertEquals(sampleRoute().destination, repository.lastSelectedDestination)
-        assertEquals(PlannerStage.SELECTED_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(NavigationPhase.ROUTE_PREVIEW, viewModel.navigationState.value.phase)
         assertEquals(selectedRoute.selectedStop.mimitStationId, viewModel.uiState.value
             .selectedRoute?.selectedStop?.mimitStationId)
         assertEquals(
@@ -1134,6 +1371,11 @@ class RoutePlannerViewModelTest {
         private val selectedItineraryResult: Result<RouteWithCngItinerary> = Result.failure(
             AssertionError("routeWithCngItinerary was not expected"),
         ),
+        private val intermediateRouteResult: Result<RouteWithIntermediateStop> = Result.failure(
+            AssertionError("routeWithIntermediateStop was not expected"),
+        ),
+        private val multipleIntermediateRouteFactory:
+            ((List<Coordinate>) -> RouteWithIntermediateStops)? = null,
         private val placeSearchResult: Result<PlaceSearchResults> = Result.failure(
             AssertionError("searchPlaces was not expected"),
         ),
@@ -1147,6 +1389,9 @@ class RoutePlannerViewModelTest {
         var previewCalls = 0
         var destinationSuggestCalls = 0
         var destinationResolveCalls = 0
+        var intermediateRouteCalls = 0
+        var lastIntermediateStop: Coordinate? = null
+        var lastIntermediateStops: List<Coordinate>? = null
         var lastDestinationSuggestRequest: DestinationSuggestRequest? = null
         var candidateCalls = 0
         var predictiveCalls = 0
@@ -1208,6 +1453,28 @@ class RoutePlannerViewModelTest {
                     geometry = listOf(origin, destination),
                 )
             }
+        }
+
+        override suspend fun routeWithIntermediateStop(
+            origin: Coordinate,
+            intermediateStop: Coordinate,
+            destination: Coordinate,
+        ): RouteWithIntermediateStop {
+            intermediateRouteCalls += 1
+            lastIntermediateStop = intermediateStop
+            return intermediateRouteResult.getOrThrow()
+        }
+
+        override suspend fun routeWithIntermediateStops(
+            origin: Coordinate,
+            intermediateStops: List<Coordinate>,
+            destination: Coordinate,
+        ): RouteWithIntermediateStops {
+            lastIntermediateStops = intermediateStops
+            lastIntermediateStop = intermediateStops.singleOrNull()
+            intermediateRouteCalls += 1
+            return multipleIntermediateRouteFactory?.invoke(intermediateStops)
+                ?: intermediateRouteResult.getOrThrow().asMultiple()
         }
 
         override suspend fun rankedCngStations(

@@ -39,6 +39,12 @@ router = APIRouter(prefix="/api/v1", tags=["place-search"])
 class DestinationContextRequest(StrictModel):
     location: SearchCoordinateResponse | None = None
     bias_radius_meters: float | None = Field(default=None, ge=1, le=50_000)
+    route_bounds: DestinationBoundsRequest | None = None
+
+
+class DestinationBoundsRequest(StrictModel):
+    south_west: SearchCoordinateResponse
+    north_east: SearchCoordinateResponse
 
 
 class DestinationSuggestRequest(StrictModel):
@@ -198,9 +204,24 @@ async def destination_suggest(
                     ),
                     bias_radius_meters=(
                         None
-                        if context is None or context.location is None
+                        if context is None or context.location is None or
+                        context.route_bounds is not None
                         else context.bias_radius_meters
                         or settings.destination_search_bias_radius_meters
+                    ),
+                    route_bounds=(
+                        None
+                        if context is None or context.route_bounds is None
+                        else (
+                            Coordinate(
+                                context.route_bounds.south_west.latitude,
+                                context.route_bounds.south_west.longitude,
+                            ),
+                            Coordinate(
+                                context.route_bounds.north_east.latitude,
+                                context.route_bounds.north_east.longitude,
+                            ),
+                        )
                     ),
                 ),
             ),

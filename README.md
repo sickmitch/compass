@@ -4,7 +4,8 @@ Compass is an open-source navigation system in development for fuel-aware CNG/me
 Italy. The product target is route planning and navigation with dynamically inserted, reachable,
 arrival-time-aware refuelling stops—not a generic fuel-station map.
 
-This repository implements the accepted **Phases 0–13** foundation:
+This repository implements the accepted **Phases 0–13** foundation and the repository-local work
+for Navigation UI Phases 14–15:
 
 - a Python/FastAPI service with liveness and database-readiness endpoints;
 - a PostgreSQL/PostGIS Docker Compose foundation and Alembic migration path;
@@ -484,8 +485,35 @@ Connectivity return performs a reason-labelled refresh through the existing CNG-
 failed recovery attempts retain local guidance and retry after 5, 15 and then 60 seconds. An active
 debug replay also survives process recreation and resumes from its checkpoint instead of switching
 to stationary device GPS.
-Android version is `0.23.1` (`versionCode=30`); the physical-device gate is pending and documented in
+Android version `0.23.1` (`versionCode=30`) passed its physical-device outage, process-recreation and
+network-recovery gate on 2026-09-09, as documented in
 [the Navigation UI Phase 13 acceptance record](docs/phases/navigation-ui-phase-13-acceptance.md).
+
+Navigation UI Phase 14 completes the compact map interaction surface. Active guidance can switch
+between heading-up tracking and north-up tracking, frame the complete remaining route in north-up
+overview, and always return to heading-up follow through `Ricentra`. Dynamic zoom remains automatic;
+pinch-to-zoom is retained without permanent +/- clutter. Voice, trip details and a guarded terminate
+action remain reachable directly from the map. Android version is `0.24.0` (`versionCode=31`); its
+physical-device gate is documented in
+[the Navigation UI Phase 14 acceptance record](docs/phases/navigation-ui-phase-14-acceptance.md).
+
+Navigation UI Phase 15 adds up to eight ordered ordinary waypoints to route creation. It offers the
+same current-position, future-favourites, Google search and MapLibre-selection choices as endpoints.
+Search is restricted to a rectangle around the current route and a selected result is accepted
+only after Valhalla proves that its added road distance is within the configurable limit, which
+defaults to 30% of direct-route length. Guidance pauses at the waypoint with zero dwell time until
+the operator completes it or moving GPS fixes prove departure, then recalculates ETA locally.
+The route-start UX follows the supplied creation diagram: endpoints, animated personalization and
+one common editable summary. Ordinary stops are reordered by long-press drag. CNG vehicle selection
+and editing replace the lower panel on the same screen instead of opening a detached workflow.
+Every planned stop can be selected in the summary for modification or deletion and deletion returns
+there after recalculation. MapLibre scales the puck down continuously on zoom-out, with a 50% lower
+bound. The `0.25.3` visual increment applies one branded Material 3 system to every non-map phase,
+including shared typography, tonal surfaces, pill controls and semantic states, while replacing the
+puck artwork with theme-specific Material day/night assets without changing its motion. Android
+`0.25.3` (`versionCode=35`) passed the operator-reported physical-device gate on 2026-09-11,
+documented in
+[the Navigation UI Phase 15 acceptance record](docs/phases/navigation-ui-phase-15-acceptance.md).
 
 Android patch `0.19.1` (`versionCode=21`) incorporates the first post-Phase-9 road-test correction:
 when a structured junction sign already names the maneuver road, Compass suppresses the redundant

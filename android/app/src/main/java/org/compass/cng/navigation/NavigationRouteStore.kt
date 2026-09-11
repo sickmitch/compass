@@ -27,11 +27,15 @@ data class NavigationProgressSnapshot(
     val voiceGuidanceEnabled: Boolean,
     val lastSuccessfulRouteRefreshEpochMillis: Long?,
     val locationMode: NavigationLocationMode = NavigationLocationMode.DEVICE,
+    val completedIntermediateStopSequences: Set<Int> = emptySet(),
+    val activeIntermediateStopVisit: NavigationIntermediateStopVisit? = null,
+    val lastCompletedIntermediateStopSequence: Int? = null,
 ) {
     init {
         require(savedAtEpochMillis >= 0L)
         require(routeProgressFraction in 0.0..1.0)
         require(completedFuelStopSequences.all { it > 0 })
+        require(completedIntermediateStopSequences.all { it > 0 })
     }
 }
 

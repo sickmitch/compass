@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
@@ -30,11 +30,12 @@ from compass.routing.domain import (
     RoutingProviderError,
     RoutingUnavailableError,
     WaypointRoute,
+    WaypointRouteRequest,
 )
 from compass.traffic.dependencies import get_traffic_route_refresher
 from compass.traffic.domain import TrafficHealthState
 from compass.traffic.route_refresh import TrafficRouteRefresher
-from compass.traffic.routing import refresh_base_route_traffic
+from compass.traffic.routing import refresh_base_route_traffic, refresh_waypoint_route_traffic
 from compass.traffic.service import network_cost_basis_from_settings, traffic_health_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["routing"])
@@ -168,6 +169,61 @@ class BaseRouteResponse(StrictModel):
     maneuvers: list[ManeuverResponse]
     speed_limits: list[RouteSpeedLimitResponse]
     speed_limit_source: Literal["valhalla_graph"] | None
+    provider: Literal["valhalla"]
+    navigation: NavigationTimingResponse
+
+
+class IntermediateStopRouteRequest(BaseRouteRequest):
+    intermediate_stop: CoordinateRequest
+
+
+class IntermediateStopsRouteRequest(BaseRouteRequest):
+    intermediate_stops: list[CoordinateRequest] = Field(min_length=1, max_length=8)
+
+
+class IntermediateStopRouteLegResponse(StrictModel):
+    kind: Literal["origin_to_intermediate_stop", "intermediate_stop_to_destination"]
+    origin: CoordinateRequest
+    destination: CoordinateRequest
+    distance_meters: float = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    geometry: RouteGeometry
+    maneuvers: list[ManeuverResponse]
+    speed_limits: list[RouteSpeedLimitResponse]
+    speed_limit_source: Literal["valhalla_graph"] | None
+
+
+class RouteWithIntermediateStopResponse(StrictModel):
+    intermediate_stop: CoordinateRequest
+    distance_meters: float = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    legs: list[IntermediateStopRouteLegResponse] = Field(min_length=2, max_length=2)
+    provider: Literal["valhalla"]
+    navigation: NavigationTimingResponse
+
+
+class IntermediateStopsRouteLegResponse(StrictModel):
+    sequence: int = Field(gt=0)
+    kind: Literal[
+        "origin_to_intermediate_stop",
+        "intermediate_stop_to_intermediate_stop",
+        "intermediate_stop_to_destination",
+    ]
+    origin: CoordinateRequest
+    destination: CoordinateRequest
+    distance_meters: float = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    geometry: RouteGeometry
+    maneuvers: list[ManeuverResponse]
+    speed_limits: list[RouteSpeedLimitResponse]
+    speed_limit_source: Literal["valhalla_graph"] | None
+
+
+class RouteWithIntermediateStopsResponse(StrictModel):
+    intermediate_stops: list[CoordinateRequest] = Field(min_length=1, max_length=8)
+    distance_meters: float = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    legs: list[IntermediateStopsRouteLegResponse] = Field(min_length=2, max_length=9)
     provider: Literal["valhalla"]
     navigation: NavigationTimingResponse
 
@@ -336,6 +392,220 @@ async def base_route(
     )
 
     return _base_route_response(route, settings=settings, departure_at=request.departure_at)
+
+
+@router.post(
+    "/routes/with-intermediate-stop",
+    response_model=RouteWithIntermediateStopResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "No route was found through the stop."},
+        502: {"model": ErrorResponse, "description": "Invalid routing provider response."},
+        503: {"model": ErrorResponse, "description": "Routing provider unavailable."},
+    },
+)
+async def route_with_intermediate_stop(
+    request: IntermediateStopRouteRequest,
+    provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    traffic_refresher: Annotated[
+        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
+    ],
+    settings: Annotated[Settings, Depends(get_api_settings)],
+) -> RouteWithIntermediateStopResponse | JSONResponse:
+    origin = Coordinate(request.origin.latitude, request.origin.longitude)
+    stop = Coordinate(
+        request.intermediate_stop.latitude,
+        request.intermediate_stop.longitude,
+    )
+    destination = Coordinate(request.destination.latitude, request.destination.longitude)
+    domain_request = WaypointRouteRequest(
+        origin=origin,
+        destination=destination,
+        waypoints=(stop,),
+        costing=request.costing,
+        language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
+    )
+    try:
+        route = await provider.route_with_waypoints(domain_request)
+    except NoRouteError:
+        return error_response(
+            422,
+            "route_not_found",
+            "No route was found through the intermediate stop.",
+        )
+    except RoutingUnavailableError:
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
+    except RoutingProviderError:
+        return error_response(
+            502,
+            "routing_provider_error",
+            "The routing service returned an invalid response.",
+        )
+
+    route = await refresh_waypoint_route_traffic(
+        route=route,
+        request=domain_request,
+        provider=provider,
+        refresher=traffic_refresher,
+        current_departure_tolerance_seconds=(
+            settings.traffic_route_refresh_min_interval_seconds
+        ),
+    )
+    departure_at = request.departure_at or datetime.now(UTC)
+    navigation = build_navigation_timing(
+        encoded_polylines=(leg.encoded_polyline for leg in route.legs),
+        driving_duration_seconds=route.duration_seconds,
+        departure_at=departure_at,
+        **_navigation_traffic(route, settings),
+    )
+    coordinates = (origin, stop, destination)
+    kinds = ("origin_to_intermediate_stop", "intermediate_stop_to_destination")
+    legs = [
+        IntermediateStopRouteLegResponse(
+            kind=kinds[index],
+            origin=CoordinateRequest(
+                latitude=coordinates[index].latitude,
+                longitude=coordinates[index].longitude,
+            ),
+            destination=CoordinateRequest(
+                latitude=coordinates[index + 1].latitude,
+                longitude=coordinates[index + 1].longitude,
+            ),
+            distance_meters=leg.distance_meters,
+            duration_seconds=leg.duration_seconds,
+            geometry=RouteGeometry(encoded_polyline=leg.encoded_polyline),
+            maneuvers=[
+                ManeuverResponse.model_validate(asdict(maneuver))
+                for maneuver in leg.maneuvers
+            ],
+            speed_limits=[
+                RouteSpeedLimitResponse.model_validate(asdict(speed_limit))
+                for speed_limit in leg.speed_limits
+            ],
+            speed_limit_source=(
+                "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
+            ),
+        )
+        for index, leg in enumerate(route.legs)
+    ]
+    return RouteWithIntermediateStopResponse(
+        intermediate_stop=request.intermediate_stop,
+        distance_meters=route.distance_meters,
+        duration_seconds=route.duration_seconds,
+        legs=legs,
+        provider="valhalla",
+        navigation=_navigation_timing_response(navigation),
+    )
+
+
+@router.post(
+    "/routes/with-intermediate-stops",
+    response_model=RouteWithIntermediateStopsResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "No route was found through the stops."},
+        502: {"model": ErrorResponse, "description": "Invalid routing provider response."},
+        503: {"model": ErrorResponse, "description": "Routing provider unavailable."},
+    },
+)
+async def route_with_intermediate_stops(
+    request: IntermediateStopsRouteRequest,
+    provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
+    traffic_refresher: Annotated[
+        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
+    ],
+    settings: Annotated[Settings, Depends(get_api_settings)],
+) -> RouteWithIntermediateStopsResponse | JSONResponse:
+    origin = Coordinate(request.origin.latitude, request.origin.longitude)
+    stops = tuple(
+        Coordinate(stop.latitude, stop.longitude) for stop in request.intermediate_stops
+    )
+    destination = Coordinate(request.destination.latitude, request.destination.longitude)
+    domain_request = WaypointRouteRequest(
+        origin=origin,
+        destination=destination,
+        waypoints=stops,
+        costing=request.costing,
+        language=request.language or settings.valhalla_route_language,
+        departure_at=request.departure_at,
+    )
+    try:
+        route = await provider.route_with_waypoints(domain_request)
+    except NoRouteError:
+        return error_response(
+            422,
+            "route_not_found",
+            "No route was found through the intermediate stops.",
+        )
+    except RoutingUnavailableError:
+        return error_response(503, "routing_unavailable", "The routing service is unavailable.")
+    except RoutingProviderError:
+        return error_response(
+            502,
+            "routing_provider_error",
+            "The routing service returned an invalid response.",
+        )
+
+    route = await refresh_waypoint_route_traffic(
+        route=route,
+        request=domain_request,
+        provider=provider,
+        refresher=traffic_refresher,
+        current_departure_tolerance_seconds=(
+            settings.traffic_route_refresh_min_interval_seconds
+        ),
+    )
+    departure_at = request.departure_at or datetime.now(UTC)
+    navigation = build_navigation_timing(
+        encoded_polylines=(leg.encoded_polyline for leg in route.legs),
+        driving_duration_seconds=route.duration_seconds,
+        departure_at=departure_at,
+        **_navigation_traffic(route, settings),
+    )
+    coordinates = (origin, *stops, destination)
+    last_leg_index = len(route.legs) - 1
+    legs = [
+        IntermediateStopsRouteLegResponse(
+            sequence=index + 1,
+            kind=(
+                "origin_to_intermediate_stop"
+                if index == 0
+                else "intermediate_stop_to_destination"
+                if index == last_leg_index
+                else "intermediate_stop_to_intermediate_stop"
+            ),
+            origin=CoordinateRequest(
+                latitude=coordinates[index].latitude,
+                longitude=coordinates[index].longitude,
+            ),
+            destination=CoordinateRequest(
+                latitude=coordinates[index + 1].latitude,
+                longitude=coordinates[index + 1].longitude,
+            ),
+            distance_meters=leg.distance_meters,
+            duration_seconds=leg.duration_seconds,
+            geometry=RouteGeometry(encoded_polyline=leg.encoded_polyline),
+            maneuvers=[
+                ManeuverResponse.model_validate(asdict(maneuver))
+                for maneuver in leg.maneuvers
+            ],
+            speed_limits=[
+                RouteSpeedLimitResponse.model_validate(asdict(speed_limit))
+                for speed_limit in leg.speed_limits
+            ],
+            speed_limit_source=(
+                "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
+            ),
+        )
+        for index, leg in enumerate(route.legs)
+    ]
+    return RouteWithIntermediateStopsResponse(
+        intermediate_stops=request.intermediate_stops,
+        distance_meters=route.distance_meters,
+        duration_seconds=route.duration_seconds,
+        legs=legs,
+        provider="valhalla",
+        navigation=_navigation_timing_response(navigation),
+    )
 
 
 @router.post(

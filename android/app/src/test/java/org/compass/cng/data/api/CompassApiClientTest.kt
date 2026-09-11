@@ -12,6 +12,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationSearchContext
+import org.compass.cng.domain.model.DestinationSearchBounds
 import org.compass.cng.domain.server.ServerConnection
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -80,6 +81,51 @@ class CompassApiClientTest {
             "45.4642",
             requestJson.getValue("origin").jsonObject.getValue("latitude").jsonPrimitive.content,
         )
+    }
+
+    @Test
+    fun postsIntermediateStopRouteAndKeepsZeroFuelDwell() = runTest {
+        server.enqueue(successResponse(INTERMEDIATE_STOP_RESPONSE))
+        val client = client()
+        val origin = Coordinate(45.0, 9.0)
+        val stop = Coordinate(45.1, 9.2)
+        val destination = Coordinate(45.2, 9.4)
+
+        val route = client.getRouteWithIntermediateStop(origin, stop, destination)
+
+        assertEquals(stop, route.intermediateStop)
+        assertEquals(2, route.legs.size)
+        assertEquals(200.0, route.durationSeconds, 0.0)
+        assertEquals(0, route.navigation.refuelingStopCount)
+        assertEquals(200.0, route.navigation.totalTripDurationSeconds, 0.0)
+        val recorded = server.takeRequest()
+        assertEquals("/api/v1/routes/with-intermediate-stop", recorded.path)
+        val requestJson = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
+        assertEquals(
+            "45.1",
+            requestJson.getValue("intermediate_stop").jsonObject
+                .getValue("latitude").jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun postsOrderedIntermediateStopsAndMapsEveryLeg() = runTest {
+        server.enqueue(successResponse(INTERMEDIATE_STOPS_RESPONSE))
+        val client = client()
+        val origin = Coordinate(45.0, 9.0)
+        val stops = listOf(Coordinate(45.1, 9.2), Coordinate(45.15, 9.3))
+        val destination = Coordinate(45.2, 9.4)
+
+        val route = client.getRouteWithIntermediateStops(origin, stops, destination)
+
+        assertEquals(stops, route.intermediateStops)
+        assertEquals(3, route.legs.size)
+        assertEquals(0, route.navigation.refuelingStopCount)
+        assertEquals(300.0, route.navigation.totalTripDurationSeconds, 0.0)
+        val recorded = server.takeRequest()
+        assertEquals("/api/v1/routes/with-intermediate-stops", recorded.path)
+        val requestJson = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
+        assertEquals(2, requestJson.getValue("intermediate_stops").jsonArray.size)
     }
 
     @Test
@@ -217,6 +263,53 @@ class CompassApiClientTest {
         assertEquals("/api/v1/destinations/resolve", resolveRequest.path)
         val resolveJson = json.parseToJsonElement(resolveRequest.body.readUtf8()).jsonObject
         assertEquals("place-a", resolveJson.getValue("provider_ref").jsonPrimitive.content)
+    }
+
+    @Test
+    fun sendsRouteBoundsForAlongRouteDestinationSearch() = runTest {
+        server.enqueue(
+            successResponse(
+                """
+                {
+                  "session_id":"9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                  "revision":1,
+                  "provider":"google_places_new",
+                  "maximum_results":5,
+                  "results":[]
+                }
+                """.trimIndent(),
+            ),
+        )
+        client().suggestDestinations(
+            ApiDestinationSuggestRequest(
+                query = "ristorante",
+                sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                revision = 1,
+                context = DestinationSearchContext(
+                    location = Coordinate(45.1, 9.2),
+                    routeBounds = DestinationSearchBounds(
+                        southWest = Coordinate(44.9, 8.8),
+                        northEast = Coordinate(45.3, 9.6),
+                    ),
+                ),
+            ),
+        )
+
+        val recorded = server.takeRequest()
+        val context = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
+            .getValue("context").jsonObject
+        assertFalse(context.containsKey("bias_radius_meters"))
+        val bounds = context.getValue("route_bounds").jsonObject
+        assertEquals(
+            "44.9",
+            bounds.getValue("south_west").jsonObject
+                .getValue("latitude").jsonPrimitive.content,
+        )
+        assertEquals(
+            "9.6",
+            bounds.getValue("north_east").jsonObject
+                .getValue("longitude").jsonPrimitive.content,
+        )
     }
 
     @Test
@@ -839,6 +932,97 @@ class CompassApiClientTest {
                 "traffic_state": "fresh",
                 "traffic_aware": true,
                 "traffic_observed_at": "2026-09-02T07:59:30+02:00"
+              }
+            }
+        """.trimIndent()
+
+        val INTERMEDIATE_STOP_RESPONSE = """
+            {
+              "intermediate_stop":{"latitude":45.1,"longitude":9.2},
+              "distance_meters":2000.0,
+              "duration_seconds":200.0,
+              "legs":[
+                {
+                  "kind":"origin_to_intermediate_stop",
+                  "origin":{"latitude":45.0,"longitude":9.0},
+                  "destination":{"latitude":45.1,"longitude":9.2},
+                  "distance_meters":1000.0,"duration_seconds":100.0,
+                  "geometry":{"format":"polyline6","encoded_polyline":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"},
+                  "maneuvers":[],"speed_limits":[],"speed_limit_source":"valhalla_graph"
+                },
+                {
+                  "kind":"intermediate_stop_to_destination",
+                  "origin":{"latitude":45.1,"longitude":9.2},
+                  "destination":{"latitude":45.2,"longitude":9.4},
+                  "distance_meters":1000.0,"duration_seconds":100.0,
+                  "geometry":{"format":"polyline6","encoded_polyline":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"},
+                  "maneuvers":[],"speed_limits":[],"speed_limit_source":"valhalla_graph"
+                }
+              ],
+              "provider":"valhalla",
+              "navigation":{
+                "route_id":"route_abcdef1234567890abcdef1234567890",
+                "driving_duration_seconds":200.0,
+                "remaining_driving_duration_seconds":200.0,
+                "refueling_stop_count":0,
+                "dwell_seconds_per_refueling_stop":1200,
+                "total_refueling_dwell_seconds":0.0,
+                "total_trip_duration_seconds":200.0,
+                "departure_at":null,"driving_arrival_at":null,"trip_arrival_at":null,
+                "traffic_delay_seconds":null,"traffic_delay_state":"unavailable",
+                "traffic_state":"not_configured","traffic_aware":false,
+                "traffic_observed_at":null
+              }
+            }
+        """.trimIndent()
+
+        val INTERMEDIATE_STOPS_RESPONSE = """
+            {
+              "intermediate_stops":[
+                {"latitude":45.1,"longitude":9.2},
+                {"latitude":45.15,"longitude":9.3}
+              ],
+              "distance_meters":3000.0,
+              "duration_seconds":300.0,
+              "legs":[
+                {
+                  "sequence":1,"kind":"origin_to_intermediate_stop",
+                  "origin":{"latitude":45.0,"longitude":9.0},
+                  "destination":{"latitude":45.1,"longitude":9.2},
+                  "distance_meters":1000.0,"duration_seconds":100.0,
+                  "geometry":{"format":"polyline6","encoded_polyline":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"},
+                  "maneuvers":[],"speed_limits":[],"speed_limit_source":"valhalla_graph"
+                },
+                {
+                  "sequence":2,"kind":"intermediate_stop_to_intermediate_stop",
+                  "origin":{"latitude":45.1,"longitude":9.2},
+                  "destination":{"latitude":45.15,"longitude":9.3},
+                  "distance_meters":1000.0,"duration_seconds":100.0,
+                  "geometry":{"format":"polyline6","encoded_polyline":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"},
+                  "maneuvers":[],"speed_limits":[],"speed_limit_source":"valhalla_graph"
+                },
+                {
+                  "sequence":3,"kind":"intermediate_stop_to_destination",
+                  "origin":{"latitude":45.15,"longitude":9.3},
+                  "destination":{"latitude":45.2,"longitude":9.4},
+                  "distance_meters":1000.0,"duration_seconds":100.0,
+                  "geometry":{"format":"polyline6","encoded_polyline":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"},
+                  "maneuvers":[],"speed_limits":[],"speed_limit_source":"valhalla_graph"
+                }
+              ],
+              "provider":"valhalla",
+              "navigation":{
+                "route_id":"route_1234567890abcdef1234567890abcdef",
+                "driving_duration_seconds":300.0,
+                "remaining_driving_duration_seconds":300.0,
+                "refueling_stop_count":0,
+                "dwell_seconds_per_refueling_stop":1200,
+                "total_refueling_dwell_seconds":0.0,
+                "total_trip_duration_seconds":300.0,
+                "departure_at":null,"driving_arrival_at":null,"trip_arrival_at":null,
+                "traffic_delay_seconds":null,"traffic_delay_state":"unavailable",
+                "traffic_state":"not_configured","traffic_aware":false,
+                "traffic_observed_at":null
               }
             }
         """.trimIndent()

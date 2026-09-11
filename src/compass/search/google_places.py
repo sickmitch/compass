@@ -94,6 +94,20 @@ class GooglePlacesNewDestinationProvider:
                         "radius": request.context.bias_radius_meters,
                     }
                 }
+        if request.context.route_bounds is not None:
+            south_west, north_east = request.context.route_bounds
+            payload["locationRestriction"] = {
+                "rectangle": {
+                    "low": {
+                        "latitude": south_west.latitude,
+                        "longitude": south_west.longitude,
+                    },
+                    "high": {
+                        "latitude": north_east.latitude,
+                        "longitude": north_east.longitude,
+                    },
+                }
+            }
         response = await self._request(
             "POST",
             self._autocomplete_url,
