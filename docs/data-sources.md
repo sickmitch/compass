@@ -39,8 +39,10 @@ alternate compliant instance. A failed OSM import does not delete or invalidate 
 ## Google Places API (New) search corroboration
 
 ADR 0021 supersedes this corroboration design for the active destination selector. The old Text
-Search adapter remains packaged but is disabled with `GEOCODING_PROVIDER=none` and
-`GOOGLE_PLACES_TEXT_SEARCH_ENABLED=false`.
+Search adapter remains packaged but is disabled with `GEOCODING_PROVIDER=none`. The dedicated
+Search Along Route Text Search operation can be enabled independently with
+`DESTINATION_ALONG_ROUTE_ENABLED=true`; it is reachable only from ordinary-stop insertion and does
+not reactivate legacy generic search.
 
 ## Google Places API (New) destination selection
 

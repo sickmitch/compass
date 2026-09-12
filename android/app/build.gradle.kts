@@ -55,8 +55,8 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 35
-        versionName = "0.25.3"
+        versionCode = 44
+        versionName = "0.27.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())

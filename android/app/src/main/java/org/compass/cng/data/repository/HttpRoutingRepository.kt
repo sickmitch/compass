@@ -24,6 +24,8 @@ import org.compass.cng.domain.model.CngItineraryRouteLeg
 import org.compass.cng.domain.model.CngRouteLeg
 import org.compass.cng.domain.model.CngRouteLegKind
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.AlongRouteSearchRequest
+import org.compass.cng.domain.model.AlongRouteSearchResults
 import org.compass.cng.domain.model.AddressComponent
 import org.compass.cng.domain.model.DestinationKind
 import org.compass.cng.domain.model.DestinationSuggestRequest
@@ -69,6 +71,52 @@ class HttpRoutingRepository(
     private val placeSearchCache: PlaceSearchCache = NoOpPlaceSearchCache,
     private val eventLogger: (String) -> Unit = {},
 ) : RoutingRepository {
+    override suspend fun searchAlongRoute(
+        request: AlongRouteSearchRequest,
+    ): AlongRouteSearchResults = mapFailures {
+        val response = apiClient.searchAlongRoute(
+            org.compass.cng.data.api.ApiAlongRouteSearchRequest(
+                query = request.query,
+                sessionId = request.sessionId,
+                revision = request.revision,
+                route = request.route,
+                pageCursor = request.pageCursor,
+            ),
+        )
+        AlongRouteSearchResults(
+            sessionId = response.sessionId,
+            revision = response.revision,
+            routeId = response.routeId,
+            routeRevision = response.routeRevision,
+            routeFingerprint = response.routeFingerprint,
+            mode = response.mode,
+            limitation = response.limitation,
+            nextPageCursor = response.nextPageCursor,
+            results = response.results.map { result ->
+                DestinationSuggestion(
+                    id = result.id,
+                    provider = result.provider,
+                    providerRef = result.providerRef,
+                    kind = result.kind.toDestinationKind(),
+                    title = result.title,
+                    subtitle = result.subtitle,
+                    addressPreview = result.addressPreview,
+                    distanceMeters = result.distanceMeters,
+                    providerRank = result.providerRank,
+                    attribution = result.attribution,
+                )
+            },
+        )
+    }
+
+    override suspend fun resolveAlongRoute(
+        search: AlongRouteSearchResults,
+        suggestion: DestinationSuggestion,
+        currentRoute: org.compass.cng.domain.model.AlongRouteContext,
+    ): ResolvedDestination = mapFailures {
+        apiClient.resolveAlongRoute(search.toApi(), suggestion.providerRef, currentRoute).toDomain()
+    }
+
     override suspend fun suggestDestinations(
         request: DestinationSuggestRequest,
     ): DestinationSuggestions = mapFailures {
@@ -612,6 +660,9 @@ class HttpRoutingRepository(
                 "cng_itinerary_out_of_range" -> {
                     RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE
                 }
+                "route_required" -> RoutePreviewFailure.ROUTE_REQUIRED
+                "route_context_stale" -> RoutePreviewFailure.STALE_SEARCH_CONTEXT
+                "rate_limited" -> RoutePreviewFailure.RATE_LIMITED
                 else -> RoutePreviewFailure.SERVER
             }
             throw RoutePreviewException(failure, error)
@@ -628,6 +679,50 @@ class HttpRoutingRepository(
         }
     }
 }
+
+private fun AlongRouteSearchResults.toApi() =
+    org.compass.cng.data.api.ApiAlongRouteSearchResults(
+        sessionId = sessionId,
+        revision = revision,
+        routeId = routeId,
+        routeRevision = routeRevision,
+        routeFingerprint = routeFingerprint,
+        mode = mode,
+        limitation = limitation,
+        nextPageCursor = nextPageCursor,
+        results = emptyList(),
+    )
+
+private fun org.compass.cng.data.api.ApiResolvedDestination.toDomain() = ResolvedDestination(
+    sessionId = sessionId,
+    revision = revision,
+    selection = ResolvedDestinationSelection(
+        provider = provider,
+        providerRef = providerRef,
+        formattedAddress = formattedAddress,
+        addressComponents = addressComponents.map {
+            AddressComponent(it.longText, it.shortText, it.types)
+        },
+        normalizedAddress = NormalizedAddress(
+            street = normalizedAddress.street,
+            streetNumber = normalizedAddress.streetNumber,
+            locality = normalizedAddress.locality,
+            province = normalizedAddress.province,
+            region = normalizedAddress.region,
+            postalCode = normalizedAddress.postalCode,
+            country = normalizedAddress.country,
+        ),
+        location = coordinate,
+        kind = kind.toDestinationKind(),
+        attribution = attribution,
+        fieldSources = fieldSources,
+    ),
+    navigationTarget = NavigationTarget(
+        location = navigationCoordinate,
+        providerRef = navigationProviderRef,
+        mapLabel = mapLabel,
+    ),
+)
 
 private fun String.toDestinationKind(): DestinationKind = when (this) {
     "business" -> DestinationKind.BUSINESS

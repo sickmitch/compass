@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+android_root="$repo_root/android"
+: "${JAVA_HOME:?Set JAVA_HOME to JDK 17.}"
+: "${ANDROID_SDK_ROOT:?Set ANDROID_SDK_ROOT to the Android SDK.}"
+: "${COMPASS_API_BASE_URL:?Set COMPASS_API_BASE_URL to the reachable Compass API URL.}"
+
+adb="$ANDROID_SDK_ROOT/platform-tools/adb"
+apk="$android_root/app/build/outputs/apk/debug/app-debug.apk"
+installable="$repo_root/dist/Compass-0.27.2-debug-installabile.apk"
+api_base="${COMPASS_API_BASE_URL%/}/"
+
+echo "[1/4] Running Android unit tests, lint and build"
+(
+    cd "$android_root"
+    ./gradlew --no-daemon -PCOMPASS_API_BASE_URL="$api_base" \
+        testDebugUnitTest lintDebug assembleDebug
+)
+
+mkdir -p "$repo_root/dist"
+cp "$apk" "$installable"
+
+echo "[2/4] Installing Android 0.27.2 without clearing persistent profiles"
+"$adb" install -r "$apk"
+
+echo "[3/4] Cold-launching Compass"
+"$adb" shell am force-stop org.compass.cng.debug
+"$adb" shell am start -W org.compass.cng.debug/org.compass.cng.MainActivity
+
+cat <<'CHECKS'
+
+OPERATOR CHECK — ORDINARY-STOP CANCELLATION
+
+Run all six cases in:
+  docs/phases/android-0.27.2-intermediate-stop-cancel-acceptance.md
+
+In particular, abandon both map selection and place search without choosing a stop. No phantom stop
+or CNG-action lock may remain. Then confirm and remove one real stop to verify the committed path.
+
+Press ENTER after completing the checks.
+CHECKS
+read -r
+
+echo "[4/4] ANDROID 0.27.2 INTERMEDIATE-STOP CANCEL GATE COMPLETE"
+echo "Installable APK: $installable"
+sha256sum "$installable"
+echo "Return this complete output and pass/fail notes for all six checks."

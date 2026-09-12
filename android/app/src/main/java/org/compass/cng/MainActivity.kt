@@ -10,6 +10,7 @@ import android.location.LocationListener
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
+import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,12 +20,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.navigation.NavigationForegroundService
+import org.compass.cng.navigation.FollowLocationPolicy
 import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.ui.route.PlannerStage
 import org.compass.cng.ui.route.RoutePlannerScreen
@@ -42,9 +46,32 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var followPollingActive = false
+    private var registeredFollowProviders: Set<String> = emptySet()
+    private val followCurrentLocationSignals = mutableListOf<CancellationSignal>()
+    private val followLocationPoll = object : Runnable {
+        override fun run() {
+            if (!followPollingActive) return
+            refreshFollowProviderSubscriptions()
+            requestFreshFollowLocation()
+            mainHandler.postDelayed(this, FollowLocationPolicy.POLL_INTERVAL_MILLIS)
+        }
+    }
+
     private val followLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            routePlannerViewModel.updateFollowLocation(location.toNavigationLocation())
+            if (location.isUsableFollowFix(System.currentTimeMillis())) {
+                routePlannerViewModel.updateFollowLocation(location.toNavigationLocation())
+            }
+        }
+
+        override fun onProviderEnabled(provider: String) {
+            mainHandler.post { refreshFollowProviderSubscriptions() }
+        }
+
+        override fun onProviderDisabled(provider: String) {
+            mainHandler.post { refreshFollowProviderSubscriptions() }
         }
     }
 
@@ -52,6 +79,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val plannerState by routePlannerViewModel.uiState.collectAsStateWithLifecycle()
             val navigationPermissions = remember {
                 buildList {
                     add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -108,7 +136,13 @@ class MainActivity : ComponentActivity() {
                         pendingStartAction = NavigationForegroundService.ACTION_START
                         navigationPermissionLauncher.launch(navigationPermissions)
                     }
-                } else if (routePlannerViewModel.uiState.value.stage == PlannerStage.FOLLOW) {
+                }
+            }
+            LaunchedEffect(plannerState.stage) {
+                if (
+                    plannerState.stage == PlannerStage.FOLLOW &&
+                    !routePlannerViewModel.shouldResumeRestoredNavigation
+                ) {
                     if (hasLocationPermission()) startFollowLocationUpdates()
                     else followPermissionLauncher.launch(locationPermissions)
                 }
@@ -294,33 +328,91 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private fun startFollowLocationUpdates() {
         if (!hasLocationPermission()) return
+        followPollingActive = true
+        refreshFollowProviderSubscriptions()
+        requestFreshFollowLocation(force = true)
+        mainHandler.removeCallbacks(followLocationPoll)
+        mainHandler.postDelayed(followLocationPoll, FollowLocationPolicy.POLL_INTERVAL_MILLIS)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun refreshFollowProviderSubscriptions() {
+        if (!followPollingActive || !hasLocationPermission()) return
         val manager = getSystemService(LocationManager::class.java)
-        val provider = when {
-            manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> {
-                LocationManager.NETWORK_PROVIDER
-            }
-            else -> return
+        val enabledProviders = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+        ).filter(manager::isProviderEnabled).toSet()
+        if (enabledProviders.isEmpty()) {
+            manager.removeUpdates(followLocationListener)
+            registeredFollowProviders = emptySet()
+            routePlannerViewModel.followLocationUnavailable()
+            return
         }
         try {
-            manager.removeUpdates(followLocationListener)
-            manager.getLastKnownLocation(provider)?.let {
-                routePlannerViewModel.updateFollowLocation(it.toNavigationLocation())
+            if (enabledProviders != registeredFollowProviders) {
+                manager.removeUpdates(followLocationListener)
+                enabledProviders.forEach { provider ->
+                    manager.requestLocationUpdates(
+                        provider,
+                        FOLLOW_LOCATION_INTERVAL_MILLIS,
+                        FOLLOW_LOCATION_MINIMUM_DISTANCE_METERS,
+                        followLocationListener,
+                        Looper.getMainLooper(),
+                    )
+                }
+                registeredFollowProviders = enabledProviders
             }
-            manager.requestLocationUpdates(
-                provider,
-                FOLLOW_LOCATION_INTERVAL_MILLIS,
-                FOLLOW_LOCATION_MINIMUM_DISTANCE_METERS,
-                followLocationListener,
-                Looper.getMainLooper(),
-            )
+            val now = System.currentTimeMillis()
+            enabledProviders.mapNotNull(manager::getLastKnownLocation)
+                .filter { it.isUsableFollowFix(now) }
+                .maxWithOrNull(compareBy<Location> { it.time }.thenBy { -it.accuracy })
+                ?.let { routePlannerViewModel.updateFollowLocation(it.toNavigationLocation()) }
+        } catch (_: SecurityException) {
+            routePlannerViewModel.currentLocationUnavailable()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestFreshFollowLocation(force: Boolean = false) {
+        if (!followPollingActive || !hasLocationPermission()) return
+        val current = routePlannerViewModel.uiState.value.followLocation
+        if (!force && !FollowLocationPolicy.shouldRepoll(current, System.currentTimeMillis())) return
+        val manager = getSystemService(LocationManager::class.java)
+        val providers = registeredFollowProviders.ifEmpty {
+            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .filter(manager::isProviderEnabled)
+                .toSet()
+        }
+        followCurrentLocationSignals.forEach(CancellationSignal::cancel)
+        followCurrentLocationSignals.clear()
+        try {
+            providers.forEach { provider ->
+                val signal = CancellationSignal()
+                followCurrentLocationSignals += signal
+                LocationManagerCompat.getCurrentLocation(
+                    manager,
+                    provider,
+                    signal,
+                    ContextCompat.getMainExecutor(this),
+                ) { location ->
+                    if (location?.isUsableFollowFix(System.currentTimeMillis()) == true) {
+                        routePlannerViewModel.updateFollowLocation(location.toNavigationLocation())
+                    }
+                }
+            }
         } catch (_: SecurityException) {
             routePlannerViewModel.currentLocationUnavailable()
         }
     }
 
     private fun stopFollowLocationUpdates() {
+        followPollingActive = false
+        mainHandler.removeCallbacks(followLocationPoll)
+        followCurrentLocationSignals.forEach(CancellationSignal::cancel)
+        followCurrentLocationSignals.clear()
         getSystemService(LocationManager::class.java).removeUpdates(followLocationListener)
+        registeredFollowProviders = emptySet()
     }
 
     private fun Location.toNavigationLocation() = NavigationLocation(
@@ -331,6 +423,12 @@ class MainActivity : ComponentActivity() {
         timestampEpochMillis = time,
         receivedAtEpochMillis = System.currentTimeMillis(),
     )
+
+    private fun Location.isUsableFollowFix(nowEpochMillis: Long): Boolean =
+        latitude.isFinite() && longitude.isFinite() && accuracy.isFinite() &&
+            accuracy in 0f..FollowLocationPolicy.MAXIMUM_ACCURACY_METERS.toFloat() &&
+            time in (nowEpochMillis - FollowLocationPolicy.SEARCH_ORIGIN_MAX_AGE_MILLIS)..
+            (nowEpochMillis + FollowLocationPolicy.MAXIMUM_FUTURE_SKEW_MILLIS)
 
     private companion object {
         const val FOLLOW_LOCATION_INTERVAL_MILLIS = 1_000L

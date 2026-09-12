@@ -6,11 +6,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.AddLocationAlt
 import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.LocalGasStation
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -260,9 +263,11 @@ fun RoutePlannerScreen(
                         state.operation == PlannerOperation.INTERMEDIATE_STOP_ROUTE,
                     message = state.message,
                     pendingResolvedDestination = state.pendingResolvedDestination,
+                    canLoadMore = state.alongRouteSearchResults?.nextPageCursor != null,
                     onQueryChanged = viewModel::updatePlaceSearchQuery,
                     onSearch = viewModel::searchDestinations,
                     onSelect = viewModel::selectDestinationSuggestion,
+                    onLoadMore = viewModel::loadMoreAlongRouteResults,
                     onConfirmCoordinateOnly = viewModel::confirmCoordinateOnlyDestination,
                 )
                 visibleStage == PlannerStage.MAP_POINT_PICKER -> MapPointPickerContent(
@@ -469,7 +474,11 @@ private fun Header(
     val title = when (stage) {
         PlannerStage.FOLLOW -> "Segui posizione"
         PlannerStage.CONFIGURE_ROUTE -> "Modifica percorso"
-        PlannerStage.DESTINATION_SEARCH -> "Cerca posizione"
+        PlannerStage.DESTINATION_SEARCH -> if (searchTarget == RouteEndpoint.INTERMEDIATE_STOP) {
+            "Aggiungi tappa"
+        } else {
+            "Cerca posizione"
+        }
         PlannerStage.MAP_POINT_PICKER -> "Scegli sulla mappa"
         PlannerStage.INTERMEDIATE_STOP_PREVIEW -> "Verifica tappa"
         PlannerStage.INTERMEDIATE_STOPS -> "Organizza le tappe"
@@ -658,22 +667,12 @@ private fun PreviewContent(
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CompassOutlinedButton(
-                    onClick = onEditRoute,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                ) {
-                    Text("Cambia percorso")
-                }
-                RouteMap(
-                    route = route,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(260.dp),
-                )
-            }
+            RouteMap(
+                route = route,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp),
+            )
         }
         item {
             Column(
@@ -696,35 +695,45 @@ private fun PreviewContent(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     CompassOutlinedButton(
+                        onClick = onEditRoute,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.AltRoute, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Cambia percorso", maxLines = 2)
+                    }
+                    CompassOutlinedButton(
+                        onClick = onAddIntermediateStops,
+                        enabled = allowCngPlanning,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Rounded.AddLocationAlt, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Aggiungi tappe", maxLines = 2)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CompassOutlinedButton(
                         onClick = onAddStop,
                         enabled = allowCngPlanning,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
                     ) {
+                        Icon(Icons.Rounded.LocalGasStation, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Sosta CNG")
                     }
                     CompassOutlinedButton(
                         onClick = onExtendedPlanning,
                         enabled = allowCngPlanning,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
                     ) {
+                        Icon(Icons.Rounded.Tune, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Piano CNG")
                     }
-                }
-                CompassOutlinedButton(
-                    onClick = onAddIntermediateStops,
-                    enabled = allowCngPlanning,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                ) {
-                    Text("Aggiungi tappe")
                 }
                 Box(
                     modifier = Modifier.fillMaxWidth(),
@@ -1964,9 +1973,11 @@ private fun DestinationSearchContent(
     isResolving: Boolean,
     message: String?,
     pendingResolvedDestination: ResolvedDestination?,
+    canLoadMore: Boolean,
     onQueryChanged: (String) -> Unit,
     onSearch: () -> Unit,
     onSelect: (DestinationSuggestion) -> Unit,
+    onLoadMore: () -> Unit,
     onConfirmCoordinateOnly: () -> Unit,
 ) {
     var input by remember { mutableStateOf(TextFieldValue(query)) }
@@ -1978,9 +1989,15 @@ private fun DestinationSearchContent(
     val isBusy = isSearching || isResolving
     val canSearch = query.count { !it.isWhitespace() } >= BuildConfig.DESTINATION_SEARCH_MIN_CHARS &&
         !isBusy
+    val emptyMessage = if (target == RouteEndpoint.INTERMEDIATE_STOP) {
+        "Nessun risultato trovato lungo questo percorso."
+    } else {
+        "Nessun luogo trovato."
+    }
     val isRecoverableError = message != null &&
         !message.startsWith("Digita almeno") &&
-        message != "Nessun luogo trovato." &&
+        message != emptyMessage &&
+        message != "Calcola prima un percorso." &&
         pendingResolvedDestination == null
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1989,7 +2006,11 @@ private fun DestinationSearchContent(
     ) {
         item {
             Text(
-                "Indirizzo, città, attività o POI",
+                if (target == RouteEndpoint.INTERMEDIATE_STOP) {
+                    "Cerca lungo il percorso"
+                } else {
+                    "Indirizzo, città, attività o POI"
+                },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -2004,12 +2025,17 @@ private fun DestinationSearchContent(
                     Text(
                         when (target) {
                             RouteEndpoint.ORIGIN -> "Partenza"
-                            RouteEndpoint.INTERMEDIATE_STOP -> "Tappa intermedia"
+                            RouteEndpoint.INTERMEDIATE_STOP -> "Cerca lungo il percorso"
                             RouteEndpoint.DESTINATION -> "Destinazione"
                         },
                     )
                 },
-                placeholder = { Text("es. Duomo di Milano") },
+                placeholder = {
+                    Text(
+                        if (target == RouteEndpoint.INTERMEDIATE_STOP) "es. farmacia"
+                        else "es. Via Cappafredda, 12, Roverchiara"
+                    )
+                },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { if (canSearch) onSearch() }),
                 singleLine = true,
@@ -2112,6 +2138,17 @@ private fun DestinationSearchContent(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+        if (canLoadMore) {
+            item {
+                CompassOutlinedButton(
+                    onClick = onLoadMore,
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Carica altri risultati")
                 }
             }
         }

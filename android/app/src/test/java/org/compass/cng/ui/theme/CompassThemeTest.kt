@@ -11,6 +11,10 @@ class CompassThemeTest {
     fun brandedMaterialSchemesKeepNavigationContrastInBothThemes() {
         assertEquals(Color(0xFF006C4C), CompassLightColors.primary)
         assertEquals(Color(0xFF91F0BC), CompassDarkColors.primary)
+        assertEquals(Color.Black, CompassDarkColors.background)
+        assertEquals(Color.Black, CompassDarkColors.surface)
+        assertEquals(Color.Black, CompassDarkColors.surfaceContainerLowest)
+        assertEquals(Color.Transparent, CompassDarkColors.surfaceTint)
         assertNotEquals(CompassLightColors.primary, CompassLightColors.surface)
         assertNotEquals(CompassDarkColors.primary, CompassDarkColors.surface)
         assertNotEquals(CompassLightColors.outline, CompassLightColors.background)

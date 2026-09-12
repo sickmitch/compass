@@ -42,6 +42,23 @@ def route_linestring_wkt(coordinates: tuple[Coordinate, ...]) -> str:
     return f"LINESTRING({points})"
 
 
+def encode_polyline5(coordinates: tuple[Coordinate, ...]) -> str:
+    """Encode validated WGS84 coordinates using Google's E5 polyline format."""
+    if len(coordinates) < 2:
+        raise ValueError("A Google route polyline requires at least two coordinates")
+    encoded: list[str] = []
+    previous_latitude = 0
+    previous_longitude = 0
+    for coordinate in coordinates:
+        latitude = round(coordinate.latitude * 100_000)
+        longitude = round(coordinate.longitude * 100_000)
+        encoded.append(_encode_value(latitude - previous_latitude))
+        encoded.append(_encode_value(longitude - previous_longitude))
+        previous_latitude = latitude
+        previous_longitude = longitude
+    return "".join(encoded)
+
+
 def _decode_value(encoded: str, index: int) -> tuple[int, int]:
     result = 0
     shift = 0
@@ -60,3 +77,13 @@ def _decode_value(encoded: str, index: int) -> tuple[int, int]:
             raise RoutingProviderError("Route geometry contains an invalid value")
     decoded = ~(result >> 1) if result & 1 else result >> 1
     return decoded, index
+
+
+def _encode_value(value: int) -> str:
+    shifted = ~(value << 1) if value < 0 else value << 1
+    characters: list[str] = []
+    while shifted >= 0x20:
+        characters.append(chr((0x20 | (shifted & 0x1F)) + 63))
+        shifted >>= 5
+    characters.append(chr(shifted + 63))
+    return "".join(characters)

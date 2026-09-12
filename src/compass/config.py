@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     destination_search_max_concurrency: int = Field(default=8, ge=1, le=64)
     destination_search_rate_limit_per_minute: int = Field(default=60, ge=1, le=1_000)
     google_places_text_search_enabled: bool = False
+    destination_along_route_enabled: bool = False
+    destination_along_route_page_size: int = Field(default=10, ge=1, le=20)
+    destination_along_route_max_geometry_points: int = Field(default=50_000, ge=2, le=200_000)
+    destination_along_route_max_encoded_chars: int = Field(
+        default=100_000, ge=100, le=1_000_000
+    )
     google_places_contract_regime: Literal["unverified", "eea", "non_eea"] = "unverified"
     geocoding_provider: Literal["none", "nominatim", "nominatim_google"] = "nominatim"
     nominatim_url: str = "https://nominatim.openstreetmap.org"
@@ -281,8 +287,13 @@ class Settings(BaseSettings):
             )
         if self.tomtom_search_enabled or self.destination_search_fallback_enabled:
             raise ValueError("TomTom destination search and fallback must remain disabled")
-        if self.google_places_text_search_enabled:
-            raise ValueError("Google Text Search must remain disabled in this increment")
+        if self.destination_along_route_enabled != self.google_places_text_search_enabled:
+            raise ValueError(
+                "destination_along_route_enabled and google_places_text_search_enabled "
+                "must be enabled or disabled together"
+            )
+        if self.destination_along_route_enabled and not self.google_places_enabled:
+            raise ValueError("Search Along Route requires Google destination search")
         if self.google_places_enabled and self.google_places_contract_regime != "eea":
             raise ValueError(
                 "google_places_contract_regime must be eea after billing-account verification; "

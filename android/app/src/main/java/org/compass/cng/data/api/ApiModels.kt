@@ -2,12 +2,33 @@ package org.compass.cng.data.api
 
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationSearchContext
+import org.compass.cng.domain.model.AlongRouteContext
 
 data class ApiDestinationSuggestRequest(
     val query: String,
     val sessionId: String,
     val revision: Int,
     val context: DestinationSearchContext,
+)
+
+data class ApiAlongRouteSearchRequest(
+    val query: String,
+    val sessionId: String,
+    val revision: Int,
+    val route: AlongRouteContext?,
+    val pageCursor: String?,
+)
+
+data class ApiAlongRouteSearchResults(
+    val sessionId: String,
+    val revision: Int,
+    val routeId: String,
+    val routeRevision: Int,
+    val routeFingerprint: String,
+    val mode: String,
+    val limitation: String,
+    val nextPageCursor: String?,
+    val results: List<ApiDestinationSuggestion>,
 )
 
 data class ApiDestinationSuggestions(

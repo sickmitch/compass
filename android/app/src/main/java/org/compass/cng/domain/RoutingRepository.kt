@@ -2,6 +2,8 @@ package org.compass.cng.domain
 
 import java.time.OffsetDateTime
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.AlongRouteSearchRequest
+import org.compass.cng.domain.model.AlongRouteSearchResults
 import org.compass.cng.domain.model.DestinationSuggestRequest
 import org.compass.cng.domain.model.DestinationSuggestions
 import org.compass.cng.domain.model.DestinationSuggestion
@@ -17,6 +19,17 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 
 interface RoutingRepository {
+    suspend fun searchAlongRoute(request: AlongRouteSearchRequest): AlongRouteSearchResults =
+        throw UnsupportedOperationException("along-route search is unavailable")
+
+    suspend fun resolveAlongRoute(
+        search: AlongRouteSearchResults,
+        suggestion: DestinationSuggestion,
+        currentRoute: org.compass.cng.domain.model.AlongRouteContext,
+    ): ResolvedDestination = throw UnsupportedOperationException(
+        "along-route selection resolution is unavailable",
+    )
+
     suspend fun suggestDestinations(request: DestinationSuggestRequest): DestinationSuggestions =
         throw UnsupportedOperationException("destination suggestions are unavailable")
 
@@ -102,6 +115,9 @@ enum class RoutePreviewFailure {
     STATION_NOT_FOUND,
     STATION_UNAVAILABLE,
     CNG_ITINERARY_OUT_OF_RANGE,
+    ROUTE_REQUIRED,
+    STALE_SEARCH_CONTEXT,
+    RATE_LIMITED,
     SERVER,
     INVALID_RESPONSE,
 }

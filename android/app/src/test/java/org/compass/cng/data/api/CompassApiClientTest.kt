@@ -13,6 +13,8 @@ import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationSearchContext
 import org.compass.cng.domain.model.DestinationSearchBounds
+import org.compass.cng.domain.model.AlongRouteContext
+import org.compass.cng.domain.model.AlongRouteLeg
 import org.compass.cng.domain.server.ServerConnection
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -263,6 +265,51 @@ class CompassApiClientTest {
         assertEquals("/api/v1/destinations/resolve", resolveRequest.path)
         val resolveJson = json.parseToJsonElement(resolveRequest.body.readUtf8()).jsonObject
         assertEquals("place-a", resolveJson.getValue("provider_ref").jsonPrimitive.content)
+    }
+
+    @Test
+    fun sendsDedicatedSearchAlongRouteContract() = runTest {
+        server.enqueue(
+            successResponse(
+                """
+                {
+                  "session_id":"9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                  "revision":2,"route_id":"selected-route","route_revision":4,
+                  "route_fingerprint":"${"a".repeat(64)}","mode":"route_biased",
+                  "limitation":"provider bias","next_page_cursor":null,"results":[]
+                }
+                """.trimIndent(),
+            ),
+        )
+        client().searchAlongRoute(
+            ApiAlongRouteSearchRequest(
+                query = "farmacia",
+                sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+                revision = 2,
+                route = AlongRouteContext(
+                    routeId = "selected-route",
+                    routeRevision = 4,
+                    origin = Coordinate(45.0, 10.0),
+                    finalDestination = Coordinate(45.2, 10.2),
+                    remainingWaypoints = emptyList(),
+                    legs = listOf(AlongRouteLeg("_izlhA~rlgdF_{geC_{geC")),
+                ),
+                pageCursor = null,
+            ),
+        )
+
+        val request = server.takeRequest()
+        assertEquals("/api/v1/places/search-along-route", request.path)
+        val body = json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals("ADD_STOP_ALONG_ROUTE", body.getValue("intent").jsonPrimitive.content)
+        val route = body.getValue("route").jsonObject
+        assertEquals("selected-route", route.getValue("route_id").jsonPrimitive.content)
+        assertEquals(
+            "6",
+            route.getValue("legs").jsonArray.single().jsonObject
+                .getValue("precision").jsonPrimitive.content,
+        )
+        assertFalse(body.containsKey("context"))
     }
 
     @Test

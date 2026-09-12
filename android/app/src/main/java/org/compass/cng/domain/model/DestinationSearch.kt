@@ -7,6 +7,12 @@ enum class DestinationKind {
     UNKNOWN,
 }
 
+enum class DestinationSearchIntent {
+    ORIGIN_SEARCH,
+    DESTINATION_SEARCH,
+    ADD_STOP_ALONG_ROUTE,
+}
+
 data class DestinationSearchContext(
     val location: Coordinate? = null,
     val biasRadiusMeters: Double? = null,
@@ -84,4 +90,39 @@ data class ResolvedDestination(
     val revision: Int,
     val selection: ResolvedDestinationSelection,
     val navigationTarget: NavigationTarget,
+)
+
+data class AlongRouteLeg(
+    val encodedPolyline6: String,
+)
+
+data class AlongRouteContext(
+    val routeId: String,
+    val routeRevision: Int,
+    val origin: Coordinate,
+    val finalDestination: Coordinate,
+    val remainingWaypoints: List<Coordinate>,
+    val legs: List<AlongRouteLeg>,
+    val progressShapeIndex: Int? = null,
+    val insertionLegIndex: Int? = null,
+)
+
+data class AlongRouteSearchRequest(
+    val query: String,
+    val sessionId: String,
+    val revision: Int,
+    val route: AlongRouteContext?,
+    val pageCursor: String? = null,
+)
+
+data class AlongRouteSearchResults(
+    val sessionId: String,
+    val revision: Int,
+    val routeId: String,
+    val routeRevision: Int,
+    val routeFingerprint: String,
+    val mode: String,
+    val limitation: String,
+    val nextPageCursor: String?,
+    val results: List<DestinationSuggestion>,
 )

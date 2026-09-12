@@ -127,9 +127,10 @@ runner output; Phase 14 therefore remains recorded as implemented locally rather
 reported as device-accepted.
 
 Navigation UI Phase 15 adds up to eight ordered ordinary waypoints between departure and
-destination. The waypoint selector reuses all endpoint acquisition modes. Google POI/address suggestions are
-restricted to a route-derived rectangle and remain on the mapless search screen; selection still
-resolves one Place ID only. The ViewModel then asks Valhalla for the direct route and the exact
+destination. The waypoint selector reuses all endpoint acquisition modes. Its original
+route-rectangle search was superseded by the dedicated Search Along Route contract documented
+below; selection remains mapless and resolves one provider result only. The ViewModel then asks
+Valhalla for the direct route and the exact
 origin→waypoint→destination route, accepting the waypoint only when the latter's added road distance
 does not exceed the chosen kilometre limit. The default is 30% of direct-route length.
 
@@ -151,6 +152,27 @@ presentation across every non-map phase and dedicated day/night Material puck ar
 changing the accepted route-creation or navigation behavior. The operator reported the
 `scripts/run-navigation-ui-phase15-live.sh` physical-device gate green on 2026-09-11; Phase 15 is
 complete.
+
+Android `0.27.0` (`versionCode=42`) separates destination-search intent from ordinary-stop search.
+Origin and destination keep Google Autocomplete/Details. **Aggiungi tappa → Ricerca** instead sends
+the selected Valhalla route legs to Compass as E6, and Compass performs Google Text Search with
+Search Along Route after converting the geometry to E5. Search results stay on the mapless screen;
+the subsequent preview and itinerary use only the coordinate, provider reference and neutral label.
+The existing Valhalla preview/explicit **Scegli** commit remains authoritative and generic stops keep
+zero dwell time.
+
+Android `0.27.1` (`versionCode=43`) removes the former Milan startup coordinate from production
+state. Route-free follow listens to both enabled Android location providers and re-polls every five
+seconds whenever no fix exists or the last fix is older than ten seconds. Generic origin and
+destination searches use only a recent device fix as Google location bias; they never substitute a
+route endpoint or hard-coded city. Dark Material surfaces use OLED black without elevation tint.
+The personalization actions form two balanced rows: **Cambia percorso / Aggiungi tappe** and
+**Sosta CNG / Piano CNG**.
+
+Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
+Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,
+place search or the empty stop editor preserves the original route and keeps every planning action
+available. The four personalization actions also share the same neutral outlined-button treatment.
 
 Navigation UI Phase 7, accepted on a physical Android device on 2026-09-06, preserves Valhalla
 junction-sign groups and roundabout exit counts across the strict API, Android models and version-1

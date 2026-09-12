@@ -19,8 +19,13 @@ import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.geometry.Polyline6Encoder
+import org.compass.cng.domain.model.AlongRouteContext
+import org.compass.cng.domain.model.AlongRouteLeg
+import org.compass.cng.domain.model.AlongRouteSearchRequest
+import org.compass.cng.domain.model.AlongRouteSearchResults
+import org.compass.cng.domain.model.DestinationSearchIntent
 import org.compass.cng.domain.model.DestinationSearchContext
-import org.compass.cng.domain.model.DestinationSearchBounds
 import org.compass.cng.domain.model.DestinationSuggestRequest
 import org.compass.cng.domain.model.DestinationSuggestion
 import org.compass.cng.domain.model.ResolvedDestination
@@ -41,6 +46,7 @@ import org.compass.cng.domain.server.ServerConnection
 import org.compass.cng.domain.server.ServerConnectionRepository
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.navigation.FollowLocationPolicy
 import org.compass.cng.navigation.toNavigationRoute
 import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
 import org.compass.cng.domain.vehicle.VehicleProfile
@@ -112,8 +118,8 @@ data class PlannedIntermediateStop(
 data class RoutePlannerUiState(
     val stage: PlannerStage = PlannerStage.FOLLOW,
     val operation: PlannerOperation? = null,
-    val activeOrigin: Coordinate = DEFAULT_ORIGIN,
-    val activeDestination: Coordinate = DEFAULT_DESTINATION,
+    val activeOrigin: Coordinate = DEFAULT_MAP_CENTER,
+    val activeDestination: Coordinate = DEFAULT_ROUTE_DESTINATION,
     val originLatitudeInput: String = "",
     val originLongitudeInput: String = "",
     val destinationLatitudeInput: String = "",
@@ -139,6 +145,7 @@ data class RoutePlannerUiState(
         CurrentLocationAcquisitionStatus.IDLE,
     val routeInputsDirty: Boolean = true,
     val placeSearchTarget: RouteEndpoint = RouteEndpoint.DESTINATION,
+    val placeSearchIntent: DestinationSearchIntent = DestinationSearchIntent.DESTINATION_SEARCH,
     val currentLocationTarget: RouteEndpoint? = null,
     val followLocation: NavigationLocation? = null,
     val placeSearchQuery: String = "",
@@ -146,6 +153,7 @@ data class RoutePlannerUiState(
     val destinationSuggestions: List<DestinationSuggestion> = emptyList(),
     val destinationSearchSessionId: String? = null,
     val destinationSearchRevision: Int = 0,
+    val alongRouteSearchResults: AlongRouteSearchResults? = null,
     val pendingResolvedDestination: ResolvedDestination? = null,
     val pendingDestinationSuggestion: DestinationSuggestion? = null,
     val pendingIntermediateStopRoute: RouteWithIntermediateStop? = null,
@@ -190,15 +198,8 @@ data class RoutePlannerUiState(
     val isBusy: Boolean get() = operation != null
 
     companion object {
-        val DEFAULT_ORIGIN = Coordinate(latitude = 45.4642, longitude = 9.1900)
-        // The former city-centre endpoint is inside a time-restricted driving area.
-        // Keep the deterministic preview in Bologna, but terminate it at a
-        // road-reachable destination so depart-now routing can use live traffic.
-        val DEFAULT_DESTINATION = Coordinate(latitude = 44.5057, longitude = 11.3424)
-        const val DEFAULT_ORIGIN_LATITUDE = "45.4642"
-        const val DEFAULT_ORIGIN_LONGITUDE = "9.1900"
-        const val DEFAULT_DESTINATION_LATITUDE = "44.5057"
-        const val DEFAULT_DESTINATION_LONGITUDE = "11.3424"
+        val DEFAULT_MAP_CENTER = Coordinate(latitude = 42.5, longitude = 12.5)
+        val DEFAULT_ROUTE_DESTINATION = Coordinate(latitude = 44.5057, longitude = 11.3424)
         const val DEFAULT_EFFECTIVE_RANGE_KM = "300"
         const val DEFAULT_RESERVE_RANGE_KM = "30"
         const val DEFAULT_MAXIMUM_DETOUR_MINUTES = "10"
@@ -208,8 +209,8 @@ data class RoutePlannerUiState(
 class RoutePlannerViewModel(
     private val routingRepository: RoutingRepository,
     private val clock: Clock = Clock.systemDefaultZone(),
-    initialOrigin: Coordinate = MILAN,
-    initialDestination: Coordinate = BOLOGNA,
+    initialOrigin: Coordinate = INITIAL_ROUTE_ORIGIN,
+    initialDestination: Coordinate = INITIAL_ROUTE_DESTINATION,
     private val navigationSession: NavigationSession = NavigationSession(),
     private val vehicleProfileRepository: VehicleProfileRepository =
         InMemoryVehicleProfileRepository(),
@@ -323,7 +324,25 @@ class RoutePlannerViewModel(
     }
 
     fun updateFollowLocation(location: NavigationLocation) {
-        mutableUiState.value = mutableUiState.value.copy(followLocation = location)
+        val state = mutableUiState.value
+        mutableUiState.value = state.copy(
+            followLocation = location,
+            message = if (state.stage == PlannerStage.FOLLOW && state.message.isGpsMessage()) {
+                null
+            } else {
+                state.message
+            },
+        )
+    }
+
+    fun followLocationUnavailable() {
+        val state = mutableUiState.value
+        if (state.stage == PlannerStage.FOLLOW) {
+            mutableUiState.value = state.copy(
+                followLocation = null,
+                message = "Segnale GPS non disponibile. Verifica localizzazione e permessi.",
+            )
+        }
     }
 
     fun selectCoordinateInput(endpoint: RouteEndpoint) {
@@ -421,6 +440,13 @@ class RoutePlannerViewModel(
             mutableUiState.value = state.copy(
                 stage = PlannerStage.DESTINATION_SEARCH,
                 placeSearchTarget = endpoint,
+                placeSearchIntent = when (endpoint) {
+                    RouteEndpoint.ORIGIN -> DestinationSearchIntent.ORIGIN_SEARCH
+                    RouteEndpoint.INTERMEDIATE_STOP -> {
+                        DestinationSearchIntent.ADD_STOP_ALONG_ROUTE
+                    }
+                    RouteEndpoint.DESTINATION -> DestinationSearchIntent.DESTINATION_SEARCH
+                },
                 originCurrentLocationStatus = if (endpoint == RouteEndpoint.ORIGIN) {
                     CurrentLocationAcquisitionStatus.IDLE
                 } else {
@@ -442,6 +468,7 @@ class RoutePlannerViewModel(
                 destinationSuggestions = emptyList(),
                 destinationSearchSessionId = UUID.randomUUID().toString(),
                 destinationSearchRevision = 0,
+                alongRouteSearchResults = null,
                 pendingResolvedDestination = null,
                 pendingDestinationSuggestion = null,
                 pendingIntermediateStopRoute = null,
@@ -464,6 +491,7 @@ class RoutePlannerViewModel(
                 pendingResolvedDestination = null,
                 pendingDestinationSuggestion = null,
                 pendingIntermediateStopRoute = null,
+                alongRouteSearchResults = null,
                 message = null,
             )
             scheduleDestinationSuggestions(immediate = false)
@@ -472,6 +500,52 @@ class RoutePlannerViewModel(
 
     fun searchDestinations() {
         scheduleDestinationSuggestions(immediate = true)
+    }
+
+    fun loadMoreAlongRouteResults() {
+        val state = mutableUiState.value
+        val search = state.alongRouteSearchResults ?: return
+        val cursor = search.nextPageCursor ?: return
+        val context = state.alongRouteContext() ?: return
+        if (
+            state.isBusy || context.routeId != search.routeId ||
+            context.routeRevision != search.routeRevision
+        ) return
+        destinationSearchJob = viewModelScope.launch {
+            mutableUiState.value = state.copy(operation = PlannerOperation.PLACE_SEARCH)
+            try {
+                val page = routingRepository.searchAlongRoute(
+                    AlongRouteSearchRequest(
+                        query = state.placeSearchQuery.trim(),
+                        sessionId = search.sessionId,
+                        revision = search.revision,
+                        route = context,
+                        pageCursor = cursor,
+                    ),
+                )
+                val latest = mutableUiState.value
+                if (
+                    latest.destinationSearchSessionId != page.sessionId ||
+                    latest.destinationSearchRevision != page.revision ||
+                    latest.alongRouteContext()?.routeId != page.routeId
+                ) return@launch
+                val combined = (latest.destinationSuggestions + page.results)
+                    .distinctBy(DestinationSuggestion::id)
+                mutableUiState.value = latest.copy(
+                    operation = null,
+                    destinationSuggestions = combined,
+                    alongRouteSearchResults = page.copy(results = combined),
+                    message = null,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: RoutePreviewException) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = error.failure.placeSearchMessage(),
+                )
+            }
+        }
     }
 
     private fun scheduleDestinationSuggestions(immediate: Boolean) {
@@ -506,41 +580,64 @@ class RoutePlannerViewModel(
                 message = null,
             )
             try {
-                val contextLocation = current.followLocation?.coordinate
-                    ?: selectedTerritorialContext(current)
-                val results = routingRepository.suggestDestinations(
-                    DestinationSuggestRequest(
-                        query = query,
-                        sessionId = sessionId,
-                        revision = revision,
-                        context = DestinationSearchContext(
-                            location = contextLocation,
-                            biasRadiusMeters = contextLocation?.let { location ->
-                                if (current.placeSearchTarget == RouteEndpoint.INTERMEDIATE_STOP) {
-                                    null
-                                } else {
-                                    25_000.0
-                                }
-                            },
-                            routeBounds = if (
-                                current.placeSearchTarget == RouteEndpoint.INTERMEDIATE_STOP
-                            ) {
-                                current.intermediateStopSearchBounds()
-                            } else {
-                                null
-                            },
+                val alongRoute = current.placeSearchIntent ==
+                    DestinationSearchIntent.ADD_STOP_ALONG_ROUTE
+                val routeContext = if (alongRoute) current.alongRouteContext() else null
+                if (alongRoute && routeContext == null) {
+                    mutableUiState.value = current.copy(
+                        operation = null,
+                        message = "Calcola prima un percorso.",
+                    )
+                    return@launch
+                }
+                val alongResults = if (alongRoute) {
+                    routingRepository.searchAlongRoute(
+                        AlongRouteSearchRequest(
+                            query = query,
+                            sessionId = sessionId,
+                            revision = revision,
+                            route = routeContext,
                         ),
-                    ),
-                )
+                    )
+                } else {
+                    null
+                }
+                val ordinaryResults = if (!alongRoute) {
+                    val searchOrigin = current.followLocation
+                        ?.takeIf { FollowLocationPolicy.canBiasSearch(it, clock.millis()) }
+                        ?.coordinate
+                    routingRepository.suggestDestinations(
+                        DestinationSuggestRequest(
+                            query = query,
+                            sessionId = sessionId,
+                            revision = revision,
+                            context = DestinationSearchContext(
+                                location = searchOrigin,
+                                biasRadiusMeters = searchOrigin?.let { 25_000.0 },
+                            ),
+                        ),
+                    )
+                } else null
+                val resultSessionId = alongResults?.sessionId ?: ordinaryResults!!.sessionId
+                val resultRevision = alongResults?.revision ?: ordinaryResults!!.revision
+                val resultItems = alongResults?.results ?: ordinaryResults!!.results
                 val latest = mutableUiState.value
                 if (
-                    latest.destinationSearchSessionId != results.sessionId ||
-                    latest.destinationSearchRevision != results.revision
+                    latest.destinationSearchSessionId != resultSessionId ||
+                    latest.destinationSearchRevision != resultRevision ||
+                    (alongResults != null && latest.alongRouteContext()?.let {
+                        it.routeId != alongResults.routeId ||
+                            it.routeRevision != alongResults.routeRevision
+                    } != false)
                 ) return@launch
                 mutableUiState.value = mutableUiState.value.copy(
                     operation = null,
-                    destinationSuggestions = results.results,
-                    message = if (results.results.isEmpty()) "Nessun luogo trovato." else null,
+                    destinationSuggestions = resultItems,
+                    alongRouteSearchResults = alongResults,
+                    message = if (resultItems.isEmpty()) {
+                        if (alongRoute) "Nessun risultato trovato lungo questo percorso."
+                        else "Nessun luogo trovato."
+                    } else null,
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -578,16 +675,32 @@ class RoutePlannerViewModel(
                 message = null,
             )
             try {
-                val resolved = routingRepository.resolveDestination(
-                    sessionId,
-                    revision,
-                    suggestion,
-                )
+                val alongRouteSearch = snapshot.alongRouteSearchResults
+                val resolved = if (
+                    snapshot.placeSearchIntent == DestinationSearchIntent.ADD_STOP_ALONG_ROUTE
+                ) {
+                    if (alongRouteSearch == null) return@launch
+                    val currentRoute = snapshot.alongRouteContext()?.takeIf {
+                        it.routeId == alongRouteSearch.routeId &&
+                            it.routeRevision == alongRouteSearch.routeRevision
+                    } ?: return@launch
+                    routingRepository.resolveAlongRoute(
+                        alongRouteSearch,
+                        suggestion,
+                        currentRoute,
+                    )
+                } else {
+                    routingRepository.resolveDestination(sessionId, revision, suggestion)
+                }
                 val latest = mutableUiState.value
                 if (
                     latest.destinationSearchSessionId != resolved.sessionId ||
                     latest.destinationSearchRevision != resolved.revision ||
-                    latest.pendingDestinationSuggestion?.id != suggestion.id
+                    latest.pendingDestinationSuggestion?.id != suggestion.id ||
+                    (alongRouteSearch != null && latest.alongRouteContext()?.let {
+                        it.routeId != alongRouteSearch.routeId ||
+                            it.routeRevision != alongRouteSearch.routeRevision
+                    } != false)
                 ) return@launch
                 if (resolved.selection.formattedAddress == null) {
                     mutableUiState.value = latest.copy(
@@ -631,8 +744,7 @@ class RoutePlannerViewModel(
         previewIntermediateCoordinate(
             coordinate = coordinate,
             method = RouteLocationMethod.SEARCH,
-            privateDisplayName = resolved.selection.formattedAddress
-                ?: "Tappa selezionata",
+            privateDisplayName = "Tappa selezionata",
             resolved = resolved,
         )
     }
@@ -792,19 +904,6 @@ class RoutePlannerViewModel(
             )
         }
     }
-
-    private fun selectedTerritorialContext(state: RoutePlannerUiState): Coordinate? =
-        when (state.placeSearchTarget) {
-            RouteEndpoint.ORIGIN -> state.activeDestination.takeIf {
-                state.destinationLocationMethod != null
-            }
-            RouteEndpoint.INTERMEDIATE_STOP -> state.baseRoute?.geometry
-                ?.getOrNull(state.baseRoute.geometry.size / 2)
-                ?: state.activeOrigin.takeIf { state.originLocationMethod != null }
-            RouteEndpoint.DESTINATION -> state.activeOrigin.takeIf {
-                state.originLocationMethod != null
-            }
-        }
 
     fun selectDestination(result: PlaceSearchResult) {
         val state = mutableUiState.value
@@ -1061,9 +1160,13 @@ class RoutePlannerViewModel(
         val state = mutableUiState.value
         val route = state.baseRoute ?: return
         if (state.isBusy) return
+        pendingIntermediateResolution = null
+        pendingIntermediateDraft = null
         mutableUiState.value = state.copy(
             stage = PlannerStage.INTERMEDIATE_STOPS,
-            intermediateStopEnabled = true,
+            // Opening the editor does not create a stop. This flag represents only
+            // committed itinerary content and must remain false for an empty draft.
+            intermediateStopEnabled = state.plannedIntermediateStops.isNotEmpty(),
             intermediateStopMaximumDeviationKmInput = state
                 .intermediateStopMaximumDeviationKmInput.ifBlank {
                     (route.distanceMeters * DEFAULT_INTERMEDIATE_STOP_DEVIATION_FRACTION / 1_000.0)
@@ -1946,8 +2049,13 @@ class RoutePlannerViewModel(
 
     fun navigateBack() {
         if (mutableUiState.value.isBusy) return
+        if (mutableUiState.value.stage == PlannerStage.DESTINATION_SEARCH) {
+            destinationSearchJob?.cancel()
+            destinationSearchJob = null
+        }
         if (mutableUiState.value.stage == PlannerStage.INTERMEDIATE_STOP_PREVIEW) {
             pendingIntermediateResolution = null
+            pendingIntermediateDraft = null
         }
         mutableUiState.value = when (mutableUiState.value.stage) {
             PlannerStage.FOLLOW -> mutableUiState.value
@@ -1989,11 +2097,62 @@ class RoutePlannerViewModel(
                 pendingIntermediateStopCoordinate = null,
                 message = null,
             )
-            PlannerStage.INTERMEDIATE_STOPS -> mutableUiState.value.copy(
-                stage = PlannerStage.PREVIEW,
-                editingIntermediateStopId = null,
-                message = null,
-            )
+            PlannerStage.INTERMEDIATE_STOPS -> {
+                pendingIntermediateResolution = null
+                pendingIntermediateDraft = null
+                val hasCommittedStops = mutableUiState.value.plannedIntermediateStops.isNotEmpty()
+                mutableUiState.value.copy(
+                    stage = PlannerStage.PREVIEW,
+                    intermediateStopEnabled = hasCommittedStops,
+                    intermediateStopLatitudeInput = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopLatitudeInput
+                    } else {
+                        ""
+                    },
+                    intermediateStopLongitudeInput = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopLongitudeInput
+                    } else {
+                        ""
+                    },
+                    intermediateStopDisplayName = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopDisplayName
+                    } else {
+                        "Non selezionata"
+                    },
+                    intermediateStopAttributions = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopAttributions
+                    } else {
+                        emptyList()
+                    },
+                    intermediateStopLocationMethod = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopLocationMethod
+                    } else {
+                        null
+                    },
+                    intermediateStopCurrentLocationStatus = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopCurrentLocationStatus
+                    } else {
+                        CurrentLocationAcquisitionStatus.IDLE
+                    },
+                    intermediateStopRoute = if (hasCommittedStops) {
+                        mutableUiState.value.intermediateStopRoute
+                    } else {
+                        null
+                    },
+                    pendingIntermediateStopRoute = null,
+                    pendingIntermediateStopsRoute = null,
+                    pendingIntermediateStopCoordinate = null,
+                    destinationSearchSessionId = null,
+                    destinationSuggestions = emptyList(),
+                    alongRouteSearchResults = null,
+                    pendingResolvedDestination = null,
+                    pendingDestinationSuggestion = null,
+                    mapPickerTarget = null,
+                    mapPickerCoordinate = null,
+                    editingIntermediateStopId = null,
+                    message = null,
+                )
+            }
             PlannerStage.CONFIGURE_CNG -> mutableUiState.value.copy(
                 stage = PlannerStage.PREVIEW,
                 message = null,
@@ -2372,15 +2531,24 @@ class RoutePlannerViewModel(
     }
 
     companion object {
-        val MILAN: Coordinate = RoutePlannerUiState.DEFAULT_ORIGIN
-        val BOLOGNA: Coordinate = RoutePlannerUiState.DEFAULT_DESTINATION
+        val INITIAL_ROUTE_ORIGIN: Coordinate = RoutePlannerUiState.DEFAULT_MAP_CENTER
+        val INITIAL_ROUTE_DESTINATION: Coordinate = RoutePlannerUiState.DEFAULT_ROUTE_DESTINATION
     }
 }
+
+private fun String?.isGpsMessage(): Boolean = this?.let {
+    it.startsWith("Segnale GPS") || it.startsWith("Impossibile ottenere la posizione")
+} == true
+
 
 private fun RoutePreviewFailure.placeSearchMessage(): String = when (this) {
     RoutePreviewFailure.NETWORK -> "Ricerca non disponibile: controlla la connessione."
     RoutePreviewFailure.AUTHENTICATION -> "Credenziali server non valide. Apri Server e correggile."
     RoutePreviewFailure.SERVER -> "Il servizio di ricerca non è disponibile."
+    RoutePreviewFailure.ROUTE_REQUIRED -> "Calcola prima un percorso."
+    RoutePreviewFailure.STALE_SEARCH_CONTEXT ->
+        "Il percorso è cambiato. Riapri Aggiungi tappa."
+    RoutePreviewFailure.RATE_LIMITED -> "Troppe ricerche. Attendi e riprova."
     else -> "La risposta del servizio di ricerca non è valida."
 }
 
@@ -2452,34 +2620,33 @@ private fun RoutePlannerUiState.destinationCoordinateOrNull(): Coordinate? = par
     "destinazione",
 ).coordinate
 
-private fun RoutePlannerUiState.intermediateStopSearchBounds(): DestinationSearchBounds? {
-    val geometry = baseRoute?.geometry?.takeIf { it.isNotEmpty() } ?: return null
-    val maximumDeviationKm = intermediateStopMaximumDeviationKmInput.parseDecimal()
-        ?.takeIf { it >= 0.0 } ?: return null
-    val searchPaddingKm = maximumDeviationKm.coerceAtLeast(MINIMUM_ROUTE_SEARCH_PADDING_KM)
-    val middleLatitude = geometry.map(Coordinate::latitude).average()
-    val latitudePadding = searchPaddingKm / 111.0
-    val longitudeScale = kotlin.math.cos(Math.toRadians(middleLatitude))
-        .coerceAtLeast(0.15)
-    val longitudePadding = searchPaddingKm / (111.0 * longitudeScale)
-    return DestinationSearchBounds(
-        southWest = Coordinate(
-            latitude = (geometry.minOf(Coordinate::latitude) - latitudePadding)
-                .coerceAtLeast(-90.0),
-            longitude = (geometry.minOf(Coordinate::longitude) - longitudePadding)
-                .coerceAtLeast(-180.0),
-        ),
-        northEast = Coordinate(
-            latitude = (geometry.maxOf(Coordinate::latitude) + latitudePadding)
-                .coerceAtMost(90.0),
-            longitude = (geometry.maxOf(Coordinate::longitude) + longitudePadding)
-                .coerceAtMost(180.0),
-        ),
+private fun RoutePlannerUiState.alongRouteContext(): AlongRouteContext? {
+    val direct = baseRoute ?: return null
+    val multiLeg = intermediateStopsRoute?.takeIf {
+        plannedIntermediateStops.isNotEmpty() &&
+            it.legs.size == plannedIntermediateStops.size + 1
+    }
+    val activeLegs = multiLeg?.legs ?: listOf(direct)
+    if (activeLegs.any { it.geometry.size < 2 }) return null
+    val routeId = multiLeg?.navigation?.routeId ?: direct.navigation.routeId
+    val encodedLegs = activeLegs.map { AlongRouteLeg(Polyline6Encoder.encode(it.geometry)) }
+    val routeRevision = alongRouteRevision(routeId, encodedLegs)
+    return AlongRouteContext(
+        routeId = routeId,
+        routeRevision = routeRevision,
+        origin = activeLegs.first().origin,
+        finalDestination = activeLegs.last().destination,
+        remainingWaypoints = multiLeg?.stops ?: emptyList(),
+        legs = encodedLegs,
     )
 }
 
+internal fun alongRouteRevision(routeId: String, legs: List<AlongRouteLeg>): Int =
+    legs.fold(routeId.hashCode()) { revision, leg ->
+        31 * revision + leg.encodedPolyline6.hashCode()
+    } and Int.MAX_VALUE
+
 private const val DEFAULT_INTERMEDIATE_STOP_DEVIATION_FRACTION = 0.30
-private const val MINIMUM_ROUTE_SEARCH_PADDING_KM = 0.1
 
 private fun Double.toInput(): String = if (this % 1.0 == 0.0) {
     toInt().toString()
@@ -2546,6 +2713,9 @@ private fun RoutePreviewFailure.baseRouteMessage(): String = when (this) {
     RoutePreviewFailure.STATION_NOT_FOUND,
     RoutePreviewFailure.STATION_UNAVAILABLE,
     RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE,
+    RoutePreviewFailure.ROUTE_REQUIRED,
+    RoutePreviewFailure.STALE_SEARCH_CONTEXT,
+    RoutePreviewFailure.RATE_LIMITED,
     -> "La risposta del server non è valida."
 }
 
@@ -2558,6 +2728,9 @@ private fun RoutePreviewFailure.candidateMessage(): String = when (this) {
     RoutePreviewFailure.STATION_NOT_FOUND,
     RoutePreviewFailure.STATION_UNAVAILABLE,
     RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE,
+    RoutePreviewFailure.ROUTE_REQUIRED,
+    RoutePreviewFailure.STALE_SEARCH_CONTEXT,
+    RoutePreviewFailure.RATE_LIMITED,
     -> "La ricerca delle stazioni non è più valida."
 }
 
@@ -2572,6 +2745,10 @@ private fun RoutePreviewFailure.selectedRouteMessage(): String = when (this) {
     }
     RoutePreviewFailure.SERVER -> "Il ricalcolo del percorso non è disponibile."
     RoutePreviewFailure.INVALID_RESPONSE -> "Il server ha restituito un percorso non valido."
+    RoutePreviewFailure.ROUTE_REQUIRED,
+    RoutePreviewFailure.STALE_SEARCH_CONTEXT,
+    RoutePreviewFailure.RATE_LIMITED,
+    -> "La richiesta di ricalcolo non è più valida."
 }
 
 private fun RoutePreviewFailure.predictiveMessage(): String = when (this) {
@@ -2583,6 +2760,9 @@ private fun RoutePreviewFailure.predictiveMessage(): String = when (this) {
     RoutePreviewFailure.STATION_NOT_FOUND,
     RoutePreviewFailure.STATION_UNAVAILABLE,
     RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE,
+    RoutePreviewFailure.ROUTE_REQUIRED,
+    RoutePreviewFailure.STALE_SEARCH_CONTEXT,
+    RoutePreviewFailure.RATE_LIMITED,
     -> "La valutazione delle stazioni non è più valida."
 }
 
@@ -2597,4 +2777,8 @@ private fun RoutePreviewFailure.selectedItineraryRouteMessage(): String = when (
     }
     RoutePreviewFailure.SERVER -> "Il calcolo dell'itinerario CNG non è disponibile."
     RoutePreviewFailure.INVALID_RESPONSE -> "Il server ha restituito un itinerario non valido."
+    RoutePreviewFailure.ROUTE_REQUIRED,
+    RoutePreviewFailure.STALE_SEARCH_CONTEXT,
+    RoutePreviewFailure.RATE_LIMITED,
+    -> "La richiesta dell'itinerario non è più valida."
 }

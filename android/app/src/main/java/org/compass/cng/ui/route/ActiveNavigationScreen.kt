@@ -1768,12 +1768,12 @@ private val junctionSignSamples = listOf(
     ),
     JunctionSignSample(
         title = "Diramazione a sinistra",
-        instruction = "Mantieni la sinistra verso Milano.",
+        instruction = "Mantieni la sinistra verso Modena.",
         visual = maneuverVisual(24, null),
         sign = NavigationJunctionSignUiModel(
             exitNumber = null,
             branches = "A1 / E 35",
-            toward = "Milano",
+            toward = "Modena",
             exitName = null,
         ),
     ),

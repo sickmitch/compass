@@ -4,6 +4,22 @@ The runtime contract is [openapi.json](openapi.json). All distances are metres, 
 timestamps ISO 8601, and CNG prices explicit unit prices (normally EUR/kg). Unknown request fields
 are rejected. Errors use `{"code":"...","message":"..."}` except dependency-state health responses.
 
+## Ordinary stops along a selected route
+
+`POST /api/v1/places/search-along-route` is reserved for the explicit
+`ADD_STOP_ALONG_ROUTE` intent. The request carries a route ID/revision, ordered waypoints and one
+E6 polyline per selected Valhalla leg. A missing route returns `route_required`; invalid, circular or
+obsolete contexts are never replaced with a global search. The response reports `mode=route_biased`,
+the route fingerprint, normalized Google results and an optional opaque pagination cursor.
+
+`POST /api/v1/places/search-along-route/resolve` resolves only a result retained in the same
+transient owner/session/query/route context. It returns text for the mapless selection flow and a
+separate neutral map target. Search does not modify the itinerary; Android asks the existing
+Valhalla multi-waypoint endpoint for one preview after selection and commits it only on confirmation.
+
+`GET /api/v1/places/search-along-route/metrics` exposes aggregate calls, latency, errors, result
+count, stale-response discards and successful resolutions without query, Place ID or polyline labels.
+
 ## Authentication
 
 When `API_AUTH_ENABLED=true`, every `/api/v1` resource requires HTTP Basic authentication. Send the

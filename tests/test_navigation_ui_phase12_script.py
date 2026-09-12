@@ -74,9 +74,9 @@ def test_phase12_candidate_order_and_pastel_price_tiers_are_explicit() -> None:
     assert "CHEAPEST" in presentation
     assert "SECOND_CHEAPEST" in presentation
     assert "orderedCandidates" in ui
-    assert "Color(0xFFCBEBD4)" in ui
-    assert "Color(0xFFFFE9A8)" in ui
-    assert "Color(0xFFF4C8CC)" in ui
+    assert "semanticColors.successContainer" in ui
+    assert "semanticColors.warningContainer" in ui
+    assert "MaterialTheme.colorScheme.errorContainer" in ui
 
 
 def test_phase12_ranking_gate_is_operator_driven_and_checks_logged_invariant() -> None:

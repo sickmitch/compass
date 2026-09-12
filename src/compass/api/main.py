@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from compass import __version__
+from compass.api.along_route_search import router as along_route_search_router
 from compass.api.auth import (
     ApiAuthenticationError,
     require_api_user,
@@ -65,6 +66,11 @@ app.include_router(
 )
 app.include_router(
     search_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
+app.include_router(
+    along_route_search_router,
     dependencies=protected_api_dependencies,
     responses=protected_api_responses,
 )

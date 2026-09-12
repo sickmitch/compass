@@ -35,6 +35,274 @@
         "title": "AddressComponentResponse",
         "type": "object"
       },
+      "AlongRouteMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "latency_ms_total": {
+            "title": "Latency Ms Total",
+            "type": "integer"
+          },
+          "provider_calls": {
+            "title": "Provider Calls",
+            "type": "integer"
+          },
+          "provider_errors": {
+            "title": "Provider Errors",
+            "type": "integer"
+          },
+          "rate_limited": {
+            "title": "Rate Limited",
+            "type": "integer"
+          },
+          "resolutions_succeeded": {
+            "title": "Resolutions Succeeded",
+            "type": "integer"
+          },
+          "results_returned": {
+            "title": "Results Returned",
+            "type": "integer"
+          },
+          "stale_responses_discarded": {
+            "title": "Stale Responses Discarded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_calls",
+          "latency_ms_total",
+          "provider_errors",
+          "rate_limited",
+          "results_returned",
+          "stale_responses_discarded",
+          "resolutions_succeeded"
+        ],
+        "title": "AlongRouteMetricsResponse",
+        "type": "object"
+      },
+      "AlongRouteResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "intent": {
+            "const": "ADD_STOP_ALONG_ROUTE",
+            "title": "Intent",
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Provider Ref",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "route": {
+            "$ref": "#/components/schemas/RouteContextRequest"
+          },
+          "route_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Route Fingerprint",
+            "type": "string"
+          },
+          "route_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Route Id",
+            "type": "string"
+          },
+          "route_revision": {
+            "minimum": 0.0,
+            "title": "Route Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "session_id",
+          "revision",
+          "route_id",
+          "route_revision",
+          "route_fingerprint",
+          "provider_ref",
+          "route"
+        ],
+        "title": "AlongRouteResolveRequest",
+        "type": "object"
+      },
+      "AlongRouteResolveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "navigation_target": {
+            "$ref": "#/components/schemas/compass__api__along_route_search__NavigationTargetResponse"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "route_id": {
+            "title": "Route Id",
+            "type": "string"
+          },
+          "route_revision": {
+            "title": "Route Revision",
+            "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/compass__api__along_route_search__ResolvedSelectionResponse"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "revision",
+          "route_id",
+          "route_revision",
+          "selection",
+          "navigation_target"
+        ],
+        "title": "AlongRouteResolveResponse",
+        "type": "object"
+      },
+      "AlongRouteSearchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "intent": {
+            "const": "ADD_STOP_ALONG_ROUTE",
+            "title": "Intent",
+            "type": "string"
+          },
+          "language": {
+            "default": "it",
+            "pattern": "^[a-z]{2}$",
+            "title": "Language",
+            "type": "string"
+          },
+          "page_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Cursor"
+          },
+          "query": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteContextRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "query",
+          "session_id",
+          "revision"
+        ],
+        "title": "AlongRouteSearchRequest",
+        "type": "object"
+      },
+      "AlongRouteSearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "limitation": {
+            "title": "Limitation",
+            "type": "string"
+          },
+          "mode": {
+            "const": "route_biased",
+            "title": "Mode",
+            "type": "string"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page Cursor"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestionResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "route_fingerprint": {
+            "title": "Route Fingerprint",
+            "type": "string"
+          },
+          "route_id": {
+            "title": "Route Id",
+            "type": "string"
+          },
+          "route_revision": {
+            "title": "Route Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "revision",
+          "route_id",
+          "route_revision",
+          "route_fingerprint",
+          "mode",
+          "limitation",
+          "next_page_cursor",
+          "results"
+        ],
+        "title": "AlongRouteSearchResponse",
+        "type": "object"
+      },
       "AuthenticationCheckResponse": {
         "properties": {
           "auth_enabled": {
@@ -789,14 +1057,14 @@
         "additionalProperties": false,
         "properties": {
           "navigation_target": {
-            "$ref": "#/components/schemas/NavigationTargetResponse"
+            "$ref": "#/components/schemas/compass__api__search__NavigationTargetResponse"
           },
           "revision": {
             "title": "Revision",
             "type": "integer"
           },
           "selection": {
-            "$ref": "#/components/schemas/ResolvedSelectionResponse"
+            "$ref": "#/components/schemas/compass__api__search__ResolvedSelectionResponse"
           },
           "session_id": {
             "title": "Session Id",
@@ -1969,37 +2237,6 @@
           "exit_name_elements"
         ],
         "title": "ManeuverSignResponse",
-        "type": "object"
-      },
-      "NavigationTargetResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "location": {
-            "$ref": "#/components/schemas/SearchCoordinateResponse"
-          },
-          "map_label": {
-            "const": "Destinazione selezionata",
-            "title": "Map Label",
-            "type": "string"
-          },
-          "provider_ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider Ref"
-          }
-        },
-        "required": [
-          "location",
-          "provider_ref",
-          "map_label"
-        ],
-        "title": "NavigationTargetResponse",
         "type": "object"
       },
       "NavigationTimingResponse": {
@@ -3881,86 +4118,77 @@
         "title": "RankingPolicyResponse",
         "type": "object"
       },
-      "ResolvedSelectionResponse": {
+      "RouteContextRequest": {
         "additionalProperties": false,
         "properties": {
-          "address_components": {
-            "items": {
-              "$ref": "#/components/schemas/AddressComponentResponse"
-            },
-            "title": "Address Components",
-            "type": "array"
+          "final_destination": {
+            "$ref": "#/components/schemas/CoordinateRequest"
           },
-          "attribution": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Attribution",
-            "type": "array"
-          },
-          "field_sources": {
-            "additionalProperties": {
-              "const": "google_places_new",
-              "type": "string"
-            },
-            "title": "Field Sources",
-            "type": "object"
-          },
-          "formatted_address": {
+          "insertion_leg_index": {
             "anyOf": [
               {
-                "type": "string"
+                "maximum": 8.0,
+                "minimum": 0.0,
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Formatted Address"
+            "title": "Insertion Leg Index"
           },
-          "kind": {
-            "enum": [
-              "business",
-              "address",
-              "locality",
-              "unknown"
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/RouteLegRequest"
+            },
+            "maxItems": 9,
+            "minItems": 1,
+            "title": "Legs",
+            "type": "array"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "progress_shape_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Kind",
+            "title": "Progress Shape Index"
+          },
+          "remaining_waypoints": {
+            "items": {
+              "$ref": "#/components/schemas/CoordinateRequest"
+            },
+            "maxItems": 8,
+            "title": "Remaining Waypoints",
+            "type": "array"
+          },
+          "route_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Route Id",
             "type": "string"
           },
-          "location": {
-            "$ref": "#/components/schemas/SearchCoordinateResponse"
-          },
-          "normalized_address": {
-            "$ref": "#/components/schemas/NormalizedAddressResponse"
-          },
-          "provider": {
-            "const": "google_places_new",
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_ref": {
-            "title": "Provider Ref",
-            "type": "string"
-          },
-          "resolution_status": {
-            "const": "resolved",
-            "title": "Resolution Status",
-            "type": "string"
+          "route_revision": {
+            "minimum": 0.0,
+            "title": "Route Revision",
+            "type": "integer"
           }
         },
         "required": [
-          "provider",
-          "provider_ref",
-          "formatted_address",
-          "address_components",
-          "normalized_address",
-          "location",
-          "kind",
-          "resolution_status",
-          "attribution",
-          "field_sources"
+          "route_id",
+          "route_revision",
+          "origin",
+          "final_destination",
+          "legs"
         ],
-        "title": "ResolvedSelectionResponse",
+        "title": "RouteContextRequest",
         "type": "object"
       },
       "RouteGeometry": {
@@ -3982,6 +4210,28 @@
           "encoded_polyline"
         ],
         "title": "RouteGeometry",
+        "type": "object"
+      },
+      "RouteLegRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "encoded_polyline": {
+            "maxLength": 1000000,
+            "minLength": 2,
+            "title": "Encoded Polyline",
+            "type": "string"
+          },
+          "precision": {
+            "const": 6,
+            "title": "Precision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "encoded_polyline",
+          "precision"
+        ],
+        "title": "RouteLegRequest",
         "type": "object"
       },
       "RouteLegResponse": {
@@ -5092,6 +5342,98 @@
         "title": "StationOsmResponse",
         "type": "object"
       },
+      "SuggestionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Preview"
+          },
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "distance_meters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Meters"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "business",
+              "address",
+              "locality",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "provider": {
+            "const": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_rank": {
+            "title": "Provider Rank",
+            "type": "integer"
+          },
+          "provider_ref": {
+            "title": "Provider Ref",
+            "type": "string"
+          },
+          "requires_resolution": {
+            "title": "Requires Resolution",
+            "type": "boolean"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "provider_ref",
+          "kind",
+          "title",
+          "subtitle",
+          "address_preview",
+          "distance_meters",
+          "provider_rank",
+          "requires_resolution",
+          "attribution"
+        ],
+        "title": "SuggestionResponse",
+        "type": "object"
+      },
       "TrafficHealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5313,6 +5655,205 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "compass__api__along_route_search__NavigationTargetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "map_label": {
+            "const": "Destinazione selezionata",
+            "title": "Map Label",
+            "type": "string"
+          },
+          "provider_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Ref"
+          }
+        },
+        "required": [
+          "location",
+          "provider_ref",
+          "map_label"
+        ],
+        "title": "NavigationTargetResponse",
+        "type": "object"
+      },
+      "compass__api__along_route_search__ResolvedSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attribution",
+            "type": "array"
+          },
+          "formatted_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formatted Address"
+          },
+          "kind": {
+            "enum": [
+              "business",
+              "address",
+              "locality",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "provider": {
+            "const": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_ref": {
+            "title": "Provider Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_ref",
+          "formatted_address",
+          "location",
+          "kind",
+          "attribution"
+        ],
+        "title": "ResolvedSelectionResponse",
+        "type": "object"
+      },
+      "compass__api__search__NavigationTargetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          },
+          "map_label": {
+            "const": "Destinazione selezionata",
+            "title": "Map Label",
+            "type": "string"
+          },
+          "provider_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Ref"
+          }
+        },
+        "required": [
+          "location",
+          "provider_ref",
+          "map_label"
+        ],
+        "title": "NavigationTargetResponse",
+        "type": "object"
+      },
+      "compass__api__search__ResolvedSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address_components": {
+            "items": {
+              "$ref": "#/components/schemas/AddressComponentResponse"
+            },
+            "title": "Address Components",
+            "type": "array"
+          },
+          "attribution": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attribution",
+            "type": "array"
+          },
+          "field_sources": {
+            "additionalProperties": {
+              "const": "google_places_new",
+              "type": "string"
+            },
+            "title": "Field Sources",
+            "type": "object"
+          },
+          "formatted_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formatted Address"
+          },
+          "kind": {
+            "enum": [
+              "business",
+              "address",
+              "locality",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/SearchCoordinateResponse"
+          },
+          "normalized_address": {
+            "$ref": "#/components/schemas/NormalizedAddressResponse"
+          },
+          "provider": {
+            "const": "google_places_new",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_ref": {
+            "title": "Provider Ref",
+            "type": "string"
+          },
+          "resolution_status": {
+            "const": "resolved",
+            "title": "Resolution Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_ref",
+          "formatted_address",
+          "address_components",
+          "normalized_address",
+          "location",
+          "kind",
+          "resolution_status",
+          "attribution",
+          "field_sources"
+        ],
+        "title": "ResolvedSelectionResponse",
         "type": "object"
       }
     },
@@ -6155,6 +6696,194 @@
           }
         ],
         "summary": "Place Search",
+        "tags": [
+          "place-search"
+        ]
+      }
+    },
+    "/api/v1/places/search-along-route": {
+      "post": {
+        "operationId": "search_along_route_api_v1_places_search_along_route_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlongRouteSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlongRouteSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Search Along Route",
+        "tags": [
+          "place-search"
+        ]
+      }
+    },
+    "/api/v1/places/search-along-route/metrics": {
+      "get": {
+        "operationId": "along_route_metrics_api_v1_places_search_along_route_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlongRouteMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Along Route Metrics",
+        "tags": [
+          "place-search"
+        ]
+      }
+    },
+    "/api/v1/places/search-along-route/resolve": {
+      "post": {
+        "operationId": "resolve_along_route_api_v1_places_search_along_route_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlongRouteResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlongRouteResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Resolve Along Route",
         "tags": [
           "place-search"
         ]

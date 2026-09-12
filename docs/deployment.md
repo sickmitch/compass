@@ -1074,6 +1074,21 @@ GOOGLE_PLACES_TEXT_SEARCH_ENABLED=false
 GEOCODING_PROVIDER=none
 ```
 
+For ordinary-place discovery along an already calculated route, enable the dedicated Text Search
+operation as well:
+
+```dotenv
+GOOGLE_PLACES_TEXT_SEARCH_ENABLED=true
+DESTINATION_ALONG_ROUTE_ENABLED=true
+DESTINATION_ALONG_ROUTE_PAGE_SIZE=10
+DESTINATION_ALONG_ROUTE_MAX_GEOMETRY_POINTS=50000
+DESTINATION_ALONG_ROUTE_MAX_ENCODED_CHARS=100000
+```
+
+This does not enable the legacy `/places/search` adapter: `GEOCODING_PROVIDER=none` keeps that path
+disabled. Search Along Route is accepted only through its dedicated authenticated endpoint and does
+not affect TomTom traffic.
+
 `GOOGLE_PLACES_CONTRACT_REGIME=unverified` is the safe default and prevents API startup when Google
 destination search is enabled. A verified `non_eea` value is also blocked pending a separate terms
 review; do not infer the regime from device position. Enable Places API (New), billing, quota and

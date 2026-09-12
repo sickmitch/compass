@@ -56,6 +56,10 @@ class CompassApiClient(
     private val placeSearchUrl: HttpUrl get() = resolve("api/v1/places/search")
     private val destinationSuggestUrl: HttpUrl get() = resolve("api/v1/destinations/suggest")
     private val destinationResolveUrl: HttpUrl get() = resolve("api/v1/destinations/resolve")
+    private val alongRouteSearchUrl: HttpUrl
+        get() = resolve("api/v1/places/search-along-route")
+    private val alongRouteResolveUrl: HttpUrl
+        get() = resolve("api/v1/places/search-along-route/resolve")
     private val rankedCandidatesUrl: HttpUrl get() = resolve("api/v1/cng/ranked-candidates")
     private val predictiveCandidatesUrl: HttpUrl
         get() = resolve("api/v1/cng/predictive-candidates")
@@ -99,6 +103,41 @@ class CompassApiClient(
             destinationResolveUrl,
             json.encodeToString(
                 DestinationResolveRequestDto(sessionId, revision, provider, providerRef),
+            ),
+        ).toApi()
+    } catch (error: IllegalArgumentException) {
+        throw ApiClientException.InvalidResponse(error)
+    }
+
+    suspend fun searchAlongRoute(
+        request: ApiAlongRouteSearchRequest,
+    ): ApiAlongRouteSearchResults = try {
+        post<AlongRouteSearchResponseDto>(
+            alongRouteSearchUrl,
+            json.encodeToString(AlongRouteSearchRequestDto.fromApi(request)),
+        ).toApi()
+    } catch (error: IllegalArgumentException) {
+        throw ApiClientException.InvalidResponse(error)
+    }
+
+    suspend fun resolveAlongRoute(
+        search: ApiAlongRouteSearchResults,
+        providerRef: String,
+        currentRoute: org.compass.cng.domain.model.AlongRouteContext,
+    ): ApiResolvedDestination = try {
+        post<AlongRouteResolveResponseDto>(
+            alongRouteResolveUrl,
+            json.encodeToString(
+                AlongRouteResolveRequestDto(
+                    intent = "ADD_STOP_ALONG_ROUTE",
+                    sessionId = search.sessionId,
+                    revision = search.revision,
+                    routeId = search.routeId,
+                    routeRevision = search.routeRevision,
+                    routeFingerprint = search.routeFingerprint,
+                    providerRef = providerRef,
+                    route = currentRoute.toDto(),
+                ),
             ),
         ).toApi()
     } catch (error: IllegalArgumentException) {
@@ -513,6 +552,102 @@ private data class DestinationResolveResponseDto(
     val revision: Int,
     val selection: ResolvedSelectionDto,
     @SerialName("navigation_target") val navigationTarget: NavigationTargetDto,
+)
+
+@Serializable
+private data class AlongRouteSearchRequestDto(
+    val intent: String,
+    val query: String,
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    val language: String = "it",
+    val route: AlongRouteContextDto?,
+    @SerialName("page_cursor") val pageCursor: String?,
+) {
+    companion object {
+        fun fromApi(value: ApiAlongRouteSearchRequest) = AlongRouteSearchRequestDto(
+            intent = "ADD_STOP_ALONG_ROUTE",
+            query = value.query,
+            sessionId = value.sessionId,
+            revision = value.revision,
+            pageCursor = value.pageCursor,
+            route = value.route?.toDto(),
+        )
+    }
+}
+
+@Serializable
+private data class AlongRouteContextDto(
+    @SerialName("route_id") val routeId: String,
+    @SerialName("route_revision") val routeRevision: Int,
+    val origin: CoordinateDto,
+    @SerialName("final_destination") val finalDestination: CoordinateDto,
+    @SerialName("remaining_waypoints") val remainingWaypoints: List<CoordinateDto>,
+    val legs: List<AlongRouteLegDto>,
+    @SerialName("progress_shape_index") val progressShapeIndex: Int?,
+    @SerialName("insertion_leg_index") val insertionLegIndex: Int?,
+)
+
+@Serializable
+private data class AlongRouteLegDto(
+    @SerialName("encoded_polyline") val encodedPolyline: String,
+    val precision: Int,
+)
+
+private fun org.compass.cng.domain.model.AlongRouteContext.toDto() = AlongRouteContextDto(
+    routeId = routeId,
+    routeRevision = routeRevision,
+    origin = origin.toDto(),
+    finalDestination = finalDestination.toDto(),
+    remainingWaypoints = remainingWaypoints.map(Coordinate::toDto),
+    legs = legs.map { AlongRouteLegDto(it.encodedPolyline6, precision = 6) },
+    progressShapeIndex = progressShapeIndex,
+    insertionLegIndex = insertionLegIndex,
+)
+
+@Serializable
+private data class AlongRouteSearchResponseDto(
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("route_revision") val routeRevision: Int,
+    @SerialName("route_fingerprint") val routeFingerprint: String,
+    val mode: String,
+    val limitation: String,
+    @SerialName("next_page_cursor") val nextPageCursor: String?,
+    val results: List<DestinationSuggestionDto>,
+)
+
+@Serializable
+private data class AlongRouteResolveRequestDto(
+    val intent: String,
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("route_revision") val routeRevision: Int,
+    @SerialName("route_fingerprint") val routeFingerprint: String,
+    @SerialName("provider_ref") val providerRef: String,
+    val route: AlongRouteContextDto,
+)
+
+@Serializable
+private data class AlongRouteResolveResponseDto(
+    @SerialName("session_id") val sessionId: String,
+    val revision: Int,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("route_revision") val routeRevision: Int,
+    val selection: AlongRouteResolvedSelectionDto,
+    @SerialName("navigation_target") val navigationTarget: NavigationTargetDto,
+)
+
+@Serializable
+private data class AlongRouteResolvedSelectionDto(
+    val provider: String,
+    @SerialName("provider_ref") val providerRef: String,
+    @SerialName("formatted_address") val formattedAddress: String?,
+    val location: CoordinateDto,
+    val kind: String,
+    val attribution: List<String>,
 )
 
 @Serializable
@@ -1213,6 +1348,69 @@ private fun DestinationSuggestResponseDto.toApi(): ApiDestinationSuggestions {
                 attribution = result.attribution,
             )
         },
+    )
+}
+
+private fun AlongRouteSearchResponseDto.toApi(): ApiAlongRouteSearchResults {
+    require(mode == "route_biased")
+    return ApiAlongRouteSearchResults(
+        sessionId = sessionId,
+        revision = revision,
+        routeId = routeId,
+        routeRevision = routeRevision,
+        routeFingerprint = routeFingerprint,
+        mode = mode,
+        limitation = limitation,
+        nextPageCursor = nextPageCursor,
+        results = results.map { result ->
+            require(result.provider == "google_places_new" && !result.requiresResolution)
+            require(result.kind in setOf("business", "address", "locality", "unknown"))
+            ApiDestinationSuggestion(
+                id = result.id,
+                provider = result.provider,
+                providerRef = result.providerRef,
+                kind = result.kind,
+                title = result.title,
+                subtitle = result.subtitle,
+                addressPreview = result.addressPreview,
+                distanceMeters = result.distanceMeters,
+                providerRank = result.providerRank,
+                attribution = result.attribution,
+            )
+        },
+    )
+}
+
+private fun AlongRouteResolveResponseDto.toApi(): ApiResolvedDestination {
+    require(selection.provider == "google_places_new")
+    require(selection.kind in setOf("business", "address", "locality", "unknown"))
+    require(navigationTarget.mapLabel == "Destinazione selezionata")
+    require(navigationTarget.providerRef == selection.providerRef)
+    val coordinate = Coordinate(selection.location.latitude, selection.location.longitude)
+    require(
+        coordinate == Coordinate(
+            navigationTarget.location.latitude,
+            navigationTarget.location.longitude,
+        ),
+    )
+    return ApiResolvedDestination(
+        sessionId = sessionId,
+        revision = revision,
+        provider = selection.provider,
+        providerRef = selection.providerRef,
+        formattedAddress = selection.formattedAddress,
+        addressComponents = emptyList(),
+        normalizedAddress = ApiNormalizedAddress(null, null, null, null, null, null, null),
+        coordinate = coordinate,
+        kind = selection.kind,
+        attribution = selection.attribution,
+        fieldSources = mapOf(
+            "formatted_address" to "google_places_new",
+            "location" to "google_places_new",
+        ),
+        navigationCoordinate = coordinate,
+        navigationProviderRef = navigationTarget.providerRef,
+        mapLabel = navigationTarget.mapLabel,
     )
 }
 

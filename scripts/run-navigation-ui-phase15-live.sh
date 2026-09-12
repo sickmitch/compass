@@ -119,9 +119,9 @@ OPERATOR CHECK A — COHERENT ROUTE-CREATION FLOW
 
 From route-free follow, tap “Crea viaggio”. Confirm Partenza and Destinazione each offer Posizione
 attuale, Posizioni preferite (disabled placeholder), Ricerca and Selezione dalla mappa. Calculate a
-route. It must open the animated Personalizza viaggio surface with Cambia percorso above the map,
-the route facts, side-by-side Sosta CNG / Piano CNG, Aggiungi tappe and a compact centred Percorso
-diretto action. Screens must replace each other instead of accumulating panels.
+route. It must open the animated Personalizza viaggio surface with the map first, the route facts,
+side-by-side Cambia percorso / Aggiungi tappe, side-by-side Sosta CNG / Piano CNG and a compact
+centred Percorso diretto action. Screens must replace each other instead of accumulating panels.
 
 Press Back from the overview and confirm it returns to the relevant planning choice, without an
 extra “selected route” confirmation screen.
