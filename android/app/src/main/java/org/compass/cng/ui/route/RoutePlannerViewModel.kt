@@ -739,11 +739,18 @@ class RoutePlannerViewModel(
                 mapPickerTarget = null,
                 message = null,
             )
-            RouteEndpoint.INTERMEDIATE_STOP -> previewIntermediateCoordinate(
-                coordinate = coordinate,
-                method = RouteLocationMethod.COORDINATES,
-                privateDisplayName = "Punto selezionato sulla mappa",
-            )
+            RouteEndpoint.INTERMEDIATE_STOP -> {
+                eventLogger(
+                    "intermediate map selection confirmed: " +
+                        "committed_stops=${state.plannedIntermediateStops.size}",
+                )
+                previewIntermediateCoordinate(
+                    coordinate = coordinate,
+                    method = RouteLocationMethod.COORDINATES,
+                    privateDisplayName = "Punto selezionato sulla mappa",
+                    allowTimeLimitOverride = true,
+                )
+            }
         }
     }
 
@@ -1173,7 +1180,7 @@ class RoutePlannerViewModel(
                     pendingIntermediateStopCoordinate = coordinate,
                     destinationSuggestions = emptyList(),
                     message = if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
-                        "Questa tappa specifica supera il limite temporale. " +
+                        "La tappa supera il limite temporale impostato. " +
                             "Conferma l'anteprima per accettarla comunque."
                     } else null,
                 )
@@ -1686,7 +1693,13 @@ class RoutePlannerViewModel(
                 )
                 val extraDurationSeconds =
                     (route.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
-                if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
+                val containsDeliberateMapSelection = state.plannedIntermediateStops.any {
+                    it.locationMethod == RouteLocationMethod.COORDINATES
+                }
+                if (
+                    extraDurationSeconds > maximumAddedMinutes * 60.0 &&
+                    !containsDeliberateMapSelection
+                ) {
                     mutableUiState.value = mutableUiState.value.copy(
                         operation = null,
                         message = intermediateStopAddedTimeMessage(
@@ -2420,7 +2433,25 @@ class RoutePlannerViewModel(
     }
 
     fun navigateBack() {
-        if (mutableUiState.value.isBusy) return
+        val busyState = mutableUiState.value
+        if (busyState.isBusy) {
+            val canCancelInPlace = busyState.stage == PlannerStage.MAP_POINT_PICKER &&
+                busyState.operation == PlannerOperation.INTERMEDIATE_STOP_ROUTE
+            val canCancelSearch = busyState.stage == PlannerStage.DESTINATION_SEARCH
+            if (!canCancelInPlace && !canCancelSearch) return
+            destinationSearchJob?.cancel()
+            destinationSearchJob = null
+            pendingIntermediateResolution = null
+            pendingIntermediateDraft = null
+            mutableUiState.value = busyState.copy(
+                operation = null,
+                pendingIntermediateStopsRoute = null,
+                pendingIntermediateStopCoordinate = null,
+                pendingResolvedDestination = null,
+                pendingDestinationSuggestion = null,
+                message = null,
+            )
+        }
         if (mutableUiState.value.stage == PlannerStage.DESTINATION_SEARCH) {
             destinationSearchJob?.cancel()
             destinationSearchJob = null
@@ -2650,6 +2681,19 @@ class RoutePlannerViewModel(
 
     fun startNavigation() {
         if (mutableUiState.value.stage != PlannerStage.NAVIGATION_PREVIEW) return
+        val voiceDefault = runCatching {
+            appPreferencesRepository.load().voiceGuidanceDefault
+        }.getOrElse {
+            mutableUiState.value = mutableUiState.value.copy(
+                message = "Impossibile leggere la preferenza delle indicazioni vocali.",
+            )
+            return
+        }
+        navigationSession.setVoiceGuidanceEnabled(voiceDefault)
+        mutableUiState.value = mutableUiState.value.copy(
+            voiceGuidanceDefault = voiceDefault,
+        )
+        eventLogger("navigation voice default applied: enabled=$voiceDefault")
         navigationSession.start()
         mutableUiState.value = mutableUiState.value.copy(message = null)
     }

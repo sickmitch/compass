@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.9` (`versionCode=55`).
+Android version is `0.28.11` (`versionCode=57`).
 
 The global Options screen persists a system/light/dark theme choice and the default voice-guidance
 state. It reuses the existing private favourites and encrypted server-connection stores, and loads
@@ -96,6 +96,18 @@ backend/traffic diagnostics from `/health/live` and `/api/v1/traffic/health` onl
 panel is open. Form screens share one title-only header. The explicit back arrow is displayed for
 three-button/two-button system navigation and hidden when Android reports gestural navigation;
 system Back remains available in either mode.
+
+Map-selected intermediate stops keep the picker visible while Valhalla recalculates, replace the
+confirmation label with an explicit progress indicator, and render route/time-limit failures in the
+same panel. Back remains intercepted while that request is active: it cancels the pending operation
+and returns to the committed stop list without clearing endpoints or the base route.
+
+Every new navigation reloads the persisted voice-guidance default immediately before entering the
+foreground navigation state. Muting or unmuting one active session does not overwrite that default.
+A generic stop selected manually on the map is always evaluated by Valhalla and may proceed to the
+atomic insertion preview even when its added driving time exceeds the configured limit; the preview
+shows a warning instead of rejecting the stop. Search/POI eligibility continues to use its existing
+time-budget policy, so this exception is limited to deliberate map selection.
 
 Destination search uses Compass `POST /api/v1/destinations/suggest` after one configurable 600 ms
 trailing-edge debounce and `POST /api/v1/destinations/resolve` only after selection. Both a settled

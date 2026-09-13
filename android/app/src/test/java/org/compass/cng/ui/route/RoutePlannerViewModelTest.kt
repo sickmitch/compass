@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -132,6 +133,31 @@ class RoutePlannerViewModelTest {
 
         viewModel.navigateBack()
         assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun everyNewNavigationPullsAndAppliesThePersistedVoiceDefault() = runTest {
+        val preferences = InMemoryAppPreferencesRepository(
+            AppPreferences(voiceGuidanceDefault = true),
+        )
+        val navigationSession = NavigationSession()
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(
+                baseResult = Result.success(sampleRoute()),
+            ),
+            navigationSession = navigationSession,
+            appPreferencesRepository = preferences,
+        )
+        runCurrent()
+        viewModel.openNavigationPreview()
+        assertTrue(navigationSession.state.value.voiceGuidanceEnabled)
+
+        preferences.save(preferences.load().copy(voiceGuidanceDefault = false))
+        viewModel.startNavigation()
+
+        assertEquals(NavigationPhase.NAVIGATING, navigationSession.state.value.phase)
+        assertFalse(navigationSession.state.value.voiceGuidanceEnabled)
+        assertFalse(viewModel.uiState.value.voiceGuidanceDefault)
     }
 
     @Test
@@ -424,7 +450,7 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun intermediateStopCustomAddedTimeLimitOverridesDefault() = runTest {
+    fun customAddedTimeLimitDoesNotBlockManualMapSelection() = runTest {
         val direct = sampleRoute(distanceMeters = 100_000.0, durationSeconds = 3_600.0)
         val stop = Coordinate(45.0, 10.0)
         val via = RouteWithIntermediateStop(
@@ -467,9 +493,25 @@ class RoutePlannerViewModelTest {
         viewModel.updateMapPickerCoordinate(stop)
         viewModel.confirmMapPointPicker()
 
-        assertTrue(viewModel.uiState.value.plannedIntermediateStops.isEmpty())
-        assertTrue(viewModel.uiState.value.message.orEmpty().contains("6,0 min"))
-        assertTrue(viewModel.uiState.value.message.orEmpty().contains("5,0 min"))
+        val preview = viewModel.uiState.value
+        assertEquals(PlannerStage.INTERMEDIATE_STOP_PREVIEW, preview.stage)
+        assertTrue(preview.plannedIntermediateStops.isEmpty())
+        assertEquals(via.asMultiple(), preview.pendingIntermediateStopsRoute)
+        assertTrue(preview.message.orEmpty().contains("supera il limite temporale"))
+
+        viewModel.chooseIntermediateStop()
+
+        val committed = viewModel.uiState.value
+        assertEquals(listOf(stop), committed.plannedIntermediateStops.map { it.location })
+        assertEquals(via.asMultiple(), committed.intermediateStopsRoute)
+        assertEquals(direct.destination, committed.baseRoute?.destination)
+
+        viewModel.calculateIntermediateStopsRoute()
+
+        val completed = viewModel.uiState.value
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, completed.stage)
+        assertEquals(listOf(stop), completed.plannedIntermediateStops.map { it.location })
+        assertEquals(direct.destination, completed.baseRoute?.destination)
     }
 
     @Test
@@ -809,7 +851,7 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun intermediateStopOverExactAddedDrivingTimeIsRejected() = runTest {
+    fun mapSelectedStopOverAddedDrivingTimeLimitStillOpensPreview() = runTest {
         val direct = sampleRoute(distanceMeters = 100_000.0, durationSeconds = 3_600.0)
         val stop = Coordinate(45.0, 10.0)
         val via = RouteWithIntermediateStop(
@@ -848,10 +890,12 @@ class RoutePlannerViewModelTest {
         viewModel.updateMapPickerCoordinate(stop)
         viewModel.confirmMapPointPicker()
 
-        assertNull(viewModel.uiState.value.intermediateStopsRoute)
-        assertTrue(viewModel.uiState.value.plannedIntermediateStops.isEmpty())
-        assertTrue(viewModel.uiState.value.message.orEmpty().contains("23,3 min"))
-        assertTrue(viewModel.uiState.value.message.orEmpty().contains("20,0 min"))
+        val preview = viewModel.uiState.value
+        assertEquals(PlannerStage.INTERMEDIATE_STOP_PREVIEW, preview.stage)
+        assertNull(preview.intermediateStopsRoute)
+        assertTrue(preview.plannedIntermediateStops.isEmpty())
+        assertEquals(via.asMultiple(), preview.pendingIntermediateStopsRoute)
+        assertTrue(preview.message.orEmpty().contains("supera il limite temporale"))
     }
 
     @Test
@@ -893,6 +937,46 @@ class RoutePlannerViewModelTest {
             listOf(second, first),
             viewModel.navigationState.value.route?.intermediateStops?.map { it.location },
         )
+    }
+
+    @Test
+    fun backCancelsMapStopRecalculationWithoutDiscardingTheExistingTrip() = runTest {
+        val direct = sampleRoute(distanceMeters = 20_000.0, durationSeconds = 1_200.0)
+        val stop = Coordinate(45.1, 10.1)
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            intermediateRouteResult = Result.success(
+                RouteWithIntermediateStop(
+                    stop = stop,
+                    distanceMeters = 21_000.0,
+                    durationSeconds = 1_260.0,
+                    legs = listOf(
+                        sampleRoute(origin = direct.origin, destination = stop),
+                        sampleRoute(origin = stop, destination = direct.destination),
+                    ),
+                    provider = "valhalla",
+                    navigation = direct.navigation,
+                ),
+            ),
+            intermediateRouteDelayMillis = 60_000L,
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        runCurrent()
+        viewModel.addIntermediateStop()
+        viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.updateMapPickerCoordinate(stop)
+        viewModel.confirmMapPointPicker()
+        runCurrent()
+
+        assertEquals(PlannerStage.MAP_POINT_PICKER, viewModel.uiState.value.stage)
+        assertEquals(PlannerOperation.INTERMEDIATE_STOP_ROUTE, viewModel.uiState.value.operation)
+
+        viewModel.navigateBack()
+        val restored = viewModel.uiState.value
+        assertEquals(PlannerStage.INTERMEDIATE_STOPS, restored.stage)
+        assertNull(restored.operation)
+        assertEquals(direct, restored.baseRoute)
+        assertTrue(restored.plannedIntermediateStops.isEmpty())
     }
 
     @Test
@@ -1907,6 +1991,7 @@ class RoutePlannerViewModelTest {
         ),
         private val multipleIntermediateRouteFactory:
             ((List<Coordinate>) -> RouteWithIntermediateStops)? = null,
+        private val intermediateRouteDelayMillis: Long = 0L,
         private val placeSearchResult: Result<PlaceSearchResults> = Result.failure(
             AssertionError("searchPlaces was not expected"),
         ),
@@ -2026,6 +2111,7 @@ class RoutePlannerViewModelTest {
             destination: Coordinate,
             originDirection: RouteOriginDirection?,
         ): RouteWithIntermediateStops {
+            if (intermediateRouteDelayMillis > 0L) delay(intermediateRouteDelayMillis)
             lastIntermediateStops = intermediateStops
             lastIntermediateStop = intermediateStops.singleOrNull()
             intermediateRouteCalls += 1

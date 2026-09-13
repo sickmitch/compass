@@ -155,7 +155,7 @@ fun RoutePlannerScreen(
     val navigationState by viewModel.navigationState.collectAsStateWithLifecycle()
     val systemUsesGestures = systemUsesGestureNavigation(LocalContext.current.resources)
     BackHandler(
-        enabled = state.stage != PlannerStage.FOLLOW && !state.isBusy,
+        enabled = state.stage != PlannerStage.FOLLOW,
         onBack = {
             if (shouldStopNavigationOnBack(state.stage, navigationState.phase)) {
                 onStopNavigation()
@@ -319,6 +319,8 @@ fun RoutePlannerScreen(
                 visibleStage == PlannerStage.MAP_POINT_PICKER -> MapPointPickerContent(
                     target = requireNotNull(state.mapPickerTarget),
                     coordinate = requireNotNull(state.mapPickerCoordinate),
+                    isCalculating = state.operation == PlannerOperation.INTERMEDIATE_STOP_ROUTE,
+                    message = state.message,
                     onCoordinateSelected = viewModel::updateMapPickerCoordinate,
                     onChoose = viewModel::confirmMapPointPicker,
                 )
@@ -1219,6 +1221,8 @@ private fun IntermediateStopPreviewContent(
 private fun MapPointPickerContent(
     target: RouteEndpoint,
     coordinate: Coordinate,
+    isCalculating: Boolean,
+    message: String?,
     onCoordinateSelected: (Coordinate) -> Unit,
     onChoose: () -> Unit,
 ) {
@@ -1257,8 +1261,21 @@ private fun MapPointPickerContent(
                     "%.6f, %.6f".format(Locale.US, coordinate.latitude, coordinate.longitude),
                     style = MaterialTheme.typography.labelMedium,
                 )
-                CompassButton(onClick = onChoose, modifier = Modifier.fillMaxWidth()) {
-                    Text("Scegli")
+                message?.let { InlineError(it) }
+                CompassButton(
+                    onClick = onChoose,
+                    enabled = !isCalculating,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (isCalculating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(if (isCalculating) "Ricalcolo percorso…" else "Scegli")
                 }
             }
         }
