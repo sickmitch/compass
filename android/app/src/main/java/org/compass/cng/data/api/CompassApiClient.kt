@@ -72,6 +72,22 @@ class CompassApiClient(
         .callTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    suspend fun getBackendSystemInfo(): ApiBackendSystemInfo {
+        val health = get<HealthResponseDto>(resolve("health/live"))
+        val traffic = get<TrafficHealthResponseDto>(resolve("api/v1/traffic/health"))
+        return ApiBackendSystemInfo(
+            service = health.service,
+            version = health.version,
+            status = health.status,
+            trafficEnabled = traffic.enabled,
+            trafficProvider = traffic.provider,
+            trafficStatus = traffic.providerStatus,
+            trafficAwareRouting = traffic.trafficAwareRouting,
+            valhallaTilesetVersion = traffic.valhallaTilesetVersion,
+            trafficMappingVersion = traffic.mappingVersion,
+        )
+    }
+
     suspend fun searchPlaces(query: String, limit: Int = 8): ApiPlaceSearchResults {
         require(query.isNotBlank()) { "search query must not be blank" }
         require(limit in 1..20) { "search limit must be between 1 and 20" }
@@ -502,6 +518,54 @@ class CompassApiClient(
             }
         }
 }
+
+data class ApiBackendSystemInfo(
+    val service: String,
+    val version: String,
+    val status: String,
+    val trafficEnabled: Boolean,
+    val trafficProvider: String,
+    val trafficStatus: String,
+    val trafficAwareRouting: Boolean,
+    val valhallaTilesetVersion: String?,
+    val trafficMappingVersion: String?,
+)
+
+@Serializable
+private data class HealthResponseDto(
+    val status: String,
+    val service: String,
+    val version: String,
+    val database: String,
+    val routing: String,
+    val data: String,
+    val traffic: String,
+)
+
+@Serializable
+private data class TrafficHealthResponseDto(
+    val enabled: Boolean,
+    val provider: String,
+    @SerialName("provider_status") val providerStatus: String,
+    @SerialName("traffic_aware_routing") val trafficAwareRouting: Boolean,
+    @SerialName("last_fetch_started_at") val lastFetchStartedAt: String?,
+    @SerialName("last_fetch_completed_at") val lastFetchCompletedAt: String?,
+    @SerialName("last_success_at") val lastSuccessAt: String?,
+    @SerialName("provider_segments_received") val providerSegmentsReceived: Int,
+    @SerialName("segments_normalized") val segmentsNormalized: Int,
+    @SerialName("segments_matched") val segmentsMatched: Int,
+    @SerialName("segments_unmatched") val segmentsUnmatched: Int,
+    @SerialName("edges_updated") val edgesUpdated: Int,
+    @SerialName("edges_expired") val edgesExpired: Int,
+    @SerialName("provider_api_errors") val providerApiErrors: Int,
+    @SerialName("updater_consecutive_failures") val updaterConsecutiveFailures: Int,
+    @SerialName("managed_edge_count") val managedEdgeCount: Int,
+    @SerialName("feed_age_seconds") val feedAgeSeconds: Double?,
+    @SerialName("mapping_version") val mappingVersion: String?,
+    @SerialName("valhalla_tileset_version") val valhallaTilesetVersion: String?,
+    @SerialName("traffic_extract_path") val trafficExtractPath: String?,
+    val message: String?,
+)
 
 @Serializable
 private data class PlaceSearchResponseDto(

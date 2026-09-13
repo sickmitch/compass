@@ -44,6 +44,8 @@ class MainActivity : ComponentActivity() {
             vehicleProfileRepository = application.container.vehicleProfileRepository,
             favoritePlaceRepository = application.container.favoritePlaceRepository,
             serverConnectionRepository = application.container.serverConnectionRepository,
+            appPreferencesRepository = application.container.appPreferencesRepository,
+            backendSystemInfoRepository = application.container.backendSystemInfoRepository,
             eventLogger = application.container.plannerEventLogger,
         )
     }
@@ -149,7 +151,7 @@ class MainActivity : ComponentActivity() {
                     else followPermissionLauncher.launch(locationPermissions)
                 }
             }
-            CompassTheme {
+            CompassTheme(themePreference = plannerState.appTheme) {
                 RoutePlannerScreen(
                     viewModel = routePlannerViewModel,
                     onStartNavigation = {

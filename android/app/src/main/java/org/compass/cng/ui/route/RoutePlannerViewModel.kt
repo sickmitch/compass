@@ -48,6 +48,12 @@ import org.compass.cng.domain.model.withNavigationDetailsFrom
 import org.compass.cng.domain.server.InMemoryServerConnectionRepository
 import org.compass.cng.domain.server.ServerConnection
 import org.compass.cng.domain.server.ServerConnectionRepository
+import org.compass.cng.domain.preferences.AppPreferencesRepository
+import org.compass.cng.domain.preferences.AppThemePreference
+import org.compass.cng.domain.preferences.InMemoryAppPreferencesRepository
+import org.compass.cng.domain.system.BackendSystemInfo
+import org.compass.cng.domain.system.BackendSystemInfoRepository
+import org.compass.cng.domain.system.InMemoryBackendSystemInfoRepository
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.navigation.FollowLocationPolicy
@@ -70,6 +76,7 @@ enum class PlannerStage {
     CONFIGURE_PREDICTIVE,
     VEHICLE_PROFILES,
     SERVER_CONNECTION,
+    OPTIONS,
     CNG_CANDIDATES,
     PREDICTIVE_ITINERARY,
     PREDICTIVE_STATUS,
@@ -204,6 +211,12 @@ data class RoutePlannerUiState(
     val serverUsernameInput: String = "",
     val serverPasswordInput: String = "",
     val serverAllowInsecureHttp: Boolean = false,
+    val appTheme: AppThemePreference = AppThemePreference.SYSTEM,
+    val voiceGuidanceDefault: Boolean = true,
+    val backendSystemInfo: BackendSystemInfo? = null,
+    val backendSystemInfoLoading: Boolean = false,
+    val backendSystemInfoError: String? = null,
+    val favoritePlaceManagementMode: Boolean = false,
 ) {
     val isBusy: Boolean get() = operation != null
 
@@ -228,6 +241,10 @@ class RoutePlannerViewModel(
         InMemoryServerConnectionRepository(),
     private val favoritePlaceRepository: FavoritePlaceRepository =
         InMemoryFavoritePlaceRepository(),
+    private val appPreferencesRepository: AppPreferencesRepository =
+        InMemoryAppPreferencesRepository(),
+    private val backendSystemInfoRepository: BackendSystemInfoRepository =
+        InMemoryBackendSystemInfoRepository(),
     private val startInFollowMode: Boolean = false,
     private val eventLogger: (String) -> Unit = {},
 ) : ViewModel() {
@@ -252,6 +269,7 @@ class RoutePlannerViewModel(
     private val initialVehicleProfiles = vehicleProfileRepository.load()
     private val initialServerConnection = serverConnectionRepository.load()
     private val initialFavoritePlaces = favoritePlaceRepository.load()
+    private val initialAppPreferences = appPreferencesRepository.load()
     private val mutableUiState = MutableStateFlow(
         restoredNavigation.route?.let { activeRoute ->
             RoutePlannerUiState(
@@ -295,6 +313,10 @@ class RoutePlannerViewModel(
         }.withVehicleProfiles(initialVehicleProfiles)
             .copy(favoritePlaces = initialFavoritePlaces)
             .withServerConnection(initialServerConnection)
+            .copy(
+                appTheme = initialAppPreferences.theme,
+                voiceGuidanceDefault = initialAppPreferences.voiceGuidanceDefault,
+            )
             .let { state ->
                 if (
                     startInFollowMode &&
@@ -314,11 +336,16 @@ class RoutePlannerViewModel(
 
     private var requestJob: Job? = null
     private var destinationSearchJob: Job? = null
+    private var systemInfoJob: Job? = null
     private var pendingIntermediateResolution: ResolvedDestination? = null
     private var pendingIntermediateDraft: PlannedIntermediateStop? = null
     private var serverReturnStage: PlannerStage = PlannerStage.FOLLOW
+    private var optionsReturnStage: PlannerStage = PlannerStage.FOLLOW
 
     init {
+        if (navigationState.value.voiceGuidanceEnabled != initialAppPreferences.voiceGuidanceDefault) {
+            navigationSession.setVoiceGuidanceEnabled(initialAppPreferences.voiceGuidanceDefault)
+        }
         if (restoredNavigation.route == null && !startInFollowMode) loadBaseRoute()
     }
 
@@ -350,8 +377,90 @@ class RoutePlannerViewModel(
             favoritePlaceNameInput = "",
             editingFavoritePlaceId = null,
             favoriteDraftCoordinate = state.favoriteCandidate(endpoint),
+            favoritePlaceManagementMode = false,
             message = null,
         )
+    }
+
+    fun openFavoritePlaceManagement() {
+        val state = mutableUiState.value
+        if (state.isBusy) return
+        mutableUiState.value = state.copy(
+            stage = PlannerStage.FAVORITE_PLACES,
+            favoritePlaceTarget = RouteEndpoint.DESTINATION,
+            favoritePlaces = favoritePlaceRepository.load(),
+            favoritePlaceNameInput = "",
+            editingFavoritePlaceId = null,
+            favoriteDraftCoordinate = state.followLocation?.coordinate
+                ?: navigationState.value.rawLocation?.coordinate
+                ?: state.originCoordinateOrNull(),
+            favoritePlaceManagementMode = true,
+            message = null,
+        )
+    }
+
+    fun openOptions() {
+        val state = mutableUiState.value
+        if (state.isBusy || state.stage == PlannerStage.OPTIONS) return
+        optionsReturnStage = state.stage
+        mutableUiState.value = state.copy(stage = PlannerStage.OPTIONS, message = null)
+        refreshBackendSystemInfo()
+    }
+
+    fun updateAppTheme(theme: AppThemePreference) {
+        val state = mutableUiState.value
+        val saved = runCatching {
+            appPreferencesRepository.save(
+                appPreferencesRepository.load().copy(theme = theme),
+            )
+        }.getOrElse {
+            mutableUiState.value = state.copy(message = "Impossibile salvare il tema.")
+            return
+        }
+        mutableUiState.value = state.copy(appTheme = saved.theme, message = null)
+    }
+
+    fun updateVoiceGuidanceDefault(enabled: Boolean) {
+        val state = mutableUiState.value
+        val saved = runCatching {
+            appPreferencesRepository.save(
+                appPreferencesRepository.load().copy(voiceGuidanceDefault = enabled),
+            )
+        }.getOrElse {
+            mutableUiState.value = state.copy(message = "Impossibile salvare la preferenza voce.")
+            return
+        }
+        navigationSession.setVoiceGuidanceEnabled(saved.voiceGuidanceDefault)
+        mutableUiState.value = state.copy(
+            voiceGuidanceDefault = saved.voiceGuidanceDefault,
+            message = null,
+        )
+    }
+
+    fun refreshBackendSystemInfo() {
+        systemInfoJob?.cancel()
+        val state = mutableUiState.value
+        systemInfoJob = viewModelScope.launch {
+            mutableUiState.value = state.copy(
+                backendSystemInfoLoading = true,
+                backendSystemInfoError = null,
+            )
+            runCatching { backendSystemInfoRepository.load() }
+                .onSuccess { info ->
+                    mutableUiState.value = mutableUiState.value.copy(
+                        backendSystemInfo = info,
+                        backendSystemInfoLoading = false,
+                        backendSystemInfoError = null,
+                    )
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    mutableUiState.value = mutableUiState.value.copy(
+                        backendSystemInfoLoading = false,
+                        backendSystemInfoError = "Informazioni backend non disponibili.",
+                    )
+                }
+        }
     }
 
     fun updateFavoritePlaceName(value: String) {
@@ -564,6 +673,12 @@ class RoutePlannerViewModel(
     fun openMapPointPicker(endpoint: RouteEndpoint) {
         val state = mutableUiState.value
         if (state.isBusy) return
+        if (endpoint == RouteEndpoint.INTERMEDIATE_STOP) {
+            destinationSearchJob?.cancel()
+            destinationSearchJob = null
+            pendingIntermediateResolution = null
+            pendingIntermediateDraft = null
+        }
         val existing = when (endpoint) {
             RouteEndpoint.ORIGIN -> state.originCoordinateOrNull()
             RouteEndpoint.INTERMEDIATE_STOP -> state.editingIntermediateStopId?.let { id ->
@@ -575,6 +690,16 @@ class RoutePlannerViewModel(
             stage = PlannerStage.MAP_POINT_PICKER,
             mapPickerTarget = endpoint,
             mapPickerCoordinate = existing ?: state.followLocation?.coordinate ?: state.activeOrigin,
+            pendingIntermediateStopCoordinate = if (endpoint == RouteEndpoint.INTERMEDIATE_STOP) {
+                null
+            } else {
+                state.pendingIntermediateStopCoordinate
+            },
+            pendingIntermediateStopsRoute = if (endpoint == RouteEndpoint.INTERMEDIATE_STOP) {
+                null
+            } else {
+                state.pendingIntermediateStopsRoute
+            },
             message = null,
         )
     }
@@ -2306,7 +2431,10 @@ class RoutePlannerViewModel(
         }
         mutableUiState.value = when (mutableUiState.value.stage) {
             PlannerStage.FOLLOW -> mutableUiState.value
-            PlannerStage.PREVIEW -> mutableUiState.value
+            PlannerStage.PREVIEW -> mutableUiState.value.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                message = null,
+            )
             PlannerStage.CONFIGURE_ROUTE -> mutableUiState.value.copy(
                 stage = if (mutableUiState.value.baseRoute == null) {
                     PlannerStage.FOLLOW
@@ -2317,6 +2445,10 @@ class RoutePlannerViewModel(
             )
             PlannerStage.FAVORITE_PLACES -> mutableUiState.value.copy(
                 stage = if (
+                    mutableUiState.value.favoritePlaceManagementMode
+                ) {
+                    PlannerStage.OPTIONS
+                } else if (
                     mutableUiState.value.favoritePlaceTarget == RouteEndpoint.INTERMEDIATE_STOP
                 ) {
                     PlannerStage.INTERMEDIATE_STOPS
@@ -2326,6 +2458,7 @@ class RoutePlannerViewModel(
                 favoritePlaceNameInput = "",
                 editingFavoritePlaceId = null,
                 favoriteDraftCoordinate = null,
+                favoritePlaceManagementMode = false,
                 message = null,
             )
             PlannerStage.DESTINATION_SEARCH -> mutableUiState.value.copy(
@@ -2433,6 +2566,10 @@ class RoutePlannerViewModel(
             )
             PlannerStage.SERVER_CONNECTION -> mutableUiState.value.copy(
                 stage = serverReturnStage,
+                message = null,
+            )
+            PlannerStage.OPTIONS -> mutableUiState.value.copy(
+                stage = optionsReturnStage,
                 message = null,
             )
             PlannerStage.CNG_CANDIDATES -> mutableUiState.value.copy(
@@ -2796,6 +2933,10 @@ class RoutePlannerViewModel(
         private val favoritePlaceRepository: FavoritePlaceRepository =
             InMemoryFavoritePlaceRepository(),
         private val serverConnectionRepository: ServerConnectionRepository,
+        private val appPreferencesRepository: AppPreferencesRepository =
+            InMemoryAppPreferencesRepository(),
+        private val backendSystemInfoRepository: BackendSystemInfoRepository =
+            InMemoryBackendSystemInfoRepository(),
         private val eventLogger: (String) -> Unit = {},
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -2809,6 +2950,8 @@ class RoutePlannerViewModel(
                 vehicleProfileRepository = vehicleProfileRepository,
                 favoritePlaceRepository = favoritePlaceRepository,
                 serverConnectionRepository = serverConnectionRepository,
+                appPreferencesRepository = appPreferencesRepository,
+                backendSystemInfoRepository = backendSystemInfoRepository,
                 startInFollowMode = true,
                 eventLogger = eventLogger,
             ) as T

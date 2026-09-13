@@ -1,9 +1,9 @@
 package org.compass.cng.ui.map
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import org.compass.cng.BuildConfig
 import org.compass.cng.R
+import org.compass.cng.ui.theme.LocalCompassDarkTheme
 
 internal enum class CompassMapTheme {
     DAY,
@@ -29,7 +29,7 @@ internal data class CompassMapAppearance(
 
 @Composable
 internal fun compassMapAppearance(): CompassMapAppearance = resolveCompassMapAppearance(
-    theme = if (isSystemInDarkTheme()) CompassMapTheme.NIGHT else CompassMapTheme.DAY,
+    theme = if (LocalCompassDarkTheme.current) CompassMapTheme.NIGHT else CompassMapTheme.DAY,
     dayStyleUrl = BuildConfig.COMPASS_MAP_DAY_STYLE_URL,
     nightStyleUrl = BuildConfig.COMPASS_MAP_NIGHT_STYLE_URL,
 )

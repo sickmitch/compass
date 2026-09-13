@@ -59,6 +59,11 @@ import org.compass.cng.domain.model.asMultiple
 import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.domain.server.InMemoryServerConnectionRepository
 import org.compass.cng.domain.server.ServerConnection
+import org.compass.cng.domain.preferences.AppPreferences
+import org.compass.cng.domain.preferences.AppThemePreference
+import org.compass.cng.domain.preferences.InMemoryAppPreferencesRepository
+import org.compass.cng.domain.system.BackendSystemInfo
+import org.compass.cng.domain.system.BackendSystemInfoRepository
 import org.compass.cng.navigation.NavigationPhase
 import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.navigation.NavigationSession
@@ -75,6 +80,60 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
+    @Test
+    fun backFromTripCustomizationReturnsToEndpointConfiguration() = runTest {
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+        )
+        runCurrent()
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+
+        viewModel.navigateBack()
+
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertTrue(viewModel.uiState.value.baseRoute != null)
+    }
+
+    @Test
+    fun optionsPersistThemeAndVoiceAndReturnToTheOpeningScreen() = runTest {
+        val preferences = InMemoryAppPreferencesRepository(
+            AppPreferences(theme = AppThemePreference.SYSTEM, voiceGuidanceDefault = true),
+        )
+        val backendInfo = BackendSystemInfo(
+            service = "compass-api",
+            version = "0.1.0",
+            status = "ok",
+            trafficEnabled = true,
+            trafficProvider = "tomtom",
+            trafficStatus = "available",
+            trafficAwareRouting = true,
+            valhallaTilesetVersion = "valhalla-3.8.3:test",
+            trafficMappingVersion = "test-v1",
+        )
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+            appPreferencesRepository = preferences,
+            backendSystemInfoRepository = object : BackendSystemInfoRepository {
+                override suspend fun load(): BackendSystemInfo = backendInfo
+            },
+        )
+        runCurrent()
+
+        viewModel.openOptions()
+        runCurrent()
+        viewModel.updateAppTheme(AppThemePreference.DARK)
+        viewModel.updateVoiceGuidanceDefault(false)
+
+        assertEquals(PlannerStage.OPTIONS, viewModel.uiState.value.stage)
+        assertEquals(AppThemePreference.DARK, preferences.load().theme)
+        assertFalse(preferences.load().voiceGuidanceDefault)
+        assertFalse(viewModel.navigationState.value.voiceGuidanceEnabled)
+        assertEquals(backendInfo, viewModel.uiState.value.backendSystemInfo)
+
+        viewModel.navigateBack()
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+    }
+
     @Test
     fun destinationSearchDebouncesOneLocalizedTextSearchBySixHundredMilliseconds() = runTest {
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))

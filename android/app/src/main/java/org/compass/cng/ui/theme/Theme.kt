@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
+import org.compass.cng.domain.preferences.AppThemePreference
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -207,13 +208,24 @@ private val LocalCompassSemanticColors = staticCompositionLocalOf {
     CompassLightSemanticColors
 }
 
+val LocalCompassDarkTheme = staticCompositionLocalOf { false }
+
 val MaterialTheme.compassSemanticColors: CompassSemanticColors
     @Composable get() = LocalCompassSemanticColors.current
 
 @Composable
-fun CompassTheme(content: @Composable () -> Unit) {
-    val darkTheme = isSystemInDarkTheme()
+fun CompassTheme(
+    themePreference: AppThemePreference = AppThemePreference.SYSTEM,
+    content: @Composable () -> Unit,
+) {
+    val systemDarkTheme = isSystemInDarkTheme()
+    val darkTheme = when (themePreference) {
+        AppThemePreference.SYSTEM -> systemDarkTheme
+        AppThemePreference.LIGHT -> false
+        AppThemePreference.DARK -> true
+    }
     CompositionLocalProvider(
+        LocalCompassDarkTheme provides darkTheme,
         LocalCompassSemanticColors provides if (darkTheme) {
             CompassDarkSemanticColors
         } else {

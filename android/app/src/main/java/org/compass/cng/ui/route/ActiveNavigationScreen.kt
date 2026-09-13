@@ -10,6 +10,7 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.Route
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -98,6 +99,7 @@ internal fun RouteFreeFollowScreen(
     location: NavigationLocation?,
     statusMessage: String? = null,
     onCreateTrip: () -> Unit,
+    onOpenOptions: () -> Unit,
 ) {
     val cameraConfig = remember { NavigationCameraConfig() }
     var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
@@ -145,6 +147,13 @@ internal fun RouteFreeFollowScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             MapIconControlButton(
+                testTag = "follow_options",
+                contentDescription = "Opzioni",
+                onClick = onOpenOptions,
+            ) {
+                Icon(Icons.Rounded.Settings, contentDescription = null)
+            }
+            MapIconControlButton(
                 testTag = "follow_create_trip",
                 contentDescription = "Crea viaggio",
                 onClick = onCreateTrip,
@@ -185,6 +194,7 @@ internal fun ActiveNavigationScreen(
     onCompleteFuelStop: () -> Unit,
     onCompleteIntermediateStop: () -> Unit,
     onStopNavigation: () -> Unit,
+    onOpenOptions: () -> Unit,
 ) {
     val navigationView = LocalView.current
     DisposableEffect(navigationView) {
@@ -444,6 +454,15 @@ internal fun ActiveNavigationScreen(
                     },
                     modifier = Modifier.padding(bottom = 44.dp),
                 )
+                Spacer(modifier = Modifier.width(8.dp))
+                MapIconControlButton(
+                    testTag = "navigation_options",
+                    contentDescription = "Opzioni",
+                    onClick = onOpenOptions,
+                    modifier = Modifier.padding(bottom = 44.dp),
+                ) {
+                    Icon(Icons.Rounded.Settings, contentDescription = null)
+                }
                 Spacer(modifier = Modifier.weight(1f))
                 MapModeControls(
                     cameraMode = cameraMode,
@@ -1020,6 +1039,7 @@ private fun MapIconControlButton(
     testTag: String,
     contentDescription: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     containerColor: androidx.compose.ui.graphics.Color =
         MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
     contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
@@ -1027,7 +1047,7 @@ private fun MapIconControlButton(
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .size(52.dp)
             .testTag(testTag)
             .clearAndSetSemantics { this.contentDescription = contentDescription },

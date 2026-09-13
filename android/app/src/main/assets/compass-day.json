@@ -78,7 +78,7 @@
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 13,
-      "paint": {"fill-color": "#d7d4ce", "fill-outline-color": "#c6c2bb", "fill-opacity": 0.78}
+      "paint": {"fill-color": "#cbc7bf", "fill-outline-color": "#aaa59c", "fill-opacity": 0.90}
     },
     {
       "id": "road-path",
@@ -95,7 +95,7 @@
       "source-layer": "transportation",
       "filter": ["in", "class", "minor", "service"],
       "minzoom": 11,
-      "paint": {"line-color": "#cfcbc4", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.6, 16, 5.0, 19, 12.0]}
+      "paint": {"line-color": "#aaa59c", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 16, 5.4, 19, 12.8]}
     },
     {
       "id": "road-minor",
@@ -112,7 +112,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "secondary", "tertiary"],
-      "paint": {"line-color": "#c9c4bb", "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.8, 14, 4.0, 18, 14.0]}
+      "paint": {"line-color": "#9f998e", "line-width": ["interpolate", ["linear"], ["zoom"], 7, 1.0, 14, 4.5, 18, 14.8]}
     },
     {
       "id": "road-secondary",
@@ -128,7 +128,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["==", "class", "primary"],
-      "paint": {"line-color": "#c7b99f", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 1.0, 14, 5.0, 18, 16.0]}
+      "paint": {"line-color": "#9a8159", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 1.2, 14, 5.5, 18, 16.8]}
     },
     {
       "id": "road-primary",
@@ -136,7 +136,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["==", "class", "primary"],
-      "paint": {"line-color": "#f8e5b9", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.6, 14, 3.8, 18, 13.8]}
+      "paint": {"line-color": "#f7dda2", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.7, 14, 4.1, 18, 14.1]}
     },
     {
       "id": "road-motorway-casing",
@@ -144,7 +144,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "motorway", "trunk"],
-      "paint": {"line-color": "#b99f74", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.2, 12, 5.5, 17, 18.0]}
+      "paint": {"line-color": "#80643c", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.4, 12, 6.0, 17, 19.0]}
     },
     {
       "id": "road-motorway",
@@ -152,7 +152,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "motorway", "trunk"],
-      "paint": {"line-color": "#efc983", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.8, 12, 4.0, 17, 15.5]}
+      "paint": {"line-color": "#f1bd61", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.9, 12, 4.3, 17, 16.0]}
     },
     {
       "id": "road-label",

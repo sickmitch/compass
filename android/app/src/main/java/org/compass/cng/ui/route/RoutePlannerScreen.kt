@@ -16,6 +16,7 @@ import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -28,6 +29,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -60,6 +62,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,6 +77,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +95,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.compass.cng.BuildConfig
 import org.compass.cng.domain.favorite.FavoritePlace
+import org.compass.cng.domain.preferences.AppThemePreference
+import org.compass.cng.domain.system.BackendSystemInfo
 import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationKind
@@ -147,13 +153,11 @@ fun RoutePlannerScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigationState by viewModel.navigationState.collectAsStateWithLifecycle()
+    val systemUsesGestures = systemUsesGestureNavigation(LocalContext.current.resources)
     BackHandler(
-        enabled = state.stage != PlannerStage.FOLLOW &&
-            state.stage != PlannerStage.PREVIEW && !state.isBusy,
+        enabled = state.stage != PlannerStage.FOLLOW && !state.isBusy,
         onBack = {
-            if (navigationState.phase != NavigationPhase.ROUTE_PREVIEW &&
-                navigationState.phase != NavigationPhase.IDLE
-            ) {
+            if (shouldStopNavigationOnBack(state.stage, navigationState.phase)) {
                 onStopNavigation()
             } else {
                 viewModel.navigateBack()
@@ -174,6 +178,7 @@ fun RoutePlannerScreen(
                 onCompleteFuelStop = onCompleteFuelStop,
                 onCompleteIntermediateStop = onCompleteIntermediateStop,
                 onStopNavigation = onStopNavigation,
+                onOpenOptions = viewModel::openOptions,
             )
         }
         return
@@ -184,6 +189,7 @@ fun RoutePlannerScreen(
                 location = state.followLocation,
                 statusMessage = state.message,
                 onCreateTrip = viewModel::openRouteConfiguration,
+                onOpenOptions = viewModel::openOptions,
             )
         }
         return
@@ -194,8 +200,7 @@ fun RoutePlannerScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            if (state.stage != PlannerStage.CONFIGURE_ROUTE) {
-                Header(
+            Header(
                     stage = state.stage,
                     searchTarget = when (state.stage) {
                         PlannerStage.MAP_POINT_PICKER -> state.mapPickerTarget
@@ -204,18 +209,17 @@ fun RoutePlannerScreen(
                         else -> state.placeSearchTarget
                     },
                     navigationPhase = navigationState.phase,
-                    canNavigateBack = state.stage != PlannerStage.PREVIEW,
+                    canNavigateBack = state.stage != PlannerStage.FOLLOW,
+                    systemUsesGestures = systemUsesGestures,
+                    onOpenOptions = viewModel::openOptions,
                     onNavigateBack = {
-                        if (navigationState.phase != NavigationPhase.ROUTE_PREVIEW &&
-                            navigationState.phase != NavigationPhase.IDLE
-                        ) {
+                        if (shouldStopNavigationOnBack(state.stage, navigationState.phase)) {
                             onStopNavigation()
                         } else {
                             viewModel.navigateBack()
                         }
                     },
                 )
-            }
             AnimatedContent(
                 targetState = state,
                 contentKey = { it.stage },
@@ -241,6 +245,22 @@ fun RoutePlannerScreen(
                     onPasswordChanged = viewModel::updateServerPassword,
                     onAllowInsecureHttpChanged = viewModel::updateServerAllowInsecureHttp,
                     onSave = viewModel::saveServerConnection,
+                )
+                visibleStage == PlannerStage.OPTIONS -> OptionsContent(
+                    theme = state.appTheme,
+                    voiceGuidanceDefault = state.voiceGuidanceDefault,
+                    serverBaseUrl = state.serverBaseUrlInput,
+                    backendInfo = state.backendSystemInfo,
+                    backendInfoLoading = state.backendSystemInfoLoading,
+                    backendInfoError = state.backendSystemInfoError,
+                    currentCoordinate = navigationState.rawLocation?.coordinate
+                        ?: state.followLocation?.coordinate,
+                    routeProvider = navigationState.route?.provider ?: state.baseRoute?.provider,
+                    onThemeChanged = viewModel::updateAppTheme,
+                    onVoiceDefaultChanged = viewModel::updateVoiceGuidanceDefault,
+                    onFavoritePlaces = viewModel::openFavoritePlaceManagement,
+                    onConnection = viewModel::openServerConnection,
+                    onRefreshInfo = viewModel::refreshBackendSystemInfo,
                 )
                 visibleStage == PlannerStage.CONFIGURE_ROUTE -> ConfigureRouteContent(
                     route = baseRoute,
@@ -278,6 +298,7 @@ fun RoutePlannerScreen(
                     onSelect = viewModel::selectFavoritePlace,
                     onEdit = viewModel::editFavoritePlace,
                     onDelete = viewModel::deleteFavoritePlace,
+                    selectionEnabled = !state.favoritePlaceManagementMode,
                 )
                 visibleStage == PlannerStage.DESTINATION_SEARCH -> DestinationSearchContent(
                     target = state.placeSearchTarget,
@@ -439,6 +460,7 @@ fun RoutePlannerScreen(
                         onSave = viewModel::saveVehicleProfile,
                     )
                     PlannerStage.SERVER_CONNECTION -> Unit
+                    PlannerStage.OPTIONS -> Unit
                     PlannerStage.CNG_CANDIDATES -> CandidateContent(
                         rankedStations = requireNotNull(state.rankedStations),
                         predictiveSuggestion = state.predictiveSuggestion,
@@ -478,6 +500,7 @@ fun RoutePlannerScreen(
                             onEditCngPlan = viewModel::editCngPlan,
                             onDeleteCngStop = viewModel::deleteCngStopFromSummary,
                             onStopNavigation = onStopNavigation,
+                            onOpenOptions = viewModel::openOptions,
                         )
                     }
                 }
@@ -493,6 +516,8 @@ private fun Header(
     searchTarget: RouteEndpoint,
     navigationPhase: NavigationPhase,
     canNavigateBack: Boolean,
+    systemUsesGestures: Boolean,
+    onOpenOptions: () -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     val creationStep = stage.creationStep(searchTarget)
@@ -502,7 +527,7 @@ private fun Header(
     )
     val title = when (stage) {
         PlannerStage.FOLLOW -> "Segui posizione"
-        PlannerStage.CONFIGURE_ROUTE -> "Modifica percorso"
+        PlannerStage.CONFIGURE_ROUTE -> "Crea viaggio"
         PlannerStage.FAVORITE_PLACES -> "Posizioni preferite"
         PlannerStage.DESTINATION_SEARCH -> if (searchTarget == RouteEndpoint.INTERMEDIATE_STOP) {
             "Aggiungi tappa"
@@ -517,6 +542,7 @@ private fun Header(
         PlannerStage.CONFIGURE_PREDICTIVE -> "Imposta piano CNG"
         PlannerStage.VEHICLE_PROFILES -> "Profili dei mezzi"
         PlannerStage.SERVER_CONNECTION -> "Connessione al server"
+        PlannerStage.OPTIONS -> "Opzioni"
         PlannerStage.CNG_CANDIDATES -> "Seleziona tappa CNG"
         PlannerStage.PREDICTIVE_ITINERARY -> "Piano rifornimenti"
         PlannerStage.PREDICTIVE_STATUS -> "Autonomia CNG"
@@ -540,26 +566,22 @@ private fun Header(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (canNavigateBack) {
+                if (shouldShowHeaderBackButton(canNavigateBack, systemUsesGestures)) {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro")
                     }
                 } else {
                     Spacer(modifier = Modifier.width(12.dp))
                 }
-                Column(
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                    Text(
-                        text = "Compass",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                )
+                if (stage != PlannerStage.OPTIONS) {
+                    IconButton(onClick = onOpenOptions) {
+                        Icon(Icons.Rounded.Settings, contentDescription = "Opzioni")
+                    }
                 }
             }
             if (creationStep != null) {
@@ -611,7 +633,168 @@ private fun PlannerStage.creationStep(searchTarget: RouteEndpoint): Int? = when 
     PlannerStage.FOLLOW,
     PlannerStage.CONFIGURE_ROUTE,
     PlannerStage.VEHICLE_PROFILES,
-    PlannerStage.SERVER_CONNECTION -> null
+    PlannerStage.SERVER_CONNECTION,
+    PlannerStage.OPTIONS -> null
+}
+
+@Composable
+private fun OptionsContent(
+    theme: AppThemePreference,
+    voiceGuidanceDefault: Boolean,
+    serverBaseUrl: String,
+    backendInfo: BackendSystemInfo?,
+    backendInfoLoading: Boolean,
+    backendInfoError: String?,
+    currentCoordinate: Coordinate?,
+    routeProvider: String?,
+    onThemeChanged: (AppThemePreference) -> Unit,
+    onVoiceDefaultChanged: (Boolean) -> Unit,
+    onFavoritePlaces: () -> Unit,
+    onConnection: () -> Unit,
+    onRefreshInfo: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item {
+            SettingsSection(title = "Tema") {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(
+                        AppThemePreference.SYSTEM to "Sistema",
+                        AppThemePreference.DARK to "Scuro",
+                        AppThemePreference.LIGHT to "Chiaro",
+                    ).forEach { (option, label) ->
+                        if (theme == option) {
+                            CompassButton(onClick = { onThemeChanged(option) }) { Text(label) }
+                        } else {
+                            CompassOutlinedButton(onClick = { onThemeChanged(option) }) {
+                                Text(label)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            SettingsSection(title = "Voce") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Indicazioni vocali predefinite", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Si applica subito e alle nuove navigazioni.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = voiceGuidanceDefault,
+                        onCheckedChange = onVoiceDefaultChanged,
+                    )
+                }
+            }
+        }
+        item {
+            SettingsSection(title = "Gestione") {
+                CompassOutlinedButton(
+                    onClick = onFavoritePlaces,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Rounded.BookmarkBorder, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Luoghi preferiti")
+                }
+                CompassOutlinedButton(
+                    onClick = onConnection,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Rounded.Settings, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Connessione")
+                }
+            }
+        }
+        item {
+            SettingsSection(title = "Info") {
+                SettingsInfoRow("App", BuildConfig.VERSION_NAME)
+                SettingsInfoRow("Server", serverBaseUrl.ifBlank { "Non configurato" })
+                SettingsInfoRow("Backend", backendInfo?.version ?: "Non disponibile")
+                SettingsInfoRow("Stato backend", backendInfo?.status ?: "Non disponibile")
+                SettingsInfoRow(
+                    "Traffico",
+                    backendInfo?.let {
+                        if (it.trafficEnabled) "${it.trafficProvider} · ${it.trafficStatus}" else "Disattivato"
+                    } ?: "Non disponibile",
+                )
+                SettingsInfoRow(
+                    "Routing con traffico",
+                    backendInfo?.trafficAwareRouting?.let { if (it) "Disponibile" else "Non disponibile" }
+                        ?: "Non disponibile",
+                )
+                SettingsInfoRow(
+                    "Tileset Valhalla",
+                    backendInfo?.valhallaTilesetVersion ?: "Non disponibile",
+                )
+                SettingsInfoRow(
+                    "Mappatura traffico",
+                    backendInfo?.trafficMappingVersion ?: "Non disponibile",
+                )
+                SettingsInfoRow("Provider route", routeProvider ?: "Nessun percorso")
+                SettingsInfoRow(
+                    "Posizione attuale",
+                    currentCoordinate?.let {
+                        "%.6f, %.6f".format(Locale.US, it.latitude, it.longitude)
+                    } ?: "GPS non disponibile",
+                )
+                SettingsInfoRow(
+                    "Stile mappa",
+                    if (BuildConfig.COMPASS_MAP_DAY_STYLE_URL.startsWith("asset://") &&
+                        BuildConfig.COMPASS_MAP_NIGHT_STYLE_URL.startsWith("asset://")) {
+                        "Integrato · chiaro/scuro"
+                    } else {
+                        "Server personalizzato"
+                    },
+                )
+                if (backendInfoLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    backendInfoError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                    CompassTextButton(onClick = onRefreshInfo) { Text("Aggiorna info") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsInfoRow(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 @Composable
@@ -628,6 +811,7 @@ private fun FavoritePlacesContent(
     onSelect: (String) -> Unit,
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
+    selectionEnabled: Boolean,
 ) {
     val targetLabel = when (target) {
         RouteEndpoint.ORIGIN -> "partenza"
@@ -642,7 +826,7 @@ private fun FavoritePlacesContent(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    "Scegli la $targetLabel",
+                    if (selectionEnabled) "Scegli la $targetLabel" else "Gestisci i luoghi",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
@@ -772,8 +956,10 @@ private fun FavoritePlacesContent(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            CompassButton(onClick = { onSelect(place.id) }) {
-                                Text("Usa")
+                            if (selectionEnabled) {
+                                CompassButton(onClick = { onSelect(place.id) }) {
+                                    Text("Usa")
+                                }
                             }
                         }
                         Row(
@@ -1360,6 +1546,7 @@ private fun NavigationPreviewContent(
     onEditCngPlan: () -> Unit,
     onDeleteCngStop: (String) -> Unit,
     onStopNavigation: () -> Unit,
+    onOpenOptions: () -> Unit,
 ) {
     if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
         ActiveNavigationScreen(
@@ -1371,6 +1558,7 @@ private fun NavigationPreviewContent(
             onCompleteFuelStop = onCompleteFuelStop,
             onCompleteIntermediateStop = onCompleteIntermediateStop,
             onStopNavigation = onStopNavigation,
+            onOpenOptions = onOpenOptions,
         )
         return
     }
@@ -1992,21 +2180,12 @@ private fun ConfigureRouteContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 24.dp,
-                top = 24.dp,
+                top = 16.dp,
                 end = 24.dp,
                 bottom = 112.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            item {
-                Text(
-                    "Crea viaggio",
-                    style = MaterialTheme.typography.displaySmall,
-                )
-            }
-            item {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
             item {
                 RouteEndpointSelector(
                     title = "Partenza",

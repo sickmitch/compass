@@ -17,7 +17,7 @@
     {
       "id": "background",
       "type": "background",
-      "paint": {"background-color": "#111714"}
+      "paint": {"background-color": "#090c0a"}
     },
     {
       "id": "landcover-wood",
@@ -40,7 +40,7 @@
       "source": "openmaptiles",
       "source-layer": "landuse",
       "filter": ["==", "class", "residential"],
-      "paint": {"fill-color": "#1a211e", "fill-opacity": 0.72}
+      "paint": {"fill-color": "#111613", "fill-opacity": 0.78}
     },
     {
       "id": "landuse-commercial",
@@ -78,7 +78,7 @@
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 13,
-      "paint": {"fill-color": "#29302d", "fill-outline-color": "#343d38", "fill-opacity": 0.82}
+      "paint": {"fill-color": "#202622", "fill-outline-color": "#2b332e", "fill-opacity": 0.92}
     },
     {
       "id": "road-path",
@@ -95,7 +95,7 @@
       "source-layer": "transportation",
       "filter": ["in", "class", "minor", "service"],
       "minzoom": 11,
-      "paint": {"line-color": "#161d1a", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.6, 16, 5.0, 19, 12.0]}
+      "paint": {"line-color": "#080b09", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 16, 5.4, 19, 12.8]}
     },
     {
       "id": "road-minor",
@@ -104,7 +104,7 @@
       "source-layer": "transportation",
       "filter": ["in", "class", "minor", "service"],
       "minzoom": 11,
-      "paint": {"line-color": "#3b4540", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.3, 16, 3.7, 19, 10.2]}
+      "paint": {"line-color": "#59665f", "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.4, 16, 3.9, 19, 10.5]}
     },
     {
       "id": "road-secondary-casing",
@@ -112,7 +112,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "secondary", "tertiary"],
-      "paint": {"line-color": "#161d1a", "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.8, 14, 4.0, 18, 14.0]}
+      "paint": {"line-color": "#080b09", "line-width": ["interpolate", ["linear"], ["zoom"], 7, 1.0, 14, 4.5, 18, 14.8]}
     },
     {
       "id": "road-secondary",
@@ -120,7 +120,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "secondary", "tertiary"],
-      "paint": {"line-color": "#46524c", "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.4, 14, 3.0, 18, 12.0]}
+      "paint": {"line-color": "#6b7871", "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.5, 14, 3.2, 18, 12.3]}
     },
     {
       "id": "road-primary-casing",
@@ -128,7 +128,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["==", "class", "primary"],
-      "paint": {"line-color": "#181d1b", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 1.0, 14, 5.0, 18, 16.0]}
+      "paint": {"line-color": "#090b0a", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 1.2, 14, 5.5, 18, 16.8]}
     },
     {
       "id": "road-primary",
@@ -136,7 +136,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["==", "class", "primary"],
-      "paint": {"line-color": "#645d49", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.6, 14, 3.8, 18, 13.8]}
+      "paint": {"line-color": "#9a875f", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.7, 14, 4.1, 18, 14.1]}
     },
     {
       "id": "road-motorway-casing",
@@ -144,7 +144,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "motorway", "trunk"],
-      "paint": {"line-color": "#181b1a", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.2, 12, 5.5, 17, 18.0]}
+      "paint": {"line-color": "#080a09", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.4, 12, 6.0, 17, 19.0]}
     },
     {
       "id": "road-motorway",
@@ -152,7 +152,7 @@
       "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": ["in", "class", "motorway", "trunk"],
-      "paint": {"line-color": "#8a7049", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.8, 12, 4.0, 17, 15.5]}
+      "paint": {"line-color": "#c18c48", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.9, 12, 4.3, 17, 16.0]}
     },
     {
       "id": "road-label",

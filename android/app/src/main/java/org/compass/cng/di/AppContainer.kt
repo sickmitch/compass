@@ -10,7 +10,9 @@ import org.compass.cng.data.api.CompassApiClient
 import org.compass.cng.data.repository.HttpRoutingRepository
 import org.compass.cng.data.favorite.SharedPreferencesFavoritePlaceRepository
 import org.compass.cng.data.navigation.SharedPreferencesNavigationRouteStore
+import org.compass.cng.data.preferences.SharedPreferencesAppPreferencesRepository
 import org.compass.cng.data.server.SharedPreferencesServerConnectionRepository
+import org.compass.cng.data.system.HttpBackendSystemInfoRepository
 import org.compass.cng.data.vehicle.SharedPreferencesVehicleProfileRepository
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.server.ServerConnection
@@ -45,17 +47,20 @@ class AppContainer(context: Context) {
         ),
     )
 
-    val routingRepository: RoutingRepository = HttpRoutingRepository(
-        CompassApiClient(
+    private val apiClient = CompassApiClient(
             connectionProvider = serverConnectionRepository::load,
             httpClient = httpClient,
             json = json,
             eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
-        ),
+        )
+    val routingRepository: RoutingRepository = HttpRoutingRepository(
+        apiClient,
         eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
     )
     val vehicleProfileRepository = SharedPreferencesVehicleProfileRepository(context)
     val favoritePlaceRepository = SharedPreferencesFavoritePlaceRepository(context)
+    val appPreferencesRepository = SharedPreferencesAppPreferencesRepository(context)
+    val backendSystemInfoRepository = HttpBackendSystemInfoRepository(apiClient)
 
     val navigationSession = NavigationSession(
         routeStore = SharedPreferencesNavigationRouteStore(context),
