@@ -43,7 +43,8 @@ failure. A permanent manual entry point is deferred to settings.
 - The active-navigation `Viaggio` and `Panoramica` controls do not change.
 - Explicitly active cached navigation may still be recovered after process death.
 - Milan/Bologna constants remain deterministic test fixtures, not production startup selections.
-- Favourite positions need a later persistence and editing contract.
+- Favorite positions were intentionally deferred here and subsequently implemented by Android
+  0.28.0 as a local private-label-and-coordinate repository; Places text remains outside it.
 - Settings need the permanent server-profile entry point.
 
 ## References

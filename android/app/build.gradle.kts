@@ -26,7 +26,7 @@ val compassMapAmbientCacheMb = providers.gradleProperty("COMPASS_MAP_AMBIENT_CAC
     .get()
     .toLong()
 val destinationSearchDebounceMs = providers.gradleProperty("DESTINATION_SEARCH_DEBOUNCE_MS")
-    .orElse("300")
+    .orElse("600")
     .get()
     .toLong()
 val destinationSearchMinChars = providers.gradleProperty("DESTINATION_SEARCH_MIN_CHARS")
@@ -55,8 +55,8 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 44
-        versionName = "0.27.2"
+        versionCode = 54
+        versionName = "0.28.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())

@@ -20,6 +20,7 @@ from compass.routing.domain import (
     MatrixResult,
     NoRouteError,
     RouteLeg,
+    RouteOriginDirection,
     RouteRequest,
     RouteSpeedLimit,
     RoutingProviderError,
@@ -78,6 +79,7 @@ class ValhallaRoutingAdapter:
             traffic_aware=self._traffic_aware,
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
+            origin_direction=request.origin_direction,
         )
         response = await self._request("POST", "/route", json=payload)
         if self._traffic_aware and _is_no_route_response(response):
@@ -124,6 +126,7 @@ class ValhallaRoutingAdapter:
             traffic_aware=self._traffic_aware,
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
+            origin_direction=request.origin_direction,
         )
         response = await self._request(
             "POST",
@@ -457,6 +460,7 @@ def _route_payload(
         "freeflow",
     ),
     departure_timezone: ZoneInfo = DEFAULT_DEPARTURE_TIMEZONE,
+    origin_direction: RouteOriginDirection | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "locations": [
@@ -473,6 +477,13 @@ def _route_payload(
         "directions_type": "instructions",
         "shape_format": "polyline6",
     }
+    if origin_direction is not None:
+        payload["locations"][0].update(
+            {
+                "heading": origin_direction.heading_degrees,
+                "heading_tolerance": origin_direction.heading_tolerance_degrees,
+            }
+        )
     _apply_time_dependent_costing(
         payload,
         costing=costing,

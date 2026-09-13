@@ -8,7 +8,13 @@ import pytest
 from compass.api.main import app
 from compass.db import get_session
 from compass.routing.dependencies import get_routing_provider
-from compass.routing.domain import Maneuver, RouteLeg, WaypointRoute, WaypointRouteRequest
+from compass.routing.domain import (
+    Maneuver,
+    RouteLeg,
+    RouteOriginDirection,
+    WaypointRoute,
+    WaypointRouteRequest,
+)
 from compass.stations.domain import StationRoutePoint
 
 
@@ -34,6 +40,8 @@ def _payload() -> dict[str, object]:
         "estimated_remaining_cng_range_km": 65,
         "reserve_cng_range_km": 30,
         "departure_at": "2026-08-30T10:00:00+02:00",
+        "origin_heading_degrees": 135.0,
+        "origin_heading_tolerance_degrees": 45,
     }
 
 
@@ -141,6 +149,7 @@ def test_multi_stop_route_revalidates_every_road_leg_and_reserve(
     assert provider.request.departure_at == datetime.fromisoformat(
         "2026-08-30T10:00:00+02:00"
     )
+    assert provider.request.origin_direction == RouteOriginDirection(135.0, 45)
 
 
 def test_multi_stop_route_rejects_provider_leg_that_consumes_the_reserve(

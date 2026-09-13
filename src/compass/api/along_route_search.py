@@ -1,3 +1,4 @@
+import logging
 from dataclasses import asdict
 from typing import Annotated, Literal
 
@@ -7,7 +8,8 @@ from pydantic import Field
 
 from compass.api.auth import AuthenticatedApiUser, require_api_user
 from compass.api.contracts import ErrorResponse, StrictModel, error_response
-from compass.routing.domain import Coordinate
+from compass.routing.dependencies import get_routing_provider
+from compass.routing.domain import Coordinate, RoutingProvider
 from compass.search.along_route import (
     AlongRouteContext,
     AlongRouteLeg,
@@ -28,6 +30,7 @@ from compass.search.destination_domain import (
 )
 
 router = APIRouter(prefix="/api/v1/places/search-along-route", tags=["place-search"])
+logger = logging.getLogger("compass.search.along_route")
 
 
 class CoordinateRequest(StrictModel):
@@ -49,6 +52,9 @@ class RouteContextRequest(StrictModel):
     legs: list[RouteLegRequest] = Field(min_length=1, max_length=9)
     progress_shape_index: int | None = Field(default=None, ge=0)
     insertion_leg_index: int | None = Field(default=None, ge=0, le=8)
+    baseline_duration_seconds: float | None = Field(default=None, ge=0)
+    current_duration_seconds: float | None = Field(default=None, ge=0)
+    maximum_total_added_duration_seconds: float | None = Field(default=None, ge=0)
 
 
 class AlongRouteSearchRequest(StrictModel):
@@ -59,6 +65,7 @@ class AlongRouteSearchRequest(StrictModel):
     language: str = Field(default="it", pattern=r"^[a-z]{2}$")
     route: RouteContextRequest | None = None
     page_cursor: str | None = Field(default=None, min_length=1, max_length=128)
+    full_search: bool = False
 
 
 class SuggestionResponse(StrictModel):
@@ -73,6 +80,10 @@ class SuggestionResponse(StrictModel):
     provider_rank: int
     requires_resolution: bool
     attribution: str
+    search_intent: Literal["generic", "specific", "ambiguous"] | None = None
+    marginal_added_duration_seconds: float | None = Field(default=None, ge=0)
+    total_added_duration_seconds: float | None = Field(default=None, ge=0)
+    within_time_budget: bool | None = None
 
 
 class AlongRouteSearchResponse(StrictModel):
@@ -81,7 +92,7 @@ class AlongRouteSearchResponse(StrictModel):
     route_id: str
     route_revision: int
     route_fingerprint: str
-    mode: Literal["route_biased"]
+    mode: Literal["route_biased", "route_time_filtered", "global_specific"]
     limitation: str
     next_page_cursor: str | None
     results: list[SuggestionResponse]
@@ -130,6 +141,10 @@ class AlongRouteMetricsResponse(StrictModel):
     results_returned: int
     stale_responses_discarded: int
     resolutions_succeeded: int
+    candidates_evaluated: int
+    candidates_within_budget: int
+    candidate_routing_errors: int
+    candidates_timed_out: int
 
 
 def _error(error: Exception) -> JSONResponse:
@@ -168,6 +183,7 @@ async def search_along_route(
     payload: AlongRouteSearchRequest,
     service: Annotated[AlongRouteSearchService, Depends(get_along_route_search_service)],
     user: Annotated[AuthenticatedApiUser, Depends(require_api_user)],
+    routing_provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
 ) -> AlongRouteSearchResponse | JSONResponse:
     route = payload.route
     try:
@@ -179,8 +195,10 @@ async def search_along_route(
                 revision=payload.revision,
                 language=payload.language,
                 page_cursor=payload.page_cursor,
+                full_search=payload.full_search,
                 route=None if route is None else _domain_route(route),
             ),
+            routing_provider=routing_provider,
         )
     except (
         RouteRequiredError,
@@ -191,8 +209,27 @@ async def search_along_route(
         DestinationSearchUnavailableError,
         StaleDestinationSelectionError,
     ) as error:
+        logger.warning(
+            "along-route search rejected error=%s revision=%s route_revision=%s "
+            "legs=%s waypoints=%s has_time_policy=%s",
+            type(error).__name__,
+            payload.revision,
+            None if route is None else route.route_revision,
+            0 if route is None else len(route.legs),
+            0 if route is None else len(route.remaining_waypoints),
+            route is not None
+            and route.baseline_duration_seconds is not None
+            and route.current_duration_seconds is not None
+            and route.maximum_total_added_duration_seconds is not None,
+        )
         return _error(error)
-    except ValueError:
+    except ValueError as error:
+        logger.warning(
+            "along-route request rejected error=%s revision=%s route_revision=%s",
+            type(error).__name__,
+            payload.revision,
+            None if route is None else route.route_revision,
+        )
         return error_response(422, "invalid_request", "Along-route search request is invalid.")
     return AlongRouteSearchResponse(
         session_id=result.session_id,
@@ -200,7 +237,7 @@ async def search_along_route(
         route_id=result.route_id,
         route_revision=result.route_revision,
         route_fingerprint=result.route_fingerprint,
-        mode="route_biased",
+        mode=result.mode,
         limitation=result.limitation,
         next_page_cursor=result.next_page_cursor,
         results=[SuggestionResponse(**asdict(item)) for item in result.results],
@@ -276,4 +313,7 @@ def _domain_route(route: RouteContextRequest) -> AlongRouteContext:
         legs=tuple(AlongRouteLeg(leg.encoded_polyline) for leg in route.legs),
         progress_shape_index=route.progress_shape_index,
         insertion_leg_index=route.insertion_leg_index,
+        baseline_duration_seconds=route.baseline_duration_seconds,
+        current_duration_seconds=route.current_duration_seconds,
+        maximum_total_added_duration_seconds=(route.maximum_total_added_duration_seconds),
     )

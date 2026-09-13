@@ -7,6 +7,9 @@ import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.AddLocationAlt
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.LocalGasStation
 import androidx.compose.material.icons.rounded.Map
@@ -71,6 +74,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,6 +90,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.compass.cng.BuildConfig
+import org.compass.cng.domain.favorite.FavoritePlace
 import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationKind
@@ -192,7 +197,12 @@ fun RoutePlannerScreen(
             if (state.stage != PlannerStage.CONFIGURE_ROUTE) {
                 Header(
                     stage = state.stage,
-                    searchTarget = state.placeSearchTarget,
+                    searchTarget = when (state.stage) {
+                        PlannerStage.MAP_POINT_PICKER -> state.mapPickerTarget
+                            ?: state.placeSearchTarget
+                        PlannerStage.FAVORITE_PLACES -> state.favoritePlaceTarget
+                        else -> state.placeSearchTarget
+                    },
                     navigationPhase = navigationState.phase,
                     canNavigateBack = state.stage != PlannerStage.PREVIEW,
                     onNavigateBack = {
@@ -250,9 +260,24 @@ fun RoutePlannerScreen(
                     isCalculating = state.operation == PlannerOperation.BASE_ROUTE,
                     message = state.message,
                     onSearch = viewModel::openPlaceSearch,
+                    onFavorites = viewModel::openFavoritePlaces,
                     onCoordinates = viewModel::openMapPointPicker,
                     onUseCurrentLocation = onUseCurrentLocation,
                     onApply = viewModel::applyRouteInputs,
+                )
+                visibleStage == PlannerStage.FAVORITE_PLACES -> FavoritePlacesContent(
+                    target = state.favoritePlaceTarget,
+                    places = state.favoritePlaces,
+                    nameInput = state.favoritePlaceNameInput,
+                    editingPlaceId = state.editingFavoritePlaceId,
+                    draftCoordinate = state.favoriteDraftCoordinate,
+                    message = state.message,
+                    onNameChanged = viewModel::updateFavoritePlaceName,
+                    onSave = viewModel::saveFavoritePlace,
+                    onCancelEdit = viewModel::cancelFavoritePlaceEdit,
+                    onSelect = viewModel::selectFavoritePlace,
+                    onEdit = viewModel::editFavoritePlace,
+                    onDelete = viewModel::deleteFavoritePlace,
                 )
                 visibleStage == PlannerStage.DESTINATION_SEARCH -> DestinationSearchContent(
                     target = state.placeSearchTarget,
@@ -305,19 +330,23 @@ fun RoutePlannerScreen(
                 else -> when (visibleStage) {
                     PlannerStage.FOLLOW,
                     PlannerStage.CONFIGURE_ROUTE,
+                    PlannerStage.FAVORITE_PLACES,
                     PlannerStage.DESTINATION_SEARCH,
                     PlannerStage.MAP_POINT_PICKER,
                     PlannerStage.INTERMEDIATE_STOP_PREVIEW -> Unit
                     PlannerStage.INTERMEDIATE_STOPS -> IntermediateStopsContent(
                         route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         stops = state.plannedIntermediateStops,
-                        maximumDeviationKmInput = state.intermediateStopMaximumDeviationKmInput,
+                        maximumAddedMinutesInput = state.intermediateStopMaximumAddedMinutesInput,
                         isCalculating = state.operation == PlannerOperation.INTERMEDIATE_STOP_ROUTE,
                         message = state.message,
-                        onMaximumDeviationChanged =
-                            viewModel::updateIntermediateStopMaximumDeviationKm,
+                        onMaximumAddedMinutesChanged =
+                            viewModel::updateIntermediateStopMaximumAddedMinutes,
                         onUseCurrentLocation = {
                             onUseCurrentLocation(RouteEndpoint.INTERMEDIATE_STOP)
+                        },
+                        onFavorites = {
+                            viewModel.openFavoritePlaces(RouteEndpoint.INTERMEDIATE_STOP)
                         },
                         onSearch = {
                             viewModel.openPlaceSearch(RouteEndpoint.INTERMEDIATE_STOP)
@@ -474,6 +503,7 @@ private fun Header(
     val title = when (stage) {
         PlannerStage.FOLLOW -> "Segui posizione"
         PlannerStage.CONFIGURE_ROUTE -> "Modifica percorso"
+        PlannerStage.FAVORITE_PLACES -> "Posizioni preferite"
         PlannerStage.DESTINATION_SEARCH -> if (searchTarget == RouteEndpoint.INTERMEDIATE_STOP) {
             "Aggiungi tappa"
         } else {
@@ -562,6 +592,7 @@ private fun Header(
 }
 
 private fun PlannerStage.creationStep(searchTarget: RouteEndpoint): Int? = when (this) {
+    PlannerStage.FAVORITE_PLACES -> if (searchTarget == RouteEndpoint.INTERMEDIATE_STOP) 2 else 1
     PlannerStage.DESTINATION_SEARCH -> if (searchTarget == RouteEndpoint.INTERMEDIATE_STOP) {
         2
     } else {
@@ -581,6 +612,187 @@ private fun PlannerStage.creationStep(searchTarget: RouteEndpoint): Int? = when 
     PlannerStage.CONFIGURE_ROUTE,
     PlannerStage.VEHICLE_PROFILES,
     PlannerStage.SERVER_CONNECTION -> null
+}
+
+@Composable
+private fun FavoritePlacesContent(
+    target: RouteEndpoint,
+    places: List<FavoritePlace>,
+    nameInput: String,
+    editingPlaceId: String?,
+    draftCoordinate: Coordinate?,
+    message: String?,
+    onNameChanged: (String) -> Unit,
+    onSave: () -> Unit,
+    onCancelEdit: () -> Unit,
+    onSelect: (String) -> Unit,
+    onEdit: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val targetLabel = when (target) {
+        RouteEndpoint.ORIGIN -> "partenza"
+        RouteEndpoint.INTERMEDIATE_STOP -> "tappa"
+        RouteEndpoint.DESTINATION -> "destinazione"
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Scegli la $targetLabel",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "I preferiti sono conservati nella memoria privata di Compass.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        if (editingPlaceId == null) {
+                            "Salva la posizione selezionata"
+                        } else {
+                            "Modifica luogo preferito"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (draftCoordinate == null) {
+                        Text(
+                            "Per creare un nuovo preferito, torna indietro e scegli prima una " +
+                                "posizione attuale, cercata o selezionata sulla mappa.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = nameInput,
+                            onValueChange = onNameChanged,
+                            label = { Text("Nome privato") },
+                            supportingText = {
+                                Text("Per esempio Casa, Lavoro o Parcheggio nord")
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { onSave() }),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "%.6f, %.6f".format(
+                                Locale.US,
+                                draftCoordinate.latitude,
+                                draftCoordinate.longitude,
+                            ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        ) {
+                            if (editingPlaceId != null) {
+                                CompassTextButton(onClick = onCancelEdit) { Text("Annulla") }
+                            }
+                            CompassButton(
+                                onClick = onSave,
+                                enabled = nameInput.isNotBlank(),
+                            ) {
+                                Text(if (editingPlaceId == null) "Salva" else "Aggiorna")
+                            }
+                        }
+                    }
+                    Text(
+                        "Compass salva soltanto il nome scelto da te e le coordinate: " +
+                            "non conserva nomi, indirizzi o payload Google Places.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        item {
+            Text(
+                "Luoghi salvati",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        if (places.isEmpty()) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Non hai ancora salvato alcun luogo preferito.",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            itemsIndexed(places, key = { _, place -> place.id }) { _, place ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Surface(
+                                shape = MaterialTheme.shapes.extraLarge,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(44.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Rounded.BookmarkBorder, contentDescription = null)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(place.name, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "%.6f, %.6f".format(
+                                        Locale.US,
+                                        place.location.latitude,
+                                        place.location.longitude,
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            CompassButton(onClick = { onSelect(place.id) }) {
+                                Text("Usa")
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            CompassTextButton(onClick = { onEdit(place.id) }) {
+                                Text("Modifica")
+                            }
+                            CompassTextButton(onClick = { onDelete(place.id) }) {
+                                Text("Elimina")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        message?.let { text -> item { InlineError(text) } }
+    }
 }
 
 @Composable
@@ -704,7 +916,6 @@ private fun PreviewContent(
                     }
                     CompassOutlinedButton(
                         onClick = onAddIntermediateStops,
-                        enabled = allowCngPlanning,
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Rounded.AddLocationAlt, contentDescription = null)
@@ -872,11 +1083,12 @@ private fun MapPointPickerContent(
 private fun IntermediateStopsContent(
     route: RoutePreview,
     stops: List<PlannedIntermediateStop>,
-    maximumDeviationKmInput: String,
+    maximumAddedMinutesInput: String,
     isCalculating: Boolean,
     message: String?,
-    onMaximumDeviationChanged: (String) -> Unit,
+    onMaximumAddedMinutesChanged: (String) -> Unit,
     onUseCurrentLocation: () -> Unit,
+    onFavorites: () -> Unit,
     onSearch: () -> Unit,
     onMapSelection: () -> Unit,
     onMove: (Int, Int) -> Unit,
@@ -884,6 +1096,11 @@ private fun IntermediateStopsContent(
     onDelete: (String) -> Unit,
     onCalculate: () -> Unit,
 ) {
+    var addControlsExpanded by rememberSaveable(stops.isEmpty()) {
+        mutableStateOf(stops.isEmpty())
+    }
+    var maximumTimeEditorVisible by rememberSaveable { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             RouteMap(
@@ -982,33 +1199,125 @@ private fun IntermediateStopsContent(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Aggiungi tappa", fontWeight = FontWeight.SemiBold)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CompassOutlinedButton(onClick = onUseCurrentLocation) {
-                        Text("Posizione attuale")
+                if (stops.isNotEmpty()) {
+                    CompassOutlinedButton(
+                        onClick = { addControlsExpanded = !addControlsExpanded },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Aggiungi tappa")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = if (addControlsExpanded) {
+                                Icons.Rounded.ExpandLess
+                            } else {
+                                Icons.Rounded.ExpandMore
+                            },
+                            contentDescription = if (addControlsExpanded) {
+                                "Comprimi opzioni"
+                            } else {
+                                "Espandi opzioni"
+                            },
+                        )
                     }
-                    CompassOutlinedButton(onClick = {}, enabled = false) {
-                        Text("Posizioni preferite")
-                    }
-                    CompassOutlinedButton(onClick = onSearch) { Text("Ricerca") }
-                    CompassOutlinedButton(onClick = onMapSelection) {
-                        Text("Selezione dalla mappa")
+                } else {
+                    Text("Aggiungi tappa", fontWeight = FontWeight.SemiBold)
+                }
+                AnimatedVisibility(visible = stops.isEmpty() || addControlsExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CompassOutlinedButton(onClick = onUseCurrentLocation) {
+                                Text("Posizione attuale")
+                            }
+                            CompassOutlinedButton(onClick = onFavorites) {
+                                Text("Posizioni preferite")
+                            }
+                            CompassOutlinedButton(onClick = onSearch) { Text("Ricerca") }
+                            CompassOutlinedButton(onClick = onMapSelection) {
+                                Text("Selezione dalla mappa")
+                            }
+                        }
+                        if (maximumTimeEditorVisible) {
+                            OutlinedTextField(
+                                value = maximumAddedMinutesInput,
+                                onValueChange = onMaximumAddedMinutesChanged,
+                                label = { Text("Tempo aggiuntivo massimo") },
+                                suffix = { Text("min") },
+                                supportingText = {
+                                    Text(
+                                        "Predefinito a un terzo della durata di guida " +
+                                            "del percorso diretto.",
+                                    )
+                                },
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = {
+                                            focusManager.clearFocus(force = true)
+                                            maximumTimeEditorVisible = false
+                                        },
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = "Conferma tempo massimo",
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Decimal,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        focusManager.clearFocus(force = true)
+                                        maximumTimeEditorVisible = false
+                                    },
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            Surface(
+                                onClick = { maximumTimeEditorVisible = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.extraLarge,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(
+                                        horizontal = 18.dp,
+                                        vertical = 14.dp,
+                                    ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        Text(
+                                            "Tempo aggiuntivo massimo",
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                        Text(
+                                            "${maximumAddedMinutesInput.ifBlank { "—" }} min",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                    Text(
+                                        "Modifica",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                OutlinedTextField(
-                    value = maximumDeviationKmInput,
-                    onValueChange = onMaximumDeviationChanged,
-                    label = { Text("Deviazione massima complessiva") },
-                    suffix = { Text("km") },
-                    supportingText = {
-                        Text("Predefinita al 30% della lunghezza del percorso diretto.")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 message?.let { InlineError(it) }
                 CompassButton(
                     onClick = onCalculate,
@@ -1129,7 +1438,7 @@ private fun NavigationPreviewContent(
                             Text(
                                 "Prezzi e orari CNG potrebbero non essere aggiornati.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
+                                color = MaterialTheme.compassSemanticColors.onWarningContainer,
                             )
                         }
                     }
@@ -1159,7 +1468,7 @@ private fun NavigationPreviewContent(
                         Text(
                             "Traffico live non disponibile: l’ETA usa i tempi di percorrenza correnti del routing.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = MaterialTheme.compassSemanticColors.onWarningContainer,
                         )
                     }
                 }
@@ -1235,9 +1544,6 @@ private fun NavigationPreviewContent(
                                 CompassOutlinedButton(
                                     onClick = { onDeleteIntermediateStop(stop.id) },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error,
-                                    ),
                                 ) { Text("Elimina") }
                             }
                         }
@@ -1264,9 +1570,6 @@ private fun NavigationPreviewContent(
                                 CompassOutlinedButton(
                                     onClick = { onDeleteCngStop(stop.mimitStationId) },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error,
-                                    ),
                                 ) { Text("Elimina") }
                             }
                         }
@@ -1274,17 +1577,32 @@ private fun NavigationPreviewContent(
                 }
             }
         }
-        item {
-            Text(
-                "Prima indicazione",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
-        }
-        route.maneuvers.firstOrNull()?.let { maneuver ->
+        if (route.intermediateStops.isNotEmpty()) {
             item {
-                ManeuverRow(number = 1, maneuver = maneuver)
+                Text(
+                    "Tappe del viaggio",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+            itemsIndexed(route.intermediateStops) { index, _ ->
+                val label = plannedIntermediateStops.getOrNull(index)
+                    ?.privateDisplayName
+                    ?.takeIf(String::isNotBlank)
+                    ?: "Tappa intermedia ${index + 1}"
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text("${index + 1}. $label", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Nessun tempo di sosta",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
             }
         }
         if (message != null) {
@@ -1305,9 +1623,6 @@ private fun NavigationPreviewContent(
                 CompassOutlinedButton(
                     onClick = { editSummary = !editSummary },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
                 ) {
                     Text(if (editSummary) "Chiudi modifica" else "Modifica")
                 }
@@ -1519,7 +1834,7 @@ private fun ActiveNavigationContent(
                                 "Compass non raggiungibile: guida locale attiva, ricalcolo non disponibile."
                             NavigationConnectivity.ONLINE -> error("handled above")
                         },
-                        color = MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.compassSemanticColors.onWarningContainer,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1529,7 +1844,7 @@ private fun ActiveNavigationContent(
                 ) {
                     Text(
                         "Dati CNG in cache: prezzi e orari non sono presentati come aggiornati.",
-                        color = MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.compassSemanticColors.onWarningContainer,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1549,7 +1864,7 @@ private fun ActiveNavigationContent(
                         } else {
                             "Verifica posizione rispetto al percorso…"
                         },
-                        color = MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.compassSemanticColors.onWarningContainer,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1652,6 +1967,7 @@ private fun ConfigureRouteContent(
     isCalculating: Boolean,
     message: String?,
     onSearch: (RouteEndpoint) -> Unit,
+    onFavorites: (RouteEndpoint) -> Unit,
     onCoordinates: (RouteEndpoint) -> Unit,
     onUseCurrentLocation: (RouteEndpoint) -> Unit,
     onApply: () -> Unit,
@@ -1700,8 +2016,8 @@ private fun ConfigureRouteContent(
                     attributions = originAttributions,
                     selectedMethod = originLocationMethod,
                     currentLocationStatus = originCurrentLocationStatus,
-                    currentLocationLast = false,
                     onSearch = onSearch,
+                    onFavorites = onFavorites,
                     onCoordinates = onCoordinates,
                     onUseCurrentLocation = onUseCurrentLocation,
                 )
@@ -1718,8 +2034,8 @@ private fun ConfigureRouteContent(
                     attributions = destinationAttributions,
                     selectedMethod = destinationLocationMethod,
                     currentLocationStatus = destinationCurrentLocationStatus,
-                    currentLocationLast = true,
                     onSearch = onSearch,
+                    onFavorites = onFavorites,
                     onCoordinates = onCoordinates,
                     onUseCurrentLocation = onUseCurrentLocation,
                 )
@@ -1771,8 +2087,8 @@ private fun RouteEndpointSelector(
     attributions: List<String>,
     selectedMethod: RouteLocationMethod?,
     currentLocationStatus: CurrentLocationAcquisitionStatus,
-    currentLocationLast: Boolean,
     onSearch: (RouteEndpoint) -> Unit,
+    onFavorites: (RouteEndpoint) -> Unit,
     onCoordinates: (RouteEndpoint) -> Unit,
     onUseCurrentLocation: (RouteEndpoint) -> Unit,
 ) {
@@ -1812,13 +2128,12 @@ private fun RouteEndpointSelector(
                 )
             }
         }
-        val methods = buildList {
-            if (!currentLocationLast) add(RouteLocationMethod.CURRENT_LOCATION)
-            add(RouteLocationMethod.FAVORITES)
-            add(RouteLocationMethod.SEARCH)
-            add(RouteLocationMethod.COORDINATES)
-            if (currentLocationLast) add(RouteLocationMethod.CURRENT_LOCATION)
-        }
+        val methods = listOf(
+            RouteLocationMethod.CURRENT_LOCATION,
+            RouteLocationMethod.FAVORITES,
+            RouteLocationMethod.SEARCH,
+            RouteLocationMethod.COORDINATES,
+        )
         methods.chunked(2).forEach { rowMethods ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1841,7 +2156,9 @@ private fun RouteEndpointSelector(
                         CurrentLocationChoiceButton(
                             selected = method == selectedMethod,
                             status = currentLocationStatus,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(TRIP_LOCATION_OPTION_HEIGHT),
                             onClick = { onUseCurrentLocation(endpoint) },
                         )
                     } else if (method == selectedMethod) {
@@ -1852,10 +2169,16 @@ private fun RouteEndpointSelector(
                                         onUseCurrentLocation(endpoint)
                                     RouteLocationMethod.SEARCH -> onSearch(endpoint)
                                     RouteLocationMethod.COORDINATES -> onCoordinates(endpoint)
-                                    RouteLocationMethod.FAVORITES -> Unit
+                                    RouteLocationMethod.FAVORITES -> onFavorites(endpoint)
                                 }
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(TRIP_LOCATION_OPTION_HEIGHT),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.compassSemanticColors.successContainer,
+                                contentColor = MaterialTheme.compassSemanticColors.onSuccessContainer,
+                            ),
                         ) {
                             Icon(icon, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -1869,11 +2192,12 @@ private fun RouteEndpointSelector(
                                         onUseCurrentLocation(endpoint)
                                     RouteLocationMethod.SEARCH -> onSearch(endpoint)
                                     RouteLocationMethod.COORDINATES -> onCoordinates(endpoint)
-                                    RouteLocationMethod.FAVORITES -> Unit
+                                    RouteLocationMethod.FAVORITES -> onFavorites(endpoint)
                                 }
                             },
-                            enabled = method != RouteLocationMethod.FAVORITES,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(TRIP_LOCATION_OPTION_HEIGHT),
                         ) {
                             Icon(icon, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -1885,9 +2209,6 @@ private fun RouteEndpointSelector(
                     Spacer(modifier = Modifier.weight(1f))
                 }
             }
-        }
-        if (selectedMethod == RouteLocationMethod.FAVORITES) {
-            Text("Posizioni preferite · prossimamente")
         }
     }
 }
@@ -1981,9 +2302,17 @@ private fun DestinationSearchContent(
     onConfirmCoordinateOnly: () -> Unit,
 ) {
     var input by remember { mutableStateOf(TextFieldValue(query)) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     LaunchedEffect(query) {
         if (query != input.text && input.composition == null) {
             input = TextFieldValue(query)
+        }
+    }
+    LaunchedEffect(results, isSearching, isResolving) {
+        if (results.isNotEmpty() && !isSearching && !isResolving) {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
         }
     }
     val isBusy = isSearching || isResolving
@@ -2133,6 +2462,28 @@ private fun DestinationSearchContent(
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
+                    result.marginalAddedDurationSeconds?.let { seconds ->
+                        Text(
+                            buildString {
+                                append("Tempo aggiunto +")
+                                append(formatDuration(seconds))
+                                if (result.withinTimeBudget == false) append(" · oltre il limite")
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (
+                        target == RouteEndpoint.INTERMEDIATE_STOP &&
+                        result.searchIntent in setOf("specific", "ambiguous") &&
+                        result.withinTimeBudget == null
+                    ) {
+                        Text(
+                            "Deviazione non verificabile · sarà calcolata nell'anteprima",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         result.attribution,
                         style = MaterialTheme.typography.labelSmall,
@@ -2259,7 +2610,7 @@ private fun ServerConnectionContent(
                             Text(
                                 "Le credenziali possono essere intercettate. Usalo solo come fallback.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
+                                color = MaterialTheme.compassSemanticColors.onWarningContainer,
                             )
                         }
                     }
@@ -3438,8 +3789,8 @@ private fun OpeningBadge(state: OpeningState) {
         )
         OpeningState.CLOSED -> Triple(
             "Chiuso all'arrivo",
-            MaterialTheme.colorScheme.errorContainer,
-            MaterialTheme.colorScheme.onErrorContainer,
+            semanticColors.warningContainer,
+            semanticColors.onWarningContainer,
         )
         OpeningState.UNKNOWN -> Triple(
             "Orario sconosciuto",
@@ -3467,7 +3818,7 @@ private fun CandidatePrice(price: CngPrice, tier: CandidatePriceTier) {
         CandidatePriceTier.SECOND_CHEAPEST ->
             semanticColors.warningContainer to semanticColors.onWarningContainer
         CandidatePriceTier.OTHER ->
-            MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+            MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(
         color = containerColor,
@@ -3599,4 +3950,5 @@ private fun predictiveStatusCopy(state: PredictiveSuggestionState): Pair<String,
 
 private fun String.filterPhoneCharacters(): String = filter { it.isDigit() || it == '+' }
 
+private val TRIP_LOCATION_OPTION_HEIGHT = 80.dp
 private const val CNG_CANDIDATE_UI_LOG_TAG = "CompassCngCandidates"

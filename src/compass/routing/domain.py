@@ -10,12 +10,25 @@ class Coordinate:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteOriginDirection:
+    heading_degrees: float
+    heading_tolerance_degrees: int = 45
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.heading_degrees < 360:
+            raise ValueError("heading_degrees must be in [0, 360)")
+        if not 0 <= self.heading_tolerance_degrees <= 180:
+            raise ValueError("heading_tolerance_degrees must be in [0, 180]")
+
+
+@dataclass(frozen=True, slots=True)
 class RouteRequest:
     origin: Coordinate
     destination: Coordinate
     costing: str = "auto"
     language: str = "it-IT"
     departure_at: datetime | None = None
+    origin_direction: RouteOriginDirection | None = None
 
     def __post_init__(self) -> None:
         if self.departure_at is not None and (
@@ -32,6 +45,7 @@ class WaypointRouteRequest:
     costing: str = "auto"
     language: str = "it-IT"
     departure_at: datetime | None = None
+    origin_direction: RouteOriginDirection | None = None
 
     def __post_init__(self) -> None:
         if not self.waypoints:

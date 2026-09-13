@@ -709,9 +709,26 @@ mapless Compose search -> /destinations/suggest -> Google Autocomplete (New)
 ```
 
 The testing registry contains only `google_places_new`. Exact Place IDs are deduplicated without
-cross-ID merging; TomTom/Nominatim destination adapters and Text Search remain dormant. The separate
-TomTom traffic provider is unaffected. Suggestion/resolution state is transient and the map-safe
-target is a distinct type that cannot carry Google name or address fields.
+cross-ID merging; TomTom/Nominatim destination adapters remain dormant. Autocomplete serves the
+600 ms typing path, while explicit origin/destination submit uses Text Search and the ordinary-stop
+intent uses its separate Search Along Route service. The separate TomTom traffic provider is
+unaffected. Suggestion/resolution state is transient and the map-safe target is a distinct type that
+cannot carry Google name or address fields.
+
+For ordinary stops, Android sends the selected Valhalla legs plus direct/current durations and the
+existing cumulative time limit. The backend converts E6 to E5, classifies the query, obtains Google
+candidates and asks Valhalla for complete ordered waypoint routes. Generic candidates are returned
+only when their unrounded duration is within `baseline + limit`, ordered by marginal added driving
+time. Specific and explicitly expanded ambiguous queries retain over-budget/unverified states for
+an explicit preview decision. Candidate evaluation is bounded and route-segment recovery never
+acts as an eligibility test.
+
+Favorite places form a separate local boundary. `FavoritePlaceRepository` persists only a
+user-authored private label and WGS84 coordinate in app-private Android storage; neither normalized
+Google selection objects nor provider text can cross into that model. Choosing an endpoint favorite
+therefore needs no provider call. Choosing an ordinary-stop favorite enters the existing waypoint
+preview pipeline, where Valhalla validates the complete itinerary before an explicit confirmation
+commits it. This store is not a history, Places cache or server-side POI database.
 
 The established local matcher, maneuver controller, confirmed off-route state machine and
 foreground service continue to own live progress. A successful reroute first attempts to retain the

@@ -48,6 +48,8 @@ class DestinationBoundsRequest(StrictModel):
 
 
 class DestinationSuggestRequest(StrictModel):
+    intent: Literal["ORIGIN_SEARCH", "DESTINATION_SEARCH"]
+    operation: Literal["autocomplete", "text_search"] = "autocomplete"
     query: str = Field(min_length=1, max_length=200)
     session_id: str = Field(min_length=36, max_length=36)
     revision: int = Field(ge=0)
@@ -67,13 +69,17 @@ class DestinationSuggestionResponse(StrictModel):
     provider_rank: int = Field(ge=0)
     requires_resolution: bool
     attribution: str
+    search_intent: None = None
+    marginal_added_duration_seconds: None = None
+    total_added_duration_seconds: None = None
+    within_time_budget: None = None
 
 
 class DestinationSuggestResponse(StrictModel):
     session_id: str
     revision: int
     provider: Literal["google_places_new"] = "google_places_new"
-    maximum_results: int = 5
+    maximum_results: int = Field(default=5, ge=1, le=20)
     results: list[DestinationSuggestionResponse]
 
 
@@ -192,6 +198,8 @@ async def destination_suggest(
                 query=payload.query,
                 session_id=payload.session_id,
                 revision=payload.revision,
+                intent=payload.intent,
+                operation=payload.operation,
                 language=payload.language,
                 context=DestinationSearchContext(
                     location=(
@@ -204,8 +212,9 @@ async def destination_suggest(
                     ),
                     bias_radius_meters=(
                         None
-                        if context is None or context.location is None or
-                        context.route_bounds is not None
+                        if context is None
+                        or context.location is None
+                        or context.route_bounds is not None
                         else context.bias_radius_meters
                         or settings.destination_search_bias_radius_meters
                     ),
@@ -238,6 +247,7 @@ async def destination_suggest(
     return DestinationSuggestResponse(
         session_id=payload.session_id,
         revision=payload.revision,
+        maximum_results=10 if payload.operation == "text_search" else 5,
         results=[DestinationSuggestionResponse(**asdict(item)) for item in results],
     )
 

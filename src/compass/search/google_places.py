@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from math import isfinite
+from math import asin, cos, isfinite, radians, sin, sqrt
 from typing import Any
 from urllib.parse import quote
 
@@ -38,10 +38,23 @@ GOOGLE_PLACES_AUTOCOMPLETE_FIELD_MASK = ",".join(
 GOOGLE_PLACES_DETAILS_FIELD_MASK = ",".join(
     ("id", "formattedAddress", "addressComponents", "location", "types", "attributions")
 )
+GOOGLE_PLACES_TEXT_SEARCH_FIELD_MASK = ",".join(
+    (
+        "places.id",
+        "places.displayName",
+        "places.formattedAddress",
+        "places.location",
+        "places.types",
+        "places.attributions",
+    )
+)
 
 
 class GooglePlacesNewDestinationProvider:
-    """Autocomplete/Details adapter; it never performs Text Search or reverse geocoding."""
+    """Places New adapter for Autocomplete, explicit Text Search and Details.
+
+    Reverse geocoding deliberately remains outside this Google-only destination flow.
+    """
 
     provider_name = "google_places_new"
 
@@ -68,8 +81,12 @@ class GooglePlacesNewDestinationProvider:
     async def suggest(
         self,
         request: DestinationSuggestRequest,
-        provider_session_token: str,
+        provider_session_token: str | None,
     ) -> tuple[DestinationSuggestion, ...]:
+        if request.operation == "text_search":
+            return await self._text_search(request)
+        if provider_session_token is None:
+            raise DestinationProviderError("Autocomplete requires a session token")
         payload: dict[str, Any] = {
             "input": request.query.strip(),
             "languageCode": request.language,
@@ -134,12 +151,84 @@ class GooglePlacesNewDestinationProvider:
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             raise DestinationProviderError("Google Autocomplete returned invalid data") from error
 
+    async def _text_search(
+        self,
+        request: DestinationSuggestRequest,
+    ) -> tuple[DestinationSuggestion, ...]:
+        payload: dict[str, Any] = {
+            "textQuery": request.query.strip(),
+            "languageCode": request.language,
+            "regionCode": self._region_code.upper(),
+            "pageSize": 10,
+        }
+        origin = request.context.location
+        if origin is not None and request.context.bias_radius_meters is not None:
+            payload["locationBias"] = {
+                "circle": {
+                    "center": {
+                        "latitude": origin.latitude,
+                        "longitude": origin.longitude,
+                    },
+                    "radius": request.context.bias_radius_meters,
+                }
+            }
+        if _is_single_category_query(request.query):
+            payload["rankPreference"] = "DISTANCE"
+        response = await self._request(
+            "POST",
+            f"{self._base_url}/places:searchText",
+            field_mask=GOOGLE_PLACES_TEXT_SEARCH_FIELD_MASK,
+            json=payload,
+        )
+        try:
+            body = response.json()
+            places = body.get("places", [])
+            if not isinstance(places, Sequence) or isinstance(places, str | bytes):
+                raise TypeError("Google Text Search places must be an array")
+            normalized: list[DestinationSuggestion] = []
+            seen: set[str] = set()
+            for rank, raw in enumerate(places):
+                if not isinstance(raw, Mapping):
+                    raise TypeError("Google Text Search place must be an object")
+                place_id = _required_text(raw.get("id"), "Google place has no id")
+                if place_id in seen:
+                    continue
+                seen.add(place_id)
+                display = raw.get("displayName")
+                title = _localized_text(display)
+                address = _optional_text(raw.get("formattedAddress"))
+                if title is None:
+                    title = _required_text(address, "Google place has no display text")
+                location = raw.get("location")
+                coordinate = _optional_coordinate(location)
+                distance = (
+                    round(_distance_meters(origin, coordinate))
+                    if origin is not None and coordinate is not None
+                    else None
+                )
+                normalized.append(
+                    DestinationSuggestion(
+                        id=f"google_places_new:{place_id}",
+                        provider=self.provider_name,
+                        provider_ref=place_id,
+                        kind=_destination_kind(_text_set(raw.get("types", []))),
+                        title=title,
+                        subtitle=address,
+                        address_preview=address,
+                        distance_meters=distance,
+                        provider_rank=rank,
+                    )
+                )
+            return tuple(normalized[:10])
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            raise DestinationProviderError("Google Text Search returned invalid data") from error
+
     async def resolve(
         self,
         provider_ref: str,
         *,
         language: str,
-        provider_session_token: str,
+        provider_session_token: str | None,
     ) -> ResolvedDestinationSelection:
         if (
             not provider_ref
@@ -155,7 +244,11 @@ class GooglePlacesNewDestinationProvider:
             params={
                 "languageCode": language,
                 "regionCode": self._region_code,
-                "sessionToken": provider_session_token,
+                **(
+                    {"sessionToken": provider_session_token}
+                    if provider_session_token is not None
+                    else {}
+                ),
             },
         )
         try:
@@ -252,6 +345,43 @@ def _prediction(value: Any) -> Mapping[str, Any] | None:
     if not isinstance(prediction, Mapping):
         raise TypeError("Google place prediction must be an object")
     return prediction
+
+
+def _optional_coordinate(value: Any) -> Coordinate | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        latitude = float(value["latitude"])
+        longitude = float(value["longitude"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not isfinite(latitude) or not isfinite(longitude):
+        return None
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        return None
+    return Coordinate(latitude, longitude)
+
+
+def _distance_meters(first: Coordinate, second: Coordinate) -> float:
+    latitude_delta = radians(second.latitude - first.latitude)
+    longitude_delta = radians(second.longitude - first.longitude)
+    first_latitude = radians(first.latitude)
+    second_latitude = radians(second.latitude)
+    haversine = sin(latitude_delta / 2) ** 2 + (
+        cos(first_latitude) * cos(second_latitude) * sin(longitude_delta / 2) ** 2
+    )
+    return 2 * 6_371_000 * asin(sqrt(haversine))
+
+
+def _is_single_category_query(query: str) -> bool:
+    normalized = " ".join(query.lower().split())
+    return normalized in {
+        "bar",
+        "farmacia",
+        "ristorante",
+        "supermercato",
+        "tabaccheria",
+    }
 
 
 def _normalize_prediction(raw: Mapping[str, Any], rank: int) -> DestinationSuggestion:

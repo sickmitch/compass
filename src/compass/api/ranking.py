@@ -19,6 +19,7 @@ from compass.api.routes import (
     SpatialPruningMetricsResponse,
     _base_route_response,
     _detour_candidate_response,
+    route_origin_direction,
 )
 from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.config import Settings, get_api_settings
@@ -165,6 +166,7 @@ async def ranked_candidates(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     domain_request = RankedCandidatesRequest(
         network_request=NetworkDetourRequest(

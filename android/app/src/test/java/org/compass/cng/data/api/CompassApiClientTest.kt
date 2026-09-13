@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationSearchContext
@@ -82,6 +83,28 @@ class CompassApiClientTest {
         assertEquals(
             "45.4642",
             requestJson.getValue("origin").jsonObject.getValue("latitude").jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun postsObservedOriginDirectionForOffRouteRecalculation() = runTest {
+        server.enqueue(successResponse(SUCCESS_RESPONSE))
+        val client = client()
+
+        client.getRoute(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(44.4949, 11.3426),
+            originDirection = RouteOriginDirection(91.5, 45),
+        )
+
+        val requestJson = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals(
+            "91.5",
+            requestJson.getValue("origin_heading_degrees").jsonPrimitive.content,
+        )
+        assertEquals(
+            "45",
+            requestJson.getValue("origin_heading_tolerance_degrees").jsonPrimitive.content,
         )
     }
 
@@ -234,6 +257,8 @@ class CompassApiClientTest {
             query = "Libreria Verona",
             sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
             revision = 4,
+            intent = "DESTINATION_SEARCH",
+            operation = "autocomplete",
             context = DestinationSearchContext(Coordinate(45.4384, 10.9916), 25_000.0),
         )
 
@@ -256,6 +281,10 @@ class CompassApiClientTest {
         assertEquals("/api/v1/destinations/suggest", suggestRequest.path)
         val suggestJson = json.parseToJsonElement(suggestRequest.body.readUtf8()).jsonObject
         assertEquals("4", suggestJson.getValue("revision").jsonPrimitive.content)
+        assertEquals(
+            "DESTINATION_SEARCH",
+            suggestJson.getValue("intent").jsonPrimitive.content,
+        )
         assertEquals(
             "25000.0",
             suggestJson.getValue("context").jsonObject
@@ -295,6 +324,7 @@ class CompassApiClientTest {
                     legs = listOf(AlongRouteLeg("_izlhA~rlgdF_{geC_{geC")),
                 ),
                 pageCursor = null,
+                fullSearch = false,
             ),
         )
 
@@ -310,6 +340,50 @@ class CompassApiClientTest {
                 .getValue("precision").jsonPrimitive.content,
         )
         assertFalse(body.containsKey("context"))
+    }
+
+    @Test
+    fun logsSafeAlongRouteShapeAndMachineReadableRejection() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(422)
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    """{"code":"invalid_route_context","message":"Invalid route."}""",
+                ),
+        )
+        val events = mutableListOf<String>()
+        val client = CompassApiClient(
+            baseUrl = server.url("/").toString(),
+            httpClient = OkHttpClient(),
+            json = json,
+            eventLogger = events::add,
+        )
+        val request = ApiAlongRouteSearchRequest(
+            query = "farmacia",
+            sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
+            revision = 2,
+            route = AlongRouteContext(
+                routeId = "selected-route",
+                routeRevision = 4,
+                origin = Coordinate(45.0, 10.0),
+                finalDestination = Coordinate(45.2, 10.2),
+                remainingWaypoints = emptyList(),
+                legs = listOf(AlongRouteLeg("_izlhA~rlgdF_{geC_{geC")),
+                baselineDurationSeconds = 3_600.0,
+                currentDurationSeconds = 3_600.0,
+                maximumTotalAddedDurationSeconds = 1_200.0,
+            ),
+            pageCursor = null,
+            fullSearch = false,
+        )
+
+        val failure = runCatching { client.searchAlongRoute(request) }.exceptionOrNull()
+
+        assertTrue(failure is ApiClientException.Http)
+        assertTrue(events.any { it.contains("legs=1 waypoints=0 time_policy=true") })
+        assertTrue(events.any { it.contains("status=422 code=invalid_route_context") })
+        assertFalse(events.any { it.contains("farmacia") || it.contains("45.0") })
     }
 
     @Test
@@ -332,6 +406,8 @@ class CompassApiClientTest {
                 query = "ristorante",
                 sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
                 revision = 1,
+                intent = "DESTINATION_SEARCH",
+                operation = "autocomplete",
                 context = DestinationSearchContext(
                     location = Coordinate(45.1, 9.2),
                     routeBounds = DestinationSearchBounds(

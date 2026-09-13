@@ -32,6 +32,7 @@ from compass.routing.domain import (
     ManeuverSign,
     ManeuverSignElement,
     MatrixCost,
+    RouteOriginDirection,
     RouteRequest,
     RouteSpeedLimit,
     RoutingUnavailableError,
@@ -477,6 +478,48 @@ def test_base_route_contract_is_provider_independent() -> None:
         destination=Coordinate(latitude=45.4781, longitude=9.2271),
         language="it-IT",
     )
+
+
+def test_base_route_forwards_a_valid_origin_direction() -> None:
+    provider = FakeRoutingProvider()
+
+    async def override_provider() -> FakeRoutingProvider:
+        return provider
+
+    async def override_settings() -> Settings:
+        return Settings(_env_file=None)
+
+    app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        response = _post(
+            "/api/v1/routes",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 45.4781, "longitude": 9.2271},
+                "origin_heading_degrees": 91.5,
+                "origin_heading_tolerance_degrees": 45,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert provider.request is not None
+    assert provider.request.origin_direction == RouteOriginDirection(91.5, 45)
+
+
+def test_base_route_rejects_origin_heading_tolerance_without_heading() -> None:
+    response = _post(
+        "/api/v1/routes",
+        {
+            "origin": {"latitude": 45.4642, "longitude": 9.19},
+            "destination": {"latitude": 45.4781, "longitude": 9.2271},
+            "origin_heading_tolerance_degrees": 45,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_base_route_refreshes_traffic_then_recomputes_with_valhalla() -> None:

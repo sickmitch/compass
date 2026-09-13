@@ -42,7 +42,9 @@ class MainActivity : ComponentActivity() {
             routingRepository = application.container.routingRepository,
             navigationSession = application.container.navigationSession,
             vehicleProfileRepository = application.container.vehicleProfileRepository,
+            favoritePlaceRepository = application.container.favoritePlaceRepository,
             serverConnectionRepository = application.container.serverConnectionRepository,
+            eventLogger = application.container.plannerEventLogger,
         )
     }
 

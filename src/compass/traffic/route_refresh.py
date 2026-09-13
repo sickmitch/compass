@@ -165,6 +165,12 @@ def sample_route_probe_points(
         targets.append(next_distance)
         next_distance += spacing_km
     targets.append(total_km)
+    # A short urban route used to probe only its origin and destination. Those
+    # points are commonly on parking/service roads, while the useful traffic
+    # segment lies between them. Keep both boundaries and add one interior
+    # probe whenever the configured budget permits it.
+    if len(targets) == 2 and max_probes >= 3:
+        targets.insert(1, total_km / 2)
     if len(targets) > max_probes:
         targets = [
             total_km * index / (max_probes - 1)

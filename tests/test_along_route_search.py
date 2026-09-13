@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from uuid import uuid4
 
 import httpx
@@ -8,7 +9,7 @@ import pytest
 from compass.api.main import app
 from compass.candidates.geometry import encode_polyline5
 from compass.config import Settings, get_api_settings
-from compass.routing.domain import Coordinate
+from compass.routing.domain import Coordinate, WaypointRoute
 from compass.search.along_route import (
     GOOGLE_SEARCH_ALONG_ROUTE_FIELD_MASK,
     AlongRouteContext,
@@ -21,6 +22,9 @@ from compass.search.along_route import (
     RouteRequiredError,
     StaleDestinationSelectionError,
     build_google_route_polyline,
+    build_google_route_recovery_polylines,
+    classify_waypoint_query,
+    is_within_time_budget,
 )
 from compass.search.dependencies import get_along_route_search_service
 from compass.search.destination_domain import (
@@ -120,9 +124,7 @@ def test_explicit_insertion_slot_uses_only_the_selected_leg() -> None:
         legs=route.legs,
         insertion_leg_index=1,
     )
-    encoded, _ = build_google_route_polyline(
-        slotted, max_points=100, max_encoded_chars=10_000
-    )
+    encoded, _ = build_google_route_polyline(slotted, max_points=100, max_encoded_chars=10_000)
     assert encoded == encode_polyline5(
         (
             Coordinate(45.100003, 10.200004),
@@ -130,6 +132,38 @@ def test_explicit_insertion_slot_uses_only_the_selected_leg() -> None:
             Coordinate(45.300005, 10.500006),
         )
     )
+
+
+def test_ring_route_is_kept_and_split_into_bounded_recovery_segments() -> None:
+    origin = Coordinate(45.0, 10.0)
+    destination = Coordinate(45.00001, 10.00001)
+    ring = AlongRouteContext(
+        route_id="ring",
+        route_revision=1,
+        origin=origin,
+        final_destination=destination,
+        remaining_waypoints=(),
+        legs=(
+            AlongRouteLeg(
+                _encode(
+                    [
+                        origin,
+                        Coordinate(45.1, 10.1),
+                        Coordinate(45.2, 10.0),
+                        Coordinate(45.1, 9.9),
+                        destination,
+                    ]
+                )
+            ),
+        ),
+    )
+    encoded, _ = build_google_route_polyline(ring, max_points=100, max_encoded_chars=10_000)
+    segments = build_google_route_recovery_polylines(
+        ring, max_points=100, max_encoded_chars=10_000, segment_count=2
+    )
+    assert encoded
+    assert len(segments) == 2
+    assert all(segment != encoded for segment in segments)
 
 
 def test_google_contract_uses_search_along_route_without_routing_summaries() -> None:
@@ -182,12 +216,149 @@ def test_google_contract_uses_search_along_route_without_routing_summaries() -> 
     request = captured[0]
     assert request.headers["X-Goog-FieldMask"] == GOOGLE_SEARCH_ALONG_ROUTE_FIELD_MASK
     payload = json.loads(request.content)
-    assert payload["searchAlongRouteParameters"] == {
-        "polyline": {"encodedPolyline": "abc"}
-    }
+    assert payload["searchAlongRouteParameters"] == {"polyline": {"encodedPolyline": "abc"}}
     assert payload["pageSize"] == 10
     assert "routingSummaries" not in payload
     assert "rankPreference" not in payload
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("farmacia", "generic"),
+        ("pizzeria", "generic"),
+        ("supermercato aperto", "generic"),
+        ("Via Roma 12, Verona", "specific"),
+        ("Lidl via X Verona", "specific"),
+        ("ristoranti a Mantova", "specific"),
+        ("Bar Centrale", "ambiguous"),
+        ("Arena di Verona", "ambiguous"),
+    ],
+)
+def test_waypoint_query_intent_is_deterministic(query: str, expected: str) -> None:
+    assert classify_waypoint_query(query) == expected
+
+
+@pytest.mark.parametrize(
+    ("duration", "expected"),
+    [(7_199.0, True), (7_200.0, True), (7_201.0, False)],
+)
+def test_one_third_time_budget_uses_unrounded_seconds(duration: float, expected: bool) -> None:
+    assert (
+        is_within_time_budget(
+            candidate_duration_seconds=duration,
+            baseline_duration_seconds=5_400.0,
+            maximum_total_added_duration_seconds=1_800.0,
+        )
+        is expected
+    )
+
+
+def test_specific_query_uses_global_text_search_without_silent_global_fallback() -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"places": []})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GooglePlacesNewAlongRouteProvider(
+                base_url="https://places.googleapis.com/v1",
+                api_key="secret",
+                timeout_seconds=2,
+                region_code="IT",
+                page_size=10,
+                client=client,
+            )
+            service = _service(provider)
+            await service.search(
+                "user",
+                _request(_route(), query="Via Roma 12, Verona"),
+            )
+
+    asyncio.run(run())
+    payload = json.loads(
+        captured.single().content if hasattr(captured, "single") else captured[0].content
+    )
+    assert "searchAlongRouteParameters" not in payload
+
+
+def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_time() -> None:
+    route = replace(
+        _route(),
+        baseline_duration_seconds=100.0,
+        current_duration_seconds=130.0,
+        maximum_total_added_duration_seconds=50.0,
+    )
+
+    def result(ref: str, longitude: float, rank: int) -> AlongRouteProviderResult:
+        suggestion = DestinationSuggestion(
+            id=f"google_places_new:{ref}",
+            provider="google_places_new",
+            provider_ref=ref,
+            kind="business",
+            title=ref,
+            subtitle=None,
+            address_preview=None,
+            distance_meters=None,
+            provider_rank=rank,
+            requires_resolution=False,
+        )
+        selection = ResolvedDestinationSelection(
+            provider="google_places_new",
+            provider_ref=ref,
+            formatted_address=None,
+            address_components=(),
+            normalized_address=NormalizedAddress(),
+            coordinate=Coordinate(45.2, longitude),
+            kind="business",
+            attribution=("Google Maps",),
+            field_sources=(("location", "google_places_new"),),
+        )
+        return AlongRouteProviderResult(suggestion, selection)
+
+    class Provider(_Provider):
+        async def search(self, **kwargs):
+            self.calls += 1
+            assert kwargs["encoded_polyline5"] is not None
+            return AlongRouteProviderResponse(
+                (
+                    result("within-slower", 10.81, 0),
+                    result("outside", 10.82, 1),
+                    result("within-faster", 10.83, 2),
+                ),
+                None,
+            )
+
+    class Routing:
+        def __init__(self):
+            self.requests = []
+
+        async def route_with_waypoints(self, request):
+            self.requests.append(request)
+            duration = {10.81: 145.0, 10.82: 151.0, 10.83: 135.0}[request.waypoints[-1].longitude]
+            return WaypointRoute(0.0, duration, (), "fixture")
+
+    provider = Provider()
+    routing = Routing()
+
+    async def run():
+        return await _service(provider).search(
+            "user",
+            _request(route, query="farmacia"),
+            routing_provider=routing,
+        )
+
+    response = asyncio.run(run())
+    assert response.mode == "route_time_filtered"
+    assert [item.provider_ref for item in response.results] == [
+        "within-faster",
+        "within-slower",
+    ]
+    assert [item.marginal_added_duration_seconds for item in response.results] == [5.0, 15.0]
+    assert all(item.within_time_budget for item in response.results)
+    assert all(request.waypoints[0] == route.remaining_waypoints[0] for request in routing.requests)
 
 
 @pytest.mark.parametrize(
@@ -263,9 +434,7 @@ def test_route_change_invalidates_pagination_cursor() -> None:
     session_id = str(uuid4())
 
     async def run():
-        first = await service.search(
-            "user", _request(_route(), session_id=session_id, revision=1)
-        )
+        first = await service.search("user", _request(_route(), session_id=session_id, revision=1))
         with pytest.raises(StaleDestinationSelectionError):
             await service.search(
                 "user",
@@ -279,6 +448,34 @@ def test_route_change_invalidates_pagination_cursor() -> None:
 
     asyncio.run(run())
     assert provider.calls == 1
+
+
+def test_identical_inflight_search_is_coalesced() -> None:
+    class Provider(_Provider):
+        def __init__(self):
+            self.calls = 0
+            self.release = asyncio.Event()
+
+        async def search(self, **_kwargs):
+            self.calls += 1
+            await self.release.wait()
+            return AlongRouteProviderResponse((), None)
+
+    async def run():
+        provider = Provider()
+        service = _service(provider)
+        request = _request(_route())
+        first = asyncio.create_task(service.search("user", request))
+        await asyncio.sleep(0)
+        second = asyncio.create_task(service.search("user", request))
+        await asyncio.sleep(0)
+        provider.release.set()
+        responses = await asyncio.gather(first, second)
+        return provider, responses
+
+    provider, responses = asyncio.run(run())
+    assert provider.calls == 1
+    assert responses[0] == responses[1]
 
 
 def test_api_requires_route_without_calling_provider() -> None:
@@ -355,9 +552,7 @@ def test_selection_is_bound_to_current_route_and_double_resolve_is_idempotent() 
     session_id = str(uuid4())
 
     async def run():
-        found = await service.search(
-            "user", _request(route, session_id=session_id, revision=1)
-        )
+        found = await service.search("user", _request(route, session_id=session_id, revision=1))
         arguments = dict(
             owner="user",
             session_id=session_id,

@@ -18,6 +18,10 @@ import kotlinx.coroutines.launch
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
+import org.compass.cng.domain.favorite.FavoritePlace
+import org.compass.cng.domain.favorite.FavoritePlaceRepository
+import org.compass.cng.domain.favorite.InMemoryFavoritePlaceRepository
+import org.compass.cng.domain.favorite.MAX_FAVORITE_PLACE_NAME_LENGTH
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.geometry.Polyline6Encoder
 import org.compass.cng.domain.model.AlongRouteContext
@@ -56,6 +60,7 @@ import org.compass.cng.domain.vehicle.VehicleProfiles
 enum class PlannerStage {
     FOLLOW,
     CONFIGURE_ROUTE,
+    FAVORITE_PLACES,
     DESTINATION_SEARCH,
     MAP_POINT_PICKER,
     INTERMEDIATE_STOP_PREVIEW,
@@ -132,7 +137,7 @@ data class RoutePlannerUiState(
     val intermediateStopLocationMethod: RouteLocationMethod? = null,
     val intermediateStopCurrentLocationStatus: CurrentLocationAcquisitionStatus =
         CurrentLocationAcquisitionStatus.IDLE,
-    val intermediateStopMaximumDeviationKmInput: String = "",
+    val intermediateStopMaximumAddedMinutesInput: String = "",
     val originDisplayName: String = "Non selezionata",
     val destinationDisplayName: String = "Non selezionata",
     val originAttributions: List<String> = emptyList(),
@@ -143,6 +148,11 @@ data class RoutePlannerUiState(
         CurrentLocationAcquisitionStatus.IDLE,
     val destinationCurrentLocationStatus: CurrentLocationAcquisitionStatus =
         CurrentLocationAcquisitionStatus.IDLE,
+    val favoritePlaces: List<FavoritePlace> = emptyList(),
+    val favoritePlaceTarget: RouteEndpoint = RouteEndpoint.DESTINATION,
+    val favoritePlaceNameInput: String = "",
+    val editingFavoritePlaceId: String? = null,
+    val favoriteDraftCoordinate: Coordinate? = null,
     val routeInputsDirty: Boolean = true,
     val placeSearchTarget: RouteEndpoint = RouteEndpoint.DESTINATION,
     val placeSearchIntent: DestinationSearchIntent = DestinationSearchIntent.DESTINATION_SEARCH,
@@ -216,7 +226,10 @@ class RoutePlannerViewModel(
         InMemoryVehicleProfileRepository(),
     private val serverConnectionRepository: ServerConnectionRepository =
         InMemoryServerConnectionRepository(),
+    private val favoritePlaceRepository: FavoritePlaceRepository =
+        InMemoryFavoritePlaceRepository(),
     private val startInFollowMode: Boolean = false,
+    private val eventLogger: (String) -> Unit = {},
 ) : ViewModel() {
     val navigationState = navigationSession.state
     private val restoredNavigation = navigationSession.state.value.let { restored ->
@@ -238,6 +251,7 @@ class RoutePlannerViewModel(
             restoredNavigation.phase != org.compass.cng.navigation.NavigationPhase.ROUTE_PREVIEW
     private val initialVehicleProfiles = vehicleProfileRepository.load()
     private val initialServerConnection = serverConnectionRepository.load()
+    private val initialFavoritePlaces = favoritePlaceRepository.load()
     private val mutableUiState = MutableStateFlow(
         restoredNavigation.route?.let { activeRoute ->
             RoutePlannerUiState(
@@ -260,6 +274,7 @@ class RoutePlannerViewModel(
                     )
                 },
             ).withVehicleProfiles(initialVehicleProfiles)
+                .copy(favoritePlaces = initialFavoritePlaces)
                 .withServerConnection(initialServerConnection)
         } ?: if (startInFollowMode) {
             RoutePlannerUiState(
@@ -278,6 +293,7 @@ class RoutePlannerViewModel(
                 destinationLongitudeInput = initialDestination.longitude.toCoordinateInput(),
             )
         }.withVehicleProfiles(initialVehicleProfiles)
+            .copy(favoritePlaces = initialFavoritePlaces)
             .withServerConnection(initialServerConnection)
             .let { state ->
                 if (
@@ -319,6 +335,179 @@ class RoutePlannerViewModel(
             mutableUiState.value = mutableUiState.value.copy(
                 stage = PlannerStage.CONFIGURE_ROUTE,
                 message = null,
+            )
+        }
+    }
+
+    fun openFavoritePlaces(endpoint: RouteEndpoint) {
+        val state = mutableUiState.value
+        if (state.isBusy) return
+        mutableUiState.value = state.copy(
+            stage = PlannerStage.FAVORITE_PLACES,
+            placeSearchTarget = endpoint,
+            favoritePlaceTarget = endpoint,
+            favoritePlaces = favoritePlaceRepository.load(),
+            favoritePlaceNameInput = "",
+            editingFavoritePlaceId = null,
+            favoriteDraftCoordinate = state.favoriteCandidate(endpoint),
+            message = null,
+        )
+    }
+
+    fun updateFavoritePlaceName(value: String) {
+        if (
+            value.length <= MAX_FAVORITE_PLACE_NAME_LENGTH &&
+            value.none { it == '\n' || it == '\r' }
+        ) {
+            mutableUiState.value = mutableUiState.value.copy(
+                favoritePlaceNameInput = value,
+                message = null,
+            )
+        }
+    }
+
+    fun saveFavoritePlace() {
+        val state = mutableUiState.value
+        if (state.stage != PlannerStage.FAVORITE_PLACES || state.isBusy) return
+        val name = state.favoritePlaceNameInput.trim()
+        val coordinate = state.favoriteDraftCoordinate
+        val editingId = state.editingFavoritePlaceId
+        when {
+            coordinate == null -> {
+                mutableUiState.value = state.copy(
+                    message = "Scegli prima una posizione da salvare.",
+                )
+                return
+            }
+            name.isEmpty() -> {
+                mutableUiState.value = state.copy(
+                    message = "Inserisci un nome per il luogo preferito.",
+                )
+                return
+            }
+            state.favoritePlaces.any {
+                it.id != editingId && it.name.trim().equals(name, ignoreCase = true)
+            } -> {
+                mutableUiState.value = state.copy(
+                    message = "Esiste già un luogo preferito con questo nome.",
+                )
+                return
+            }
+        }
+        try {
+            val places = favoritePlaceRepository.save(
+                FavoritePlace(
+                    id = editingId ?: UUID.randomUUID().toString(),
+                    name = name,
+                    location = coordinate,
+                ),
+            )
+            mutableUiState.value = state.copy(
+                favoritePlaces = places,
+                favoritePlaceNameInput = "",
+                editingFavoritePlaceId = null,
+                favoriteDraftCoordinate = state.favoriteCandidate(state.favoritePlaceTarget),
+                message = null,
+            )
+        } catch (_: IllegalArgumentException) {
+            mutableUiState.value = state.copy(
+                message = "Non è possibile salvare altri luoghi preferiti.",
+            )
+        } catch (_: IllegalStateException) {
+            mutableUiState.value = state.copy(
+                message = "Impossibile salvare il luogo preferito sul dispositivo.",
+            )
+        }
+    }
+
+    fun editFavoritePlace(placeId: String) {
+        val state = mutableUiState.value
+        if (state.stage != PlannerStage.FAVORITE_PLACES || state.isBusy) return
+        val place = state.favoritePlaces.firstOrNull { it.id == placeId } ?: return
+        mutableUiState.value = state.copy(
+            favoritePlaceNameInput = place.name,
+            editingFavoritePlaceId = place.id,
+            favoriteDraftCoordinate = place.location,
+            message = null,
+        )
+    }
+
+    fun cancelFavoritePlaceEdit() {
+        val state = mutableUiState.value
+        if (state.stage != PlannerStage.FAVORITE_PLACES || state.isBusy) return
+        mutableUiState.value = state.copy(
+            favoritePlaceNameInput = "",
+            editingFavoritePlaceId = null,
+            favoriteDraftCoordinate = state.favoriteCandidate(state.favoritePlaceTarget),
+            message = null,
+        )
+    }
+
+    fun deleteFavoritePlace(placeId: String) {
+        val state = mutableUiState.value
+        if (state.stage != PlannerStage.FAVORITE_PLACES || state.isBusy) return
+        try {
+            mutableUiState.value = state.copy(
+                favoritePlaces = favoritePlaceRepository.delete(placeId),
+                favoritePlaceNameInput = if (state.editingFavoritePlaceId == placeId) {
+                    ""
+                } else {
+                    state.favoritePlaceNameInput
+                },
+                editingFavoritePlaceId = state.editingFavoritePlaceId.takeUnless {
+                    it == placeId
+                },
+                favoriteDraftCoordinate = if (state.editingFavoritePlaceId == placeId) {
+                    state.favoriteCandidate(state.favoritePlaceTarget)
+                } else {
+                    state.favoriteDraftCoordinate
+                },
+                message = null,
+            )
+        } catch (_: IllegalStateException) {
+            mutableUiState.value = state.copy(
+                message = "Impossibile eliminare il luogo preferito.",
+            )
+        }
+    }
+
+    fun selectFavoritePlace(placeId: String) {
+        val state = mutableUiState.value
+        if (state.stage != PlannerStage.FAVORITE_PLACES || state.isBusy) return
+        val place = state.favoritePlaces.firstOrNull { it.id == placeId } ?: return
+        when (state.favoritePlaceTarget) {
+            RouteEndpoint.ORIGIN -> mutableUiState.value = state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                originLatitudeInput = place.location.latitude.toCoordinateInput(),
+                originLongitudeInput = place.location.longitude.toCoordinateInput(),
+                originDisplayName = place.name,
+                originAttributions = emptyList(),
+                originLocationMethod = RouteLocationMethod.FAVORITES,
+                originCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
+                favoritePlaceNameInput = "",
+                editingFavoritePlaceId = null,
+                favoriteDraftCoordinate = null,
+                message = null,
+            )
+            RouteEndpoint.DESTINATION -> mutableUiState.value = state.copy(
+                stage = PlannerStage.CONFIGURE_ROUTE,
+                destinationLatitudeInput = place.location.latitude.toCoordinateInput(),
+                destinationLongitudeInput = place.location.longitude.toCoordinateInput(),
+                destinationDisplayName = place.name,
+                destinationAttributions = emptyList(),
+                destinationLocationMethod = RouteLocationMethod.FAVORITES,
+                destinationCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
+                routeInputsDirty = true,
+                favoritePlaceNameInput = "",
+                editingFavoritePlaceId = null,
+                favoriteDraftCoordinate = null,
+                message = null,
+            )
+            RouteEndpoint.INTERMEDIATE_STOP -> previewIntermediateCoordinate(
+                coordinate = place.location,
+                method = RouteLocationMethod.FAVORITES,
+                privateDisplayName = place.name,
             )
         }
     }
@@ -436,6 +625,11 @@ class RoutePlannerViewModel(
     fun openPlaceSearch(endpoint: RouteEndpoint) {
         if (!mutableUiState.value.isBusy) {
             val state = mutableUiState.value
+            eventLogger(
+                "place_search opened: target=${endpoint.name.lowercase()} " +
+                    "route_available=${state.baseRoute != null} " +
+                    "committed_stops=${state.plannedIntermediateStops.size}",
+            )
             pendingIntermediateResolution = null
             mutableUiState.value = state.copy(
                 stage = PlannerStage.DESTINATION_SEARCH,
@@ -499,7 +693,17 @@ class RoutePlannerViewModel(
     }
 
     fun searchDestinations() {
-        scheduleDestinationSuggestions(immediate = true)
+        val state = mutableUiState.value
+        if (state.isBusy) return
+        mutableUiState.value = state.copy(
+            destinationSearchRevision = state.destinationSearchRevision + 1,
+            destinationSuggestions = emptyList(),
+            alongRouteSearchResults = null,
+            pendingDestinationSuggestion = null,
+            pendingResolvedDestination = null,
+            message = null,
+        )
+        scheduleDestinationSuggestions(immediate = true, fullSearch = true)
     }
 
     fun loadMoreAlongRouteResults() {
@@ -521,6 +725,7 @@ class RoutePlannerViewModel(
                         revision = search.revision,
                         route = context,
                         pageCursor = cursor,
+                        fullSearch = search.mode == "global_specific",
                     ),
                 )
                 val latest = mutableUiState.value
@@ -548,7 +753,10 @@ class RoutePlannerViewModel(
         }
     }
 
-    private fun scheduleDestinationSuggestions(immediate: Boolean) {
+    private fun scheduleDestinationSuggestions(
+        immediate: Boolean,
+        fullSearch: Boolean = false,
+    ) {
         destinationSearchJob?.cancel()
         val snapshot = mutableUiState.value
         val query = snapshot.placeSearchQuery.trim()
@@ -591,26 +799,47 @@ class RoutePlannerViewModel(
                     return@launch
                 }
                 val alongResults = if (alongRoute) {
+                    eventLogger(
+                        "along_route dispatch: revision=$revision " +
+                            "route_revision=${routeContext?.routeRevision ?: -1} " +
+                            "legs=${routeContext?.legs?.size ?: 0} " +
+                            "waypoints=${routeContext?.remainingWaypoints?.size ?: 0} " +
+                            "full_search=$fullSearch",
+                    )
                     routingRepository.searchAlongRoute(
                         AlongRouteSearchRequest(
                             query = query,
                             sessionId = sessionId,
                             revision = revision,
                             route = routeContext,
+                            fullSearch = fullSearch,
                         ),
                     )
                 } else {
                     null
                 }
                 val ordinaryResults = if (!alongRoute) {
-                    val searchOrigin = current.followLocation
+                    val recentGps = current.followLocation
                         ?.takeIf { FollowLocationPolicy.canBiasSearch(it, clock.millis()) }
                         ?.coordinate
+                    val searchOrigin = when (current.placeSearchTarget) {
+                        RouteEndpoint.ORIGIN -> recentGps
+                        RouteEndpoint.DESTINATION -> current.originCoordinateOrNull()
+                            .takeIf { current.originLocationMethod != null }
+                            ?: recentGps
+                        RouteEndpoint.INTERMEDIATE_STOP -> null
+                    }
                     routingRepository.suggestDestinations(
                         DestinationSuggestRequest(
                             query = query,
                             sessionId = sessionId,
                             revision = revision,
+                            intent = current.placeSearchIntent,
+                            // Autocomplete remains relevance-oriented even with an origin/bias and
+                            // can omit the closest category results. A settled query and an explicit
+                            // submit therefore share the same localized Text Search contract.
+                            operation = org.compass.cng.domain.model
+                                .DestinationSearchOperation.TEXT_SEARCH,
                             context = DestinationSearchContext(
                                 location = searchOrigin,
                                 biasRadiusMeters = searchOrigin?.let { 25_000.0 },
@@ -642,6 +871,10 @@ class RoutePlannerViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
+                eventLogger(
+                    "place_search failed: target=${current.placeSearchTarget.name.lowercase()} " +
+                        "revision=$revision failure=${error.failure.name.lowercase()}",
+                )
                 if (error.failure.requiresServerConfiguration()) {
                     openServerConnectionForFailure(
                         message = error.failure.placeSearchMessage(),
@@ -741,11 +974,15 @@ class RoutePlannerViewModel(
 
     private fun previewIntermediateStop(resolved: ResolvedDestination) {
         val coordinate = resolved.navigationTarget.location
+        val selectedSuggestion = mutableUiState.value.pendingDestinationSuggestion
         previewIntermediateCoordinate(
             coordinate = coordinate,
             method = RouteLocationMethod.SEARCH,
             privateDisplayName = "Tappa selezionata",
             resolved = resolved,
+            allowTimeLimitOverride = selectedSuggestion?.searchIntent in
+                setOf("specific", "ambiguous") &&
+                selectedSuggestion?.withinTimeBudget != true,
         )
     }
 
@@ -754,14 +991,15 @@ class RoutePlannerViewModel(
         method: RouteLocationMethod,
         privateDisplayName: String,
         resolved: ResolvedDestination? = null,
+        allowTimeLimitOverride: Boolean = false,
     ) {
         val state = mutableUiState.value
         val directRoute = state.baseRoute ?: return
-        val maximumDeviationKm = state.intermediateStopMaximumDeviationKmInput.parseDecimal()
-        if (maximumDeviationKm == null || maximumDeviationKm < 0.0) {
+        val maximumAddedMinutes = state.intermediateStopMaximumAddedMinutesInput.parseDecimal()
+        if (maximumAddedMinutes == null || maximumAddedMinutes < 0.0) {
             mutableUiState.value = state.copy(
                 operation = null,
-                message = "Inserisci una deviazione massima valida per la tappa.",
+                message = "Inserisci un tempo aggiuntivo massimo valido per la tappa.",
             )
             return
         }
@@ -789,14 +1027,14 @@ class RoutePlannerViewModel(
                     intermediateStops = proposedStops.map(PlannedIntermediateStop::location),
                     destination = directRoute.destination,
                 )
-                val extraDistanceMeters =
-                    (candidateRoute.distanceMeters - directRoute.distanceMeters).coerceAtLeast(0.0)
-                if (extraDistanceMeters > maximumDeviationKm * 1_000.0) {
+                val extraDurationSeconds =
+                    (candidateRoute.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
+                if (extraDurationSeconds > maximumAddedMinutes * 60.0 && !allowTimeLimitOverride) {
                     mutableUiState.value = mutableUiState.value.copy(
                         operation = null,
-                        message = intermediateStopDeviationMessage(
-                            extraDistanceMeters = extraDistanceMeters,
-                            maximumDeviationKm = maximumDeviationKm,
+                        message = intermediateStopAddedTimeMessage(
+                            extraDurationSeconds = extraDurationSeconds,
+                            maximumAddedMinutes = maximumAddedMinutes,
                         ),
                     )
                     return@launch
@@ -806,10 +1044,13 @@ class RoutePlannerViewModel(
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.INTERMEDIATE_STOP_PREVIEW,
                     operation = null,
-                pendingIntermediateStopsRoute = candidateRoute,
-                pendingIntermediateStopCoordinate = coordinate,
+                    pendingIntermediateStopsRoute = candidateRoute,
+                    pendingIntermediateStopCoordinate = coordinate,
                     destinationSuggestions = emptyList(),
-                    message = null,
+                    message = if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
+                        "Questa tappa specifica supera il limite temporale. " +
+                            "Conferma l'anteprima per accettarla comunque."
+                    } else null,
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -1146,10 +1387,10 @@ class RoutePlannerViewModel(
         }
     }
 
-    fun updateIntermediateStopMaximumDeviationKm(value: String) {
+    fun updateIntermediateStopMaximumAddedMinutes(value: String) {
         if (value.length <= 8 && value.all { it.isDigit() || it == ',' || it == '.' }) {
             mutableUiState.value = mutableUiState.value.copy(
-                intermediateStopMaximumDeviationKmInput = value,
+                intermediateStopMaximumAddedMinutesInput = value,
                 routeInputsDirty = true,
                 message = null,
             )
@@ -1162,14 +1403,18 @@ class RoutePlannerViewModel(
         if (state.isBusy) return
         pendingIntermediateResolution = null
         pendingIntermediateDraft = null
+        eventLogger(
+            "intermediate_editor opened: committed_stops=${state.plannedIntermediateStops.size} " +
+                "enabled_before=${state.intermediateStopEnabled}",
+        )
         mutableUiState.value = state.copy(
             stage = PlannerStage.INTERMEDIATE_STOPS,
             // Opening the editor does not create a stop. This flag represents only
             // committed itinerary content and must remain false for an empty draft.
             intermediateStopEnabled = state.plannedIntermediateStops.isNotEmpty(),
-            intermediateStopMaximumDeviationKmInput = state
-                .intermediateStopMaximumDeviationKmInput.ifBlank {
-                    (route.distanceMeters * DEFAULT_INTERMEDIATE_STOP_DEVIATION_FRACTION / 1_000.0)
+            intermediateStopMaximumAddedMinutesInput = state
+                .intermediateStopMaximumAddedMinutesInput.ifBlank {
+                    (route.durationSeconds / 60.0 / DEFAULT_INTERMEDIATE_STOP_TIME_DIVISOR)
                         .toOneDecimalInput()
                 },
             editingIntermediateStopId = null,
@@ -1293,10 +1538,10 @@ class RoutePlannerViewModel(
             )
             return
         }
-        val maximumDeviationKm = state.intermediateStopMaximumDeviationKmInput.parseDecimal()
-        if (maximumDeviationKm == null || maximumDeviationKm < 0.0) {
+        val maximumAddedMinutes = state.intermediateStopMaximumAddedMinutesInput.parseDecimal()
+        if (maximumAddedMinutes == null || maximumAddedMinutes < 0.0) {
             mutableUiState.value = state.copy(
-                message = "Inserisci una deviazione massima valida per le tappe.",
+                message = "Inserisci un tempo aggiuntivo massimo valido per le tappe.",
             )
             return
         }
@@ -1314,14 +1559,14 @@ class RoutePlannerViewModel(
                     },
                     destination = directRoute.destination,
                 )
-                val extraDistanceMeters =
-                    (route.distanceMeters - directRoute.distanceMeters).coerceAtLeast(0.0)
-                if (extraDistanceMeters > maximumDeviationKm * 1_000.0) {
+                val extraDurationSeconds =
+                    (route.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
+                if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
                     mutableUiState.value = mutableUiState.value.copy(
                         operation = null,
-                        message = intermediateStopDeviationMessage(
-                            extraDistanceMeters,
-                            maximumDeviationKm,
+                        message = intermediateStopAddedTimeMessage(
+                            extraDurationSeconds,
+                            maximumAddedMinutes,
                         ),
                     )
                     return@launch
@@ -1361,7 +1606,7 @@ class RoutePlannerViewModel(
             intermediateStopAttributions = emptyList(),
             intermediateStopLocationMethod = null,
             intermediateStopCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
-            intermediateStopMaximumDeviationKmInput = "",
+            intermediateStopMaximumAddedMinutesInput = "",
             intermediateStopRoute = null,
             pendingIntermediateStopRoute = null,
             plannedIntermediateStops = emptyList(),
@@ -1631,7 +1876,9 @@ class RoutePlannerViewModel(
                 vehicleProfileCngReserveInput = "",
                 vehicleProfileGasolineRangeInput = "",
                 vehicleProfileGasolineReserveInput = "",
-                message = "Profilo ${profile.name} salvato e selezionato.",
+                // The updated list and selected state provide the success feedback. `message`
+                // is reserved for failures because the shared renderer uses the error palette.
+                message = null,
             )
         } catch (_: Exception) {
             mutableUiState.value = state.copy(message = "Impossibile salvare il profilo del mezzo.")
@@ -2068,6 +2315,19 @@ class RoutePlannerViewModel(
                 },
                 message = null,
             )
+            PlannerStage.FAVORITE_PLACES -> mutableUiState.value.copy(
+                stage = if (
+                    mutableUiState.value.favoritePlaceTarget == RouteEndpoint.INTERMEDIATE_STOP
+                ) {
+                    PlannerStage.INTERMEDIATE_STOPS
+                } else {
+                    PlannerStage.CONFIGURE_ROUTE
+                },
+                favoritePlaceNameInput = "",
+                editingFavoritePlaceId = null,
+                favoriteDraftCoordinate = null,
+                message = null,
+            )
             PlannerStage.DESTINATION_SEARCH -> mutableUiState.value.copy(
                 stage = if (
                     mutableUiState.value.placeSearchTarget == RouteEndpoint.INTERMEDIATE_STOP
@@ -2076,6 +2336,12 @@ class RoutePlannerViewModel(
                 } else {
                     PlannerStage.CONFIGURE_ROUTE
                 },
+                destinationSearchSessionId = null,
+                destinationSearchRevision = mutableUiState.value.destinationSearchRevision + 1,
+                destinationSuggestions = emptyList(),
+                alongRouteSearchResults = null,
+                pendingDestinationSuggestion = null,
+                pendingResolvedDestination = null,
                 message = null,
             )
             PlannerStage.MAP_POINT_PICKER -> mutableUiState.value.copy(
@@ -2403,13 +2669,18 @@ class RoutePlannerViewModel(
         destination: Coordinate = mutableUiState.value.activeDestination,
         originDisplayName: String = mutableUiState.value.originDisplayName,
         destinationDisplayName: String = mutableUiState.value.destinationDisplayName,
-        intermediateStop: Coordinate? = mutableUiState.value.selectedIntermediateStopCoordinate(),
+        intermediateStop: Coordinate? = null,
         successStage: PlannerStage = PlannerStage.PREVIEW,
     ) {
         requestJob?.cancel()
         navigationSession.clear()
-        val maximumIntermediateDeviationKm = mutableUiState.value
-            .intermediateStopMaximumDeviationKmInput.parseDecimal()
+        val maximumIntermediateAddedMinutes = mutableUiState.value
+            .intermediateStopMaximumAddedMinutesInput.parseDecimal()
+        eventLogger(
+            "base_route recalculation: clearing_committed_stops=" +
+                "${mutableUiState.value.plannedIntermediateStops.size} " +
+                "legacy_stop_requested=${intermediateStop != null}",
+        )
         requestJob = viewModelScope.launch {
             mutableUiState.value = mutableUiState.value.copy(
                 stage = successStage,
@@ -2427,10 +2698,19 @@ class RoutePlannerViewModel(
                 placeSearchQuery = "",
                 placeSearchResults = emptyList(),
                 baseRoute = null,
+                intermediateStopEnabled = false,
                 intermediateStopRoute = null,
                 plannedIntermediateStops = emptyList(),
                 intermediateStopsRoute = null,
                 pendingIntermediateStopsRoute = null,
+                pendingIntermediateStopRoute = null,
+                pendingIntermediateStopCoordinate = null,
+                intermediateStopLatitudeInput = "",
+                intermediateStopLongitudeInput = "",
+                intermediateStopDisplayName = "Non selezionata",
+                intermediateStopAttributions = emptyList(),
+                intermediateStopLocationMethod = null,
+                intermediateStopCurrentLocationStatus = CurrentLocationAcquisitionStatus.IDLE,
                 editingIntermediateStopId = null,
                 rankedStations = null,
                 predictiveSuggestion = null,
@@ -2444,25 +2724,25 @@ class RoutePlannerViewModel(
             try {
                 val directRoute = routingRepository.previewRoute(origin, destination)
                 val viaRoute = intermediateStop?.let { stop ->
-                    val maximumDeviationKm = maximumIntermediateDeviationKm
-                    if (maximumDeviationKm == null || maximumDeviationKm < 0.0) {
+                    val maximumAddedMinutes = maximumIntermediateAddedMinutes
+                    if (maximumAddedMinutes == null || maximumAddedMinutes < 0.0) {
                         mutableUiState.value = mutableUiState.value.copy(
                             operation = null,
                             baseRoute = directRoute,
-                            message = "Inserisci una deviazione massima valida per la tappa.",
+                            message = "Inserisci un tempo aggiuntivo massimo valido per la tappa.",
                         )
                         return@launch
                     }
                     routingRepository.routeWithIntermediateStop(origin, stop, destination).also {
-                        val extraDistanceMeters =
-                            (it.distanceMeters - directRoute.distanceMeters).coerceAtLeast(0.0)
-                        if (extraDistanceMeters > maximumDeviationKm * 1_000.0) {
+                        val extraDurationSeconds =
+                            (it.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
+                        if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
                             mutableUiState.value = mutableUiState.value.copy(
                                 operation = null,
                                 baseRoute = directRoute,
-                                message = intermediateStopDeviationMessage(
-                                    extraDistanceMeters = extraDistanceMeters,
-                                    maximumDeviationKm = maximumDeviationKm,
+                                message = intermediateStopAddedTimeMessage(
+                                    extraDurationSeconds = extraDurationSeconds,
+                                    maximumAddedMinutes = maximumAddedMinutes,
                                 ),
                             )
                             return@launch
@@ -2513,7 +2793,10 @@ class RoutePlannerViewModel(
         private val routingRepository: RoutingRepository,
         private val navigationSession: NavigationSession,
         private val vehicleProfileRepository: VehicleProfileRepository,
+        private val favoritePlaceRepository: FavoritePlaceRepository =
+            InMemoryFavoritePlaceRepository(),
         private val serverConnectionRepository: ServerConnectionRepository,
+        private val eventLogger: (String) -> Unit = {},
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -2524,8 +2807,10 @@ class RoutePlannerViewModel(
                 routingRepository = routingRepository,
                 navigationSession = navigationSession,
                 vehicleProfileRepository = vehicleProfileRepository,
+                favoritePlaceRepository = favoritePlaceRepository,
                 serverConnectionRepository = serverConnectionRepository,
                 startInFollowMode = true,
+                eventLogger = eventLogger,
             ) as T
         }
     }
@@ -2590,23 +2875,12 @@ private fun Double.toCoordinateInput(): String = "%.6f".format(java.util.Locale.
 
 private fun Double.toOneDecimalInput(): String = "%.1f".format(java.util.Locale.ITALIAN, this)
 
-private fun intermediateStopDeviationMessage(
-    extraDistanceMeters: Double,
-    maximumDeviationKm: Double,
-): String = "La tappa richiede una deviazione di " +
-    "${(extraDistanceMeters / 1_000.0).toOneDecimalInput()} km, " +
-    "oltre il limite di ${maximumDeviationKm.toOneDecimalInput()} km."
-
-private fun RoutePlannerUiState.selectedIntermediateStopCoordinate(): Coordinate? =
-    if (!intermediateStopEnabled) {
-        null
-    } else {
-        parseCoordinate(
-            intermediateStopLatitudeInput,
-            intermediateStopLongitudeInput,
-            "tappa",
-        ).coordinate
-    }
+private fun intermediateStopAddedTimeMessage(
+    extraDurationSeconds: Double,
+    maximumAddedMinutes: Double,
+): String = "La tappa aggiunge " +
+    "${(extraDurationSeconds / 60.0).toOneDecimalInput()} min di guida, " +
+    "oltre il limite di ${maximumAddedMinutes.toOneDecimalInput()} min."
 
 private fun RoutePlannerUiState.originCoordinateOrNull(): Coordinate? = parseCoordinate(
     originLatitudeInput,
@@ -2620,6 +2894,17 @@ private fun RoutePlannerUiState.destinationCoordinateOrNull(): Coordinate? = par
     "destinazione",
 ).coordinate
 
+private fun RoutePlannerUiState.favoriteCandidate(endpoint: RouteEndpoint): Coordinate? =
+    when (endpoint) {
+        RouteEndpoint.ORIGIN -> originCoordinateOrNull().takeIf { originLocationMethod != null }
+        RouteEndpoint.DESTINATION -> destinationCoordinateOrNull().takeIf {
+            destinationLocationMethod != null
+        }
+        RouteEndpoint.INTERMEDIATE_STOP -> editingIntermediateStopId?.let { id ->
+            plannedIntermediateStops.firstOrNull { it.id == id }?.location
+        }
+    }
+
 private fun RoutePlannerUiState.alongRouteContext(): AlongRouteContext? {
     val direct = baseRoute ?: return null
     val multiLeg = intermediateStopsRoute?.takeIf {
@@ -2631,6 +2916,9 @@ private fun RoutePlannerUiState.alongRouteContext(): AlongRouteContext? {
     val routeId = multiLeg?.navigation?.routeId ?: direct.navigation.routeId
     val encodedLegs = activeLegs.map { AlongRouteLeg(Polyline6Encoder.encode(it.geometry)) }
     val routeRevision = alongRouteRevision(routeId, encodedLegs)
+    val maximumAddedMinutes = intermediateStopMaximumAddedMinutesInput.parseDecimal()
+        ?.takeIf { it.isFinite() && it >= 0.0 }
+        ?: return null
     return AlongRouteContext(
         routeId = routeId,
         routeRevision = routeRevision,
@@ -2638,6 +2926,9 @@ private fun RoutePlannerUiState.alongRouteContext(): AlongRouteContext? {
         finalDestination = activeLegs.last().destination,
         remainingWaypoints = multiLeg?.stops ?: emptyList(),
         legs = encodedLegs,
+        baselineDurationSeconds = direct.durationSeconds,
+        currentDurationSeconds = multiLeg?.durationSeconds ?: direct.durationSeconds,
+        maximumTotalAddedDurationSeconds = maximumAddedMinutes * 60.0,
     )
 }
 
@@ -2646,7 +2937,7 @@ internal fun alongRouteRevision(routeId: String, legs: List<AlongRouteLeg>): Int
         31 * revision + leg.encodedPolyline6.hashCode()
     } and Int.MAX_VALUE
 
-private const val DEFAULT_INTERMEDIATE_STOP_DEVIATION_FRACTION = 0.30
+private const val DEFAULT_INTERMEDIATE_STOP_TIME_DIVISOR = 3.0
 
 private fun Double.toInput(): String = if (this % 1.0 == 0.0) {
     toInt().toString()

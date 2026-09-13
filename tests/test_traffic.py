@@ -12,6 +12,7 @@ from compass.traffic.cli import _matching_source_reference
 from compass.traffic.domain import (
     TrafficEdgeUpdate,
     TrafficFlowSegment,
+    TrafficProviderContractError,
     TrafficProviderUnavailableError,
     TrafficQualityPolicy,
 )
@@ -173,6 +174,12 @@ def test_build_tomtom_flow_segment_provider_from_settings() -> None:
     assert isinstance(provider, TomTomTrafficProvider)
 
 
+def test_tomtom_flow_segment_default_zoom_keeps_local_roads_visible() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.tomtom_flow_segment_zoom == 18
+
+
 def test_tomtom_feed_configuration_is_validated_when_provider_is_built() -> None:
     settings = Settings(
         _env_file=None,
@@ -302,6 +309,7 @@ def test_tomtom_flow_segment_adapter_normalizes_base_traffic_api_response() -> N
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
+        assert request.url.path.endswith("/absolute/18/json")
         assert request.url.params["key"] == "test-key"
         assert request.url.params["point"] == "45.464200,9.190000"
         assert request.url.params["unit"] == "kmph"
@@ -398,6 +406,58 @@ def test_tomtom_route_probes_use_bounded_concurrency_and_deduplicate_segments() 
     assert snapshot.metrics.provider_segments_received == 3
     assert snapshot.metrics.segments_normalized == 1
     assert len(snapshot.segments) == 1
+
+
+def test_tomtom_flow_segment_rejection_reports_safe_http_status_counts() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                403,
+                json={"detailedError": {"code": "FORBIDDEN", "message": "secret"}},
+            )
+        )
+    )
+    provider = TomTomTrafficProvider(
+        api_key="test-key",
+        timeout_seconds=1,
+        refresh_seconds=60,
+        api_mode="flow_segment",
+        flow_segment_points=(Coordinate(45.0, 9.0), Coordinate(45.1, 9.1)),
+        max_retries=0,
+        client=client,
+    )
+    try:
+        with pytest.raises(TrafficProviderContractError, match=r"http_403=2") as raised:
+            asyncio.run(provider.fetch_flow())
+    finally:
+        asyncio.run(client.aclose())
+
+    assert "secret" not in str(raised.value)
+
+
+def test_tomtom_flow_segment_rejection_reports_missing_data() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"unexpected": {}})
+        )
+    )
+    provider = TomTomTrafficProvider(
+        api_key="test-key",
+        timeout_seconds=1,
+        refresh_seconds=60,
+        api_mode="flow_segment",
+        flow_segment_points=(Coordinate(45.0, 9.0),),
+        max_retries=0,
+        client=client,
+    )
+    try:
+        with pytest.raises(
+            TrafficProviderContractError,
+            match=r"missing_flow_segment_data=1",
+        ):
+            asyncio.run(provider.fetch_flow())
+    finally:
+        asyncio.run(client.aclose())
 
 
 def test_valhalla_traffic_overlay_extract_command_uses_native_tool() -> None:
@@ -716,6 +776,8 @@ def test_traffic_updater_image_is_pinned_to_valhalla_native_runtime() -> None:
     assert "/custom_files/compass_traffic_state/health.json" in compose
     assert "valhalla_data:/custom_files:ro" in compose
     assert "traffic_state:/var/lib/compass-traffic" not in compose
+    assert "TOMTOM_FLOW_SEGMENT_ZOOM: ${TOMTOM_FLOW_SEGMENT_ZOOM:-18}" in compose
+    assert "TOMTOM_FLOW_SEGMENT_ZOOM: ${TOMTOM_FLOW_SEGMENT_ZOOM:-10}" not in compose
 
 
 def test_matching_diagnostic_exposes_provider_reference_without_speed() -> None:

@@ -1,7 +1,8 @@
+import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Response, status
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -37,6 +38,7 @@ from compass.traffic.domain import TrafficHealthState
 from compass.traffic.service import traffic_health_from_settings
 
 configure_logging(get_settings().log_level)
+validation_logger = logging.getLogger("compass.api.validation")
 
 
 @asynccontextmanager
@@ -103,8 +105,23 @@ app.include_router(
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error(
-    _request: object, _error: RequestValidationError
+    request: Request, error: RequestValidationError
 ) -> JSONResponse:
+    # Do not log payload values: route geometry, coordinates and search text may
+    # contain sensitive data. Field locations and validation categories are enough
+    # to diagnose an Android/backend contract mismatch.
+    failures = [
+        {
+            "field": ".".join(str(item) for item in detail.get("loc", ())),
+            "type": str(detail.get("type", "unknown")),
+        }
+        for detail in error.errors()[:12]
+    ]
+    validation_logger.warning(
+        "request validation failed path=%s failures=%s",
+        request.url.path,
+        failures,
+    )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"code": "invalid_request", "message": "The request payload is invalid."},

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -44,7 +45,7 @@ class TomTomTrafficProvider:
         api_mode: str = "flow_segment",
         flow_segment_points: tuple[Coordinate, ...] = (),
         flow_segment_style: str = "absolute",
-        flow_segment_zoom: int = 10,
+        flow_segment_zoom: int = 18,
         flow_segment_unit: str = "kmph",
         flow_segment_openlr: bool = True,
         max_retries: int = 3,
@@ -171,6 +172,7 @@ class TomTomTrafficProvider:
         segments: list[TrafficFlowSegment] = []
         rejected = 0
         errors = 0
+        rejection_reasons: Counter[str] = Counter()
         latest_observed_at: datetime | None = None
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient()
@@ -201,8 +203,10 @@ class TomTomTrafficProvider:
             if response.status_code >= 400:
                 if response.status_code == 429 or response.status_code >= 500:
                     errors += 1
+                    rejection_reasons[f"http_{response.status_code}"] += 1
                     continue
                 rejected += 1
+                rejection_reasons[f"http_{response.status_code}"] += 1
                 continue
             try:
                 observed_at, segment = _normalise_flow_segment_payload(
@@ -211,8 +215,9 @@ class TomTomTrafficProvider:
                     point_index=index,
                     segment_ttl_seconds=self._segment_ttl_seconds,
                 )
-            except (KeyError, TypeError, ValueError, TrafficProviderContractError):
+            except (KeyError, TypeError, ValueError, TrafficProviderContractError) as error:
                 rejected += 1
+                rejection_reasons[_flow_segment_rejection_reason(error)] += 1
                 continue
             latest_observed_at = (
                 observed_at
@@ -225,6 +230,7 @@ class TomTomTrafficProvider:
             ):
                 segments.append(segment)
         if errors and not segments:
+            reason_summary = _format_rejection_reasons(rejection_reasons)
             now = datetime.now(UTC)
             self._last_status = TrafficHealth(
                 enabled=True,
@@ -233,12 +239,16 @@ class TomTomTrafficProvider:
                 traffic_aware_routing=False,
                 last_fetch_started_at=started,
                 last_fetch_completed_at=now,
-                message="TomTom Flow Segment probes failed",
+                message=f"TomTom Flow Segment probes failed ({reason_summary})",
             )
-            raise TrafficProviderUnavailableError("TomTom Flow Segment probes failed")
+            raise TrafficProviderUnavailableError(
+                f"TomTom Flow Segment probes failed ({reason_summary})"
+            )
         if rejected and not segments:
+            reason_summary = _format_rejection_reasons(rejection_reasons)
             raise TrafficProviderContractError(
-                "TomTom Flow Segment probes returned no usable records"
+                "TomTom Flow Segment probes returned no usable records "
+                f"({reason_summary})"
             )
 
         latency = time.perf_counter() - start_time
@@ -421,6 +431,29 @@ def _normalise_flow_segment_payload(
         prediction=False,
     )
     return observed_at, segment
+
+
+def _flow_segment_rejection_reason(error: Exception) -> str:
+    if isinstance(error, TrafficProviderContractError):
+        message = str(error)
+        if "missing data" in message:
+            return "missing_flow_segment_data"
+        if "must be an object" in message:
+            return "invalid_payload_shape"
+        return "provider_contract"
+    if isinstance(error, ValueError):
+        return "invalid_field_value"
+    if isinstance(error, TypeError):
+        return "invalid_field_type"
+    if isinstance(error, KeyError):
+        return "missing_required_field"
+    return "unusable_payload"
+
+
+def _format_rejection_reasons(reasons: Counter[str]) -> str:
+    if not reasons:
+        return "unknown=1"
+    return ",".join(f"{reason}={count}" for reason, count in sorted(reasons.items()))
 
 
 def _tomtom_observed_at(payload: Mapping[str, Any]) -> datetime:

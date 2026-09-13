@@ -4,6 +4,8 @@ from typing import Literal, Protocol
 from compass.routing.domain import Coordinate
 
 DestinationKind = Literal["business", "address", "locality", "unknown"]
+DestinationSearchIntent = Literal["ORIGIN_SEARCH", "DESTINATION_SEARCH"]
+DestinationSearchOperation = Literal["autocomplete", "text_search"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,8 @@ class DestinationSuggestRequest:
     query: str
     session_id: str
     revision: int
+    intent: DestinationSearchIntent
+    operation: DestinationSearchOperation = "autocomplete"
     language: str = "it"
     context: DestinationSearchContext = DestinationSearchContext()
 
@@ -54,6 +58,10 @@ class DestinationSuggestion:
     provider_rank: int
     requires_resolution: bool = True
     attribution: str = "Google Maps"
+    search_intent: Literal["generic", "specific", "ambiguous"] | None = None
+    marginal_added_duration_seconds: float | None = None
+    total_added_duration_seconds: float | None = None
+    within_time_budget: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +139,7 @@ class DestinationSearchProvider(Protocol):
     async def suggest(
         self,
         request: DestinationSuggestRequest,
-        provider_session_token: str,
+        provider_session_token: str | None,
     ) -> tuple[DestinationSuggestion, ...]: ...
 
     async def resolve(
@@ -139,5 +147,5 @@ class DestinationSearchProvider(Protocol):
         provider_ref: str,
         *,
         language: str,
-        provider_session_token: str,
+        provider_session_token: str | None,
     ) -> ResolvedDestinationSelection: ...

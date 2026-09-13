@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import org.compass.cng.BuildConfig
 import org.compass.cng.data.api.CompassApiClient
 import org.compass.cng.data.repository.HttpRoutingRepository
+import org.compass.cng.data.favorite.SharedPreferencesFavoritePlaceRepository
 import org.compass.cng.data.navigation.SharedPreferencesNavigationRouteStore
 import org.compass.cng.data.server.SharedPreferencesServerConnectionRepository
 import org.compass.cng.data.vehicle.SharedPreferencesVehicleProfileRepository
@@ -18,6 +19,9 @@ import org.compass.cng.navigation.CompassNavigationRouteRecalculator
 import org.compass.cng.navigation.NavigationRouteRecalculator
 
 class AppContainer(context: Context) {
+    val plannerEventLogger: (String) -> Unit = { event ->
+        Log.i(COMPASS_PLANNER_LOG_TAG, event)
+    }
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
@@ -51,6 +55,7 @@ class AppContainer(context: Context) {
         eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
     )
     val vehicleProfileRepository = SharedPreferencesVehicleProfileRepository(context)
+    val favoritePlaceRepository = SharedPreferencesFavoritePlaceRepository(context)
 
     val navigationSession = NavigationSession(
         routeStore = SharedPreferencesNavigationRouteStore(context),
@@ -62,5 +67,6 @@ class AppContainer(context: Context) {
     private companion object {
         const val COMPASS_API_LOG_TAG = "CompassApi"
         const val COMPASS_NAVIGATION_LOG_TAG = "CompassNavigation"
+        const val COMPASS_PLANNER_LOG_TAG = "CompassPlanner"
     }
 }

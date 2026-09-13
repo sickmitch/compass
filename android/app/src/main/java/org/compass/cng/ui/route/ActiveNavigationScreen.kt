@@ -2,6 +2,7 @@ package org.compass.cng.ui.route
 
 import android.util.Log
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AddRoad
@@ -89,6 +90,7 @@ import org.compass.cng.ui.map.FollowMap
 import org.compass.cng.ui.theme.CompassButton
 import org.compass.cng.ui.theme.CompassOutlinedButton
 import org.compass.cng.ui.theme.CompassTextButton
+import org.compass.cng.ui.theme.compassSemanticColors
 
 /** GPS-follow surface shown when no destination or route exists. */
 @Composable
@@ -142,22 +144,12 @@ internal fun RouteFreeFollowScreen(
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Surface(
-                shape = MaterialTheme.shapes.extraLarge,
-                tonalElevation = 6.dp,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            MapIconControlButton(
+                testTag = "follow_create_trip",
+                contentDescription = "Crea viaggio",
+                onClick = onCreateTrip,
             ) {
-                CompassTextButton(
-                    onClick = onCreateTrip,
-                    modifier = Modifier.testTag("follow_create_trip"),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) {
-                    Icon(Icons.Rounded.AddRoad, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Crea viaggio")
-                }
+                Icon(Icons.Rounded.AddRoad, contentDescription = null)
             }
             if (cameraMode != NavigationCameraMode.FOLLOW) {
                 Surface(
@@ -606,7 +598,7 @@ private fun CngGuidanceCard(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = if (stop.availabilityIsWarning) {
-                                MaterialTheme.colorScheme.error
+                                MaterialTheme.compassSemanticColors.onWarningContainer
                             } else {
                                 MaterialTheme.colorScheme.primary
                             },
@@ -716,7 +708,7 @@ private fun RouteUpdateNoticeCard(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = if (notice.addsTime) {
-                            MaterialTheme.colorScheme.error
+                            MaterialTheme.compassSemanticColors.onWarningContainer
                         } else {
                             MaterialTheme.colorScheme.primary
                         },
@@ -742,7 +734,7 @@ private fun VoiceGuidanceToggle(
     Surface(
         onClick = onToggle,
         modifier = modifier
-            .size(width = 76.dp, height = 58.dp)
+            .size(60.dp)
             .testTag("navigation_voice_toggle")
             .clearAndSetSemantics {
                 contentDescription = if (enabled) {
@@ -753,21 +745,20 @@ private fun VoiceGuidanceToggle(
             },
         shape = CircleShape,
         color = if (enabled) {
-            MaterialTheme.colorScheme.primary
+            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.97f)
         } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+            MaterialTheme.colorScheme.primary
         },
         contentColor = if (enabled) {
-            MaterialTheme.colorScheme.onPrimary
+            MaterialTheme.colorScheme.primary
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.colorScheme.onPrimary
         },
-        tonalElevation = 7.dp,
+        tonalElevation = 9.dp,
     ) {
-        Column(
+        Box(
             modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = if (enabled) {
@@ -776,12 +767,7 @@ private fun VoiceGuidanceToggle(
                     Icons.AutoMirrored.Rounded.VolumeOff
                 },
                 contentDescription = null,
-                modifier = Modifier.size(26.dp),
-            )
-            Text(
-                text = if (enabled) "Voce" else "Muta",
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
+                modifier = Modifier.size(32.dp),
             )
         }
     }
@@ -964,18 +950,12 @@ private fun MapModeControls(
     val policy = cameraMode.mapControlPolicy()
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!tripSummaryVisible) {
-            Surface(
-                shape = CircleShape,
-                tonalElevation = 6.dp,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            MapIconControlButton(
+                testTag = "navigation_trip_toggle",
+                contentDescription = "Apri dettagli viaggio",
+                onClick = onShowTripSummary,
             ) {
-                CompassTextButton(
-                    onClick = onShowTripSummary,
-                    modifier = Modifier.testTag("navigation_trip_toggle"),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) { Text("Viaggio") }
+                Icon(Icons.AutoMirrored.Rounded.ListAlt, contentDescription = null)
             }
         }
         if (policy.showOrientationToggle) {
@@ -1026,8 +1006,8 @@ private fun MapModeControls(
         MapIconControlButton(
             testTag = "navigation_stop",
             contentDescription = "Termina navigazione",
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.96f),
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
             onClick = onStopNavigation,
         ) {
             Icon(Icons.Rounded.StopCircle, contentDescription = null)
@@ -1323,7 +1303,8 @@ private fun NavigationDetailsSheet(
                                 NavigationStatusLevel.NORMAL ->
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 NavigationStatusLevel.POSITIVE -> MaterialTheme.colorScheme.primary
-                                NavigationStatusLevel.WARNING -> MaterialTheme.colorScheme.error
+                                NavigationStatusLevel.WARNING ->
+                                    MaterialTheme.compassSemanticColors.onWarningContainer
                             },
                             fontWeight = if (message.level == NavigationStatusLevel.NORMAL) {
                                 FontWeight.Normal
@@ -1377,7 +1358,7 @@ private fun NavigationDetailsSheet(
                                 Text(
                                     availability,
                                     color = if (stop.availabilityIsWarning) {
-                                        MaterialTheme.colorScheme.error
+                                        MaterialTheme.compassSemanticColors.onWarningContainer
                                     } else {
                                         MaterialTheme.colorScheme.primary
                                     },
@@ -1556,7 +1537,7 @@ private fun NavigationDeveloperScreen(
                             )
                             Text(
                                 "Non usare durante la guida",
-                                color = MaterialTheme.colorScheme.error,
+                                color = MaterialTheme.compassSemanticColors.onWarningContainer,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }

@@ -128,6 +128,12 @@ class DestinationSearchRuntime:
                 max_concurrency=settings.destination_search_max_concurrency,
                 requests_per_user_minute=(settings.destination_search_rate_limit_per_minute),
                 minimum_query_characters=settings.destination_search_min_chars,
+                candidate_evaluation_limit=(settings.destination_along_route_candidate_limit),
+                candidate_evaluation_timeout_seconds=(
+                    settings.destination_along_route_evaluation_timeout_seconds
+                ),
+                recovery_call_limit=settings.destination_along_route_recovery_calls,
+                minimum_eligible_results=settings.destination_along_route_minimum_results,
             )
         else:
             self.along_route_service = DisabledAlongRouteSearchService()

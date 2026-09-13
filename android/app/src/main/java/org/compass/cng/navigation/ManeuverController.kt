@@ -4,7 +4,11 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 enum class AnnouncementStage {
-    EARLY,
+    INITIAL,
+    FIVE_HUNDRED_METERS,
+    TWO_HUNDRED_FIFTY_METERS,
+    ONE_HUNDRED_METERS,
+    FIFTY_METERS,
     PREPARE,
     NOW,
 }
@@ -23,27 +27,29 @@ data class VoiceAnnouncement(
 )
 
 data class ManeuverAnnouncementPolicy(
-    val earlySeconds: Double = 40.0,
-    val prepareSeconds: Double = 14.0,
-    val immediateSeconds: Double = 4.0,
-    val earlyMinimumDistanceMeters: Double = 700.0,
-    val prepareMinimumDistanceMeters: Double = 180.0,
-    val immediateMinimumDistanceMeters: Double = 35.0,
-    val minimumTimingSpeedMetersPerSecond: Double = 4.0,
+    val fiveHundredMeters: Double = 500.0,
+    val twoHundredFiftyMeters: Double = 250.0,
+    val oneHundredMeters: Double = 100.0,
+    val fiftyMeters: Double = 50.0,
+    val immediateMeters: Double = 10.0,
 )
 
-/** Selects speed-aware announcements and guarantees one utterance per route/stage/event. */
+/** Announces every new maneuver and fixed countdown thresholds once per route maneuver. */
 class ManeuverController(
     private val policy: ManeuverAnnouncementPolicy = ManeuverAnnouncementPolicy(),
 ) {
     private val spoken = mutableSetOf<String>()
     private var activeRouteId: String? = null
+    private var activeManeuverId: String? = null
+    private var previousManeuverDistanceMeters: Double? = null
 
     fun nextAnnouncement(state: NavigationState): VoiceAnnouncement? {
         val route = state.route ?: return null
         if (route.routeId != activeRouteId) {
             activeRouteId = route.routeId
             spoken.clear()
+            activeManeuverId = null
+            previousManeuverDistanceMeters = null
         }
         if (state.phase == NavigationPhase.ARRIVED) {
             return emitOnce(
@@ -115,24 +121,53 @@ class ManeuverController(
                 it.endShapeIndex == maneuver.endShapeIndex
         }.takeIf { it >= 0 } ?: return null
         val distance = state.distanceToNextManeuverMeters ?: return null
-        val stage = stageFor(
-            distanceMeters = distance,
-            speedMetersPerSecond = state.currentSpeedMetersPerSecond,
-        ) ?: return null
-        val id = "${route.routeId}:maneuver:$maneuverIndex:${stage.name}"
-        val text = when (stage) {
-            AnnouncementStage.EARLY -> maneuver.verbalTransitionAlertInstruction
-                ?: "Tra ${spokenDistance(distance)}, ${maneuver.instruction.lowercaseFirst()}"
-            AnnouncementStage.PREPARE -> maneuver.verbalPreTransitionInstruction
-                ?: maneuver.instruction
-            AnnouncementStage.NOW -> maneuver.instruction
-        }.trim()
+        val maneuverId = "${route.routeId}:maneuver:$maneuverIndex"
+        val thresholds = maneuverThresholds()
+        if (maneuverId != activeManeuverId) {
+            activeManeuverId = maneuverId
+            previousManeuverDistanceMeters = distance
+            thresholds
+                .filter { distance <= it.distanceMeters }
+                .forEach { spoken.add("$maneuverId:${it.stage.name}") }
+            val text = maneuverAnnouncementText(
+                distanceMeters = distance,
+                instruction = maneuver.instruction,
+                policy = policy,
+            )
+            if (text.isBlank()) return null
+            return emitOnce(
+                VoiceAnnouncement(
+                    id = "$maneuverId:${AnnouncementStage.INITIAL.name}",
+                    text = text,
+                    stage = AnnouncementStage.INITIAL,
+                    kind = AnnouncementKind.MANEUVER,
+                ),
+            )
+        }
+
+        val previousDistance = previousManeuverDistanceMeters ?: distance
+        previousManeuverDistanceMeters = distance
+        val crossed = thresholds.filter { threshold ->
+            previousDistance > threshold.distanceMeters &&
+                distance <= threshold.distanceMeters &&
+                "$maneuverId:${threshold.stage.name}" !in spoken
+        }
+        val threshold = crossed.lastOrNull() ?: return null
+        crossed.dropLast(1).forEach { skipped ->
+            spoken.add("$maneuverId:${skipped.stage.name}")
+        }
+        val id = "$maneuverId:${threshold.stage.name}"
+        val text = maneuverAnnouncementText(
+            distanceMeters = threshold.distanceMeters,
+            instruction = maneuver.instruction,
+            policy = policy,
+        )
         if (text.isBlank()) return null
         return emitOnce(
             VoiceAnnouncement(
                 id = id,
                 text = text,
-                stage = stage,
+                stage = threshold.stage,
                 kind = AnnouncementKind.MANEUVER,
             ),
         )
@@ -140,33 +175,55 @@ class ManeuverController(
 
     fun reset() {
         activeRouteId = null
+        activeManeuverId = null
+        previousManeuverDistanceMeters = null
         spoken.clear()
     }
 
-    private fun stageFor(distanceMeters: Double, speedMetersPerSecond: Double): AnnouncementStage? {
-        val timingSpeed = maxOf(speedMetersPerSecond, policy.minimumTimingSpeedMetersPerSecond)
-        val seconds = distanceMeters / timingSpeed
-        return when {
-            distanceMeters <= policy.immediateMinimumDistanceMeters ||
-                seconds <= policy.immediateSeconds -> AnnouncementStage.NOW
-            distanceMeters <= policy.prepareMinimumDistanceMeters ||
-                seconds <= policy.prepareSeconds -> AnnouncementStage.PREPARE
-            distanceMeters <= policy.earlyMinimumDistanceMeters ||
-                seconds <= policy.earlySeconds -> AnnouncementStage.EARLY
-            else -> null
-        }
-    }
+    private fun maneuverThresholds(): List<ManeuverThreshold> = listOf(
+        ManeuverThreshold(policy.fiveHundredMeters, AnnouncementStage.FIVE_HUNDRED_METERS),
+        ManeuverThreshold(
+            policy.twoHundredFiftyMeters,
+            AnnouncementStage.TWO_HUNDRED_FIFTY_METERS,
+        ),
+        ManeuverThreshold(policy.oneHundredMeters, AnnouncementStage.ONE_HUNDRED_METERS),
+        ManeuverThreshold(policy.fiftyMeters, AnnouncementStage.FIFTY_METERS),
+        ManeuverThreshold(policy.immediateMeters, AnnouncementStage.NOW),
+    )
 
     private fun emitOnce(announcement: VoiceAnnouncement): VoiceAnnouncement? =
         announcement.takeIf { spoken.add(it.id) }
 }
 
+private data class ManeuverThreshold(
+    val distanceMeters: Double,
+    val stage: AnnouncementStage,
+)
+
 private fun NavigationFuelStop.displayName(): String = name ?: "MIMIT $mimitStationId"
+
+private fun maneuverAnnouncementText(
+    distanceMeters: Double,
+    instruction: String,
+    policy: ManeuverAnnouncementPolicy,
+): String {
+    val normalizedInstruction = instruction.trim()
+    if (normalizedInstruction.isEmpty()) return ""
+    val distanceLead = if (
+        distanceMeters <= policy.fiftyMeters && distanceMeters > policy.immediateMeters
+    ) {
+        "A breve"
+    } else {
+        "Tra ${spokenDistance(distanceMeters)}"
+    }
+    return "$distanceLead, ${normalizedInstruction.lowercaseFirst()}"
+}
 
 private fun spokenDistance(distanceMeters: Double): String = if (distanceMeters >= 1_000) {
     String.format(Locale.ITALIAN, "%.1f chilometri", distanceMeters / 1_000)
 } else {
-    "${(distanceMeters / 10).roundToInt() * 10} metri"
+    val stepMeters = if (distanceMeters > 50.0) 50 else 10
+    "${(distanceMeters / stepMeters).roundToInt() * stepMeters} metri"
 }
 
 private fun String.lowercaseFirst(): String = replaceFirstChar {

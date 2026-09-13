@@ -18,6 +18,16 @@ import org.compass.cng.domain.model.asMultiple
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 
+data class RouteOriginDirection(
+    val headingDegrees: Double,
+    val headingToleranceDegrees: Int,
+) {
+    init {
+        require(headingDegrees.isFinite() && headingDegrees >= 0.0 && headingDegrees < 360.0)
+        require(headingToleranceDegrees in 0..180)
+    }
+}
+
 interface RoutingRepository {
     suspend fun searchAlongRoute(request: AlongRouteSearchRequest): AlongRouteSearchResults =
         throw UnsupportedOperationException("along-route search is unavailable")
@@ -49,12 +59,14 @@ interface RoutingRepository {
     suspend fun previewRoute(
         origin: Coordinate,
         destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
     ): RoutePreview
 
     suspend fun routeWithIntermediateStop(
         origin: Coordinate,
         intermediateStop: Coordinate,
         destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
     ): RouteWithIntermediateStop = throw UnsupportedOperationException(
         "intermediate-stop routing is unavailable",
     )
@@ -63,11 +75,17 @@ interface RoutingRepository {
         origin: Coordinate,
         intermediateStops: List<Coordinate>,
         destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
     ): RouteWithIntermediateStops {
         require(intermediateStops.size == 1) {
             "multiple intermediate-stop routing is unavailable"
         }
-        return routeWithIntermediateStop(origin, intermediateStops.single(), destination)
+        return routeWithIntermediateStop(
+            origin,
+            intermediateStops.single(),
+            destination,
+            originDirection,
+        )
             .asMultiple()
     }
 
@@ -83,6 +101,7 @@ interface RoutingRepository {
         origin: Coordinate,
         destination: Coordinate,
         mimitStationId: String,
+        originDirection: RouteOriginDirection? = null,
     ): RouteWithCngStop
 
     suspend fun predictiveCngStations(
@@ -96,6 +115,7 @@ interface RoutingRepository {
         excludedMimitStationIds: Set<String> = emptySet(),
         estimatedRemainingGasolineRangeKm: Double? = null,
         reserveGasolineRangeKm: Double? = null,
+        originDirection: RouteOriginDirection? = null,
     ): PredictiveCngSuggestion
 
     suspend fun routeWithCngItinerary(
@@ -105,6 +125,7 @@ interface RoutingRepository {
         effectiveCngRangeKm: Double,
         estimatedRemainingCngRangeKm: Double,
         reserveCngRangeKm: Double,
+        originDirection: RouteOriginDirection? = null,
     ): RouteWithCngItinerary
 }
 

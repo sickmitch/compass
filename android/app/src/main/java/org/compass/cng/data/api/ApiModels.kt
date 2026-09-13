@@ -8,6 +8,8 @@ data class ApiDestinationSuggestRequest(
     val query: String,
     val sessionId: String,
     val revision: Int,
+    val intent: String,
+    val operation: String,
     val context: DestinationSearchContext,
 )
 
@@ -17,6 +19,7 @@ data class ApiAlongRouteSearchRequest(
     val revision: Int,
     val route: AlongRouteContext?,
     val pageCursor: String?,
+    val fullSearch: Boolean,
 )
 
 data class ApiAlongRouteSearchResults(
@@ -48,6 +51,10 @@ data class ApiDestinationSuggestion(
     val distanceMeters: Int?,
     val providerRank: Int,
     val attribution: String,
+    val searchIntent: String? = null,
+    val marginalAddedDurationSeconds: Double? = null,
+    val totalAddedDurationSeconds: Double? = null,
+    val withinTimeBudget: Boolean? = null,
 )
 
 data class ApiResolvedDestination(

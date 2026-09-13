@@ -6,6 +6,7 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationConnectivity
 import org.compass.cng.navigation.NavigationFuelStop
@@ -110,7 +111,7 @@ internal fun NavigationState.toDrivingUiModel(
         distanceToManeuver = if (refuellingVisit != null) {
             "Sosta CNG"
         } else {
-            distanceToNextManeuverMeters?.let(::formatDistance) ?: "—"
+            distanceToNextManeuverMeters?.let(::formatManeuverDistance) ?: "—"
         },
         primaryInstruction = if (refuellingVisit != null) {
             "Rifornimento in corso"
@@ -422,6 +423,16 @@ private fun formatRemainingDuration(seconds: Double): String {
     val minutes = totalMinutes % 60
     return if (hours > 0) "${hours} h ${minutes} min" else "$minutes min"
 }
+
+internal fun roundedManeuverDistanceMeters(distanceMeters: Double): Int {
+    if (!distanceMeters.isFinite() || distanceMeters <= 0.0) return 0
+    val stepMeters = if (distanceMeters > 50.0) 50.0 else 10.0
+    return ((distanceMeters / stepMeters).roundToInt() * stepMeters.toInt())
+        .coerceAtLeast(10)
+}
+
+internal fun formatManeuverDistance(distanceMeters: Double): String =
+    formatDistance(roundedManeuverDistanceMeters(distanceMeters).toDouble())
 
 private val NAVIGATION_CLOCK_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 private const val OPENING_ETA_TOLERANCE_MINUTES = 30L

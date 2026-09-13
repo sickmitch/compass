@@ -125,7 +125,8 @@ TOMTOM_TRAFFIC_API_MODE=flow_segment
 TOMTOM_TRAFFIC_URL=
 TOMTOM_FLOW_SEGMENT_POINTS=
 TOMTOM_FLOW_SEGMENT_STYLE=absolute
-TOMTOM_FLOW_SEGMENT_ZOOM=10
+# Keep local/urban road classes visible to route-scoped probes.
+TOMTOM_FLOW_SEGMENT_ZOOM=18
 TOMTOM_FLOW_SEGMENT_UNIT=kmph
 TOMTOM_FLOW_SEGMENT_OPENLR=true
 TOMTOM_API_KEY=
@@ -145,6 +146,11 @@ TOMTOM_API_KEY=...
 `TOMTOM_FLOW_SEGMENT_POINTS` is an optional semicolon-separated `lat,lon` fallback for commands
 such as `fetch-once`, `match-once` and `plan-once`. It is ignored when a route-scoped request
 supplies dynamic probes.
+
+`TOMTOM_FLOW_SEGMENT_ZOOM` defaults to `18`. TomTom uses the requested zoom to determine which
+road classes are visible to Flow Segment Data; the former zoom `10` could yield no usable record
+for a short route contained entirely on local urban roads. Routes shorter than the configured
+probe spacing also receive an interior midpoint probe, in addition to origin and destination.
 
 ## Route-scoped update policy
 

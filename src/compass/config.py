@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     google_places_enabled: bool = False
     tomtom_search_enabled: bool = False
     destination_search_fallback_enabled: bool = False
-    destination_search_debounce_ms: int = Field(default=300, ge=100, le=2_000)
+    destination_search_debounce_ms: int = Field(default=600, ge=100, le=2_000)
     destination_search_min_chars: int = Field(default=3, ge=1, le=20)
     destination_search_language: str = Field(default="it", pattern=r"^[a-z]{2}$")
     destination_search_region: str = Field(default="it", pattern=r"^[a-z]{2}$")
@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     destination_along_route_max_encoded_chars: int = Field(
         default=100_000, ge=100, le=1_000_000
     )
+    destination_along_route_candidate_limit: int = Field(default=10, ge=1, le=20)
+    destination_along_route_evaluation_timeout_seconds: float = Field(
+        default=20, gt=0, le=120
+    )
+    destination_along_route_recovery_calls: int = Field(default=2, ge=0, le=4)
+    destination_along_route_minimum_results: int = Field(default=3, ge=1, le=10)
     google_places_contract_regime: Literal["unverified", "eea", "non_eea"] = "unverified"
     geocoding_provider: Literal["none", "nominatim", "nominatim_google"] = "nominatim"
     nominatim_url: str = "https://nominatim.openstreetmap.org"
@@ -115,7 +121,10 @@ class Settings(BaseSettings):
         "relative-delay",
         "reduced-sensitivity",
     ] = "absolute"
-    tomtom_flow_segment_zoom: int = Field(default=10, ge=0, le=22)
+    # Route probes must include local/urban roads. TomTom hides lower road
+    # classes at small zoom levels, so zoom 10 is not suitable for navigation
+    # routes whose endpoints and short legs can be entirely local.
+    tomtom_flow_segment_zoom: int = Field(default=18, ge=0, le=22)
     tomtom_flow_segment_unit: Literal["kmph", "mph"] = "kmph"
     tomtom_flow_segment_openlr: bool = True
     tomtom_api_key: str = ""

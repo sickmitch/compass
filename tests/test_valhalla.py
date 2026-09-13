@@ -12,6 +12,7 @@ from compass.routing.domain import (
     MatrixLocationError,
     MatrixRequest,
     NoRouteError,
+    RouteOriginDirection,
     RouteRequest,
     RoutingProviderError,
     RoutingUnavailableError,
@@ -124,6 +125,42 @@ def test_route_translates_request_and_normalizes_response() -> None:
     assert tuple(element.text for element in sign.exit_toward_elements) == ("Bologna",)
     assert tuple(element.text for element in sign.exit_name_elements) == ("Casalecchio",)
     assert route.maneuvers[1].roundabout_exit_count == 2
+
+
+def test_route_applies_direction_only_to_the_origin_location() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        locations = json.loads(request.content)["locations"]
+        assert locations[0] == {
+            "lat": 45.4642,
+            "lon": 9.19,
+            "type": "break",
+            "heading": 91.5,
+            "heading_tolerance": 45,
+        }
+        assert locations[1] == {
+            "lat": 45.4781,
+            "lon": 9.2271,
+            "type": "break",
+        }
+        return httpx.Response(200, json=fixture)
+
+    adapter, client = _adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(
+            adapter.route(
+                RouteRequest(
+                    origin=Coordinate(45.4642, 9.19),
+                    destination=Coordinate(45.4781, 9.2271),
+                    origin_direction=RouteOriginDirection(91.5, 45),
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.provider == "valhalla"
 
 
 def test_route_enriches_speed_limits_by_shape_index_and_merges_equal_edges() -> None:
@@ -481,7 +518,13 @@ def test_waypoint_route_preserves_leg_boundaries() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["locations"] == [
-            {"lat": 45.4642, "lon": 9.19, "type": "break"},
+            {
+                "lat": 45.4642,
+                "lon": 9.19,
+                "type": "break",
+                "heading": 135.0,
+                "heading_tolerance": 45,
+            },
             {"lat": 45.2, "lon": 9.7, "type": "break"},
             {"lat": 44.4949, "lon": 11.3426, "type": "break"},
         ]
@@ -495,6 +538,7 @@ def test_waypoint_route_preserves_leg_boundaries() -> None:
                     origin=Coordinate(45.4642, 9.19),
                     destination=Coordinate(44.4949, 11.3426),
                     waypoints=(Coordinate(45.2, 9.7),),
+                    origin_direction=RouteOriginDirection(135.0, 45),
                 )
             )
         )

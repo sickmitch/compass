@@ -13,6 +13,11 @@ enum class DestinationSearchIntent {
     ADD_STOP_ALONG_ROUTE,
 }
 
+enum class DestinationSearchOperation {
+    AUTOCOMPLETE,
+    TEXT_SEARCH,
+}
+
 data class DestinationSearchContext(
     val location: Coordinate? = null,
     val biasRadiusMeters: Double? = null,
@@ -28,6 +33,8 @@ data class DestinationSuggestRequest(
     val query: String,
     val sessionId: String,
     val revision: Int,
+    val intent: DestinationSearchIntent,
+    val operation: DestinationSearchOperation = DestinationSearchOperation.AUTOCOMPLETE,
     val context: DestinationSearchContext = DestinationSearchContext(),
 )
 
@@ -42,6 +49,10 @@ data class DestinationSuggestion(
     val distanceMeters: Int?,
     val providerRank: Int,
     val attribution: String,
+    val searchIntent: String? = null,
+    val marginalAddedDurationSeconds: Double? = null,
+    val totalAddedDurationSeconds: Double? = null,
+    val withinTimeBudget: Boolean? = null,
 )
 
 data class DestinationSuggestions(
@@ -105,6 +116,9 @@ data class AlongRouteContext(
     val legs: List<AlongRouteLeg>,
     val progressShapeIndex: Int? = null,
     val insertionLegIndex: Int? = null,
+    val baselineDurationSeconds: Double? = null,
+    val currentDurationSeconds: Double? = null,
+    val maximumTotalAddedDurationSeconds: Double? = null,
 )
 
 data class AlongRouteSearchRequest(
@@ -113,6 +127,7 @@ data class AlongRouteSearchRequest(
     val revision: Int,
     val route: AlongRouteContext?,
     val pageCursor: String? = null,
+    val fullSearch: Boolean = false,
 )
 
 data class AlongRouteSearchResults(

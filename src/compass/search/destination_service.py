@@ -23,6 +23,7 @@ class _SearchSession:
     language: str
     revision: int = -1
     query: str | None = None
+    operation: str = "autocomplete"
     suggestions: tuple[DestinationSuggestion, ...] = ()
     updated_at: float = field(default_factory=time.monotonic)
     concluded: bool = False
@@ -119,7 +120,11 @@ class DestinationSearchService:
             if request.revision < session.revision:
                 raise StaleDestinationSelectionError("search revision is stale")
             normalized_query = request.query.strip()
-            if request.revision == session.revision and normalized_query == session.query:
+            if (
+                request.revision == session.revision
+                and normalized_query == session.query
+                and request.operation == session.operation
+            ):
                 if session.suggestion_task is None:
                     return session.suggestions
                 task = session.suggestion_task
@@ -129,13 +134,14 @@ class DestinationSearchService:
                     raise StaleDestinationSelectionError("revision was reused for another query")
                 session.revision = request.revision
                 session.query = normalized_query
+                session.operation = request.operation
                 session.language = request.language
                 session.updated_at = time.monotonic()
                 task = asyncio.create_task(
                     self._suggest_provider(
                         self._providers["google_places_new"],
                         request,
-                        session.provider_token,
+                        session.provider_token if request.operation == "autocomplete" else None,
                     )
                 )
                 session.suggestion_task = task
@@ -172,12 +178,27 @@ class DestinationSearchService:
         self,
         provider: DestinationSearchProvider,
         request: DestinationSuggestRequest,
-        provider_token: str,
+        provider_token: str | None,
     ) -> tuple[DestinationSuggestion, ...]:
         started = time.monotonic()
         try:
             async with self._provider_slots:
-                return await provider.suggest(request, provider_token)
+                suggestions = await provider.suggest(request, provider_token)
+                if request.context.location is None:
+                    return suggestions
+                # Google distanceMeters is a geodesic distance from `origin`, not
+                # driving time. It is useful for local origin/destination discovery
+                # and remains distinct from the along-route time evaluation.
+                return tuple(
+                    sorted(
+                        suggestions,
+                        key=lambda item: (
+                            item.distance_meters is None,
+                            item.distance_meters if item.distance_meters is not None else 0,
+                            item.provider_rank,
+                        ),
+                    )
+                )
         finally:
             self.metrics.suggest_latency_ms_total += round((time.monotonic() - started) * 1_000)
 
@@ -211,7 +232,7 @@ class DestinationSearchService:
                         self._providers[provider],
                         provider_ref,
                         session.language,
-                        session.provider_token,
+                        session.provider_token if session.operation == "autocomplete" else None,
                     )
                 )
                 session.resolutions[provider_ref] = task
@@ -252,7 +273,7 @@ class DestinationSearchService:
         provider: DestinationSearchProvider,
         provider_ref: str,
         language: str,
-        provider_token: str,
+        provider_token: str | None,
     ) -> ResolvedDestinationSelection:
         started = time.monotonic()
         try:

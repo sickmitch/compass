@@ -41,7 +41,7 @@ class NavigationDrivingUiModelTest {
 
         assertEquals(ManeuverVisualFamily.TURN, ui.maneuverVisual.family)
         assertEquals(ManeuverDirection.RIGHT, ui.maneuverVisual.direction)
-        assertEquals("320 m", ui.distanceToManeuver)
+        assertEquals("300 m", ui.distanceToManeuver)
         assertEquals("Svolta a destra su Via Roma.", ui.primaryInstruction)
         assertEquals("Via Roma", ui.targetRoad)
         assertEquals("Poi mantieni la sinistra.", ui.followingInstruction)
@@ -58,6 +58,16 @@ class NavigationDrivingUiModelTest {
         assertEquals("20 min", ui.nextCngStop?.dwellDuration)
         assertEquals(1, ui.cngStops.size)
         assertEquals(0.25f, ui.progress)
+    }
+
+    @Test
+    fun maneuverDistanceUsesFiftyMeterThenTenMeterSteps() {
+        assertEquals(100, roundedManeuverDistanceMeters(79.0))
+        assertEquals(50, roundedManeuverDistanceMeters(74.0))
+        assertEquals(50, roundedManeuverDistanceMeters(50.0))
+        assertEquals(40, roundedManeuverDistanceMeters(44.0))
+        assertEquals(10, roundedManeuverDistanceMeters(6.0))
+        assertEquals(0, roundedManeuverDistanceMeters(0.0))
     }
 
     @Test

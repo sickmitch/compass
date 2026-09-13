@@ -28,6 +28,7 @@ from compass.api.routes import (
     NetworkEvaluationMetricsResponse,
     SpatialPruningMetricsResponse,
     _base_route_response,
+    route_origin_direction,
 )
 from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.config import Settings, get_api_settings
@@ -253,6 +254,7 @@ async def predictive_candidates(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     predictive_request = PredictiveCandidatesRequest(
         ranked_request=RankedCandidatesRequest(

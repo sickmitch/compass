@@ -17,6 +17,7 @@ import org.compass.cng.data.search.NoOpPlaceSearchCache
 import org.compass.cng.data.search.PlaceSearchCache
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
+import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.geometry.Polyline6Decoder
 import org.compass.cng.domain.model.CngPrice
@@ -81,6 +82,7 @@ class HttpRoutingRepository(
                 revision = request.revision,
                 route = request.route,
                 pageCursor = request.pageCursor,
+                fullSearch = request.fullSearch,
             ),
         )
         AlongRouteSearchResults(
@@ -104,6 +106,10 @@ class HttpRoutingRepository(
                     distanceMeters = result.distanceMeters,
                     providerRank = result.providerRank,
                     attribution = result.attribution,
+                    searchIntent = result.searchIntent,
+                    marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
+                    totalAddedDurationSeconds = result.totalAddedDurationSeconds,
+                    withinTimeBudget = result.withinTimeBudget,
                 )
             },
         )
@@ -125,6 +131,8 @@ class HttpRoutingRepository(
                 query = request.query,
                 sessionId = request.sessionId,
                 revision = request.revision,
+                intent = request.intent.name,
+                operation = request.operation.name.lowercase(),
                 context = request.context,
             ),
         )
@@ -143,6 +151,10 @@ class HttpRoutingRepository(
                     distanceMeters = result.distanceMeters,
                     providerRank = result.providerRank,
                     attribution = result.attribution,
+                    searchIntent = result.searchIntent,
+                    marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
+                    totalAddedDurationSeconds = result.totalAddedDurationSeconds,
+                    withinTimeBudget = result.withinTimeBudget,
                 )
             },
         )
@@ -244,19 +256,22 @@ class HttpRoutingRepository(
     override suspend fun previewRoute(
         origin: Coordinate,
         destination: Coordinate,
+        originDirection: RouteOriginDirection?,
     ): RoutePreview = mapFailures {
-        apiClient.getRoute(origin, destination).toRoutePreview(origin, destination)
+        apiClient.getRoute(origin, destination, originDirection).toRoutePreview(origin, destination)
     }
 
     override suspend fun routeWithIntermediateStop(
         origin: Coordinate,
         intermediateStop: Coordinate,
         destination: Coordinate,
+        originDirection: RouteOriginDirection?,
     ): RouteWithIntermediateStop = mapFailures {
         val response = apiClient.getRouteWithIntermediateStop(
             origin,
             intermediateStop,
             destination,
+            originDirection,
         )
         RouteWithIntermediateStop(
             stop = response.intermediateStop,
@@ -280,11 +295,13 @@ class HttpRoutingRepository(
         origin: Coordinate,
         intermediateStops: List<Coordinate>,
         destination: Coordinate,
+        originDirection: RouteOriginDirection?,
     ): RouteWithIntermediateStops = mapFailures {
         val response = apiClient.getRouteWithIntermediateStops(
             origin,
             intermediateStops,
             destination,
+            originDirection,
         )
         RouteWithIntermediateStops(
             stops = response.intermediateStops,
@@ -344,6 +361,7 @@ class HttpRoutingRepository(
         excludedMimitStationIds: Set<String>,
         estimatedRemainingGasolineRangeKm: Double?,
         reserveGasolineRangeKm: Double?,
+        originDirection: RouteOriginDirection?,
     ): PredictiveCngSuggestion = mapFailures {
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
         require(
@@ -385,6 +403,7 @@ class HttpRoutingRepository(
             excludedMimitStationIds = excludedMimitStationIds,
             estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
             reserveGasolineRangeKm = reserveGasolineRangeKm,
+            originDirection = originDirection,
         )
         require(response.excludedMimitStationIds.toSet() == excludedMimitStationIds) {
             "server did not acknowledge the excluded MIMIT station IDs"
@@ -501,6 +520,7 @@ class HttpRoutingRepository(
         effectiveCngRangeKm: Double,
         estimatedRemainingCngRangeKm: Double,
         reserveCngRangeKm: Double,
+        originDirection: RouteOriginDirection?,
     ): RouteWithCngItinerary = mapFailures {
         require(mimitStationIds.isNotEmpty() && mimitStationIds.size <= 32) {
             "CNG itinerary must contain between 1 and 32 stops"
@@ -527,6 +547,7 @@ class HttpRoutingRepository(
             effectiveCngRangeKm = effectiveCngRangeKm,
             estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
             reserveCngRangeKm = reserveCngRangeKm,
+            originDirection = originDirection,
         )
         val selectedStops = response.selectedStops.map { stop ->
             SelectedCngStop(
@@ -594,9 +615,15 @@ class HttpRoutingRepository(
         origin: Coordinate,
         destination: Coordinate,
         mimitStationId: String,
+        originDirection: RouteOriginDirection?,
     ): RouteWithCngStop = mapFailures {
         require(mimitStationId.matches(Regex("^[0-9]{1,32}$"))) { "invalid MIMIT station ID" }
-        val response = apiClient.getRouteWithCngStop(origin, destination, mimitStationId)
+        val response = apiClient.getRouteWithCngStop(
+            origin,
+            destination,
+            mimitStationId,
+            originDirection,
+        )
         val legs = response.legs.map { leg ->
             CngRouteLeg(
                 kind = when (leg.kind) {

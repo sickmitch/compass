@@ -17,8 +17,9 @@ Crea viaggio
   → Avvia navigazione
 ```
 
-- Partenza and destination expose current position, the disabled favourites placeholder, Google
-  search and direct selection on a MapLibre map.
+- Partenza and destination expose current position, local favorite places, Google search and direct
+  selection on a MapLibre map. Favorite-place creation and editing were completed in Android
+  0.28.0 without changing the accepted creation flow.
 - `Calcola percorso` immediately opens route personalization. There is no second continue action.
 - The personalization map is followed by distance, duration and traffic. Single CNG stop and full
   CNG planning are side by side; ordinary stops are a separate full-width choice; the direct-route
@@ -27,14 +28,19 @@ Crea viaggio
   with a CNG plan until the backend fuel-reachability planner can validate both stop classes in one
   authoritative itinerary.
 - Ordinary stops are plural (one to eight), preserve user order and add no dwell. Their list is
-  reordered by long-press drag. The default maximum total added road distance is 30% of the direct
-  route length and remains editable.
+  reordered by long-press drag. Android 0.28.2 replaces the original distance gate with a maximum
+  total added driving time: one third of the direct Valhalla duration by default, editable in
+  minutes.
 - `POST /api/v1/routes/with-intermediate-stops` sends all ordered coordinates to the existing
   Valhalla waypoint route path and returns one sequenced leg more than the stop count. Traffic
   refresh and navigation timing are retained; CNG stop count and dwell remain zero.
-- Each ordinary stop can use current GPS position, future favourites, Google search or map
+- Each ordinary stop can use current GPS position, local favorites, Google search or map
   selection. A Google result is resolved once, then shown as an exact highlighted point on a route
   preview; `Scegli` is the commit action.
+- Android 0.28.3 makes the search context explicit end to end. Typing is debounced once for 600 ms;
+  explicit Cerca uses Text Search immediately. Ordinary generic stops are prevalidated by full
+  Valhalla itinerary duration against the cumulative budget and ordered by marginal added time;
+  specific/global matches can be explicitly previewed beyond the limit.
 - Google results and textual addresses remain on the mapless search surface. Tap-list maps and the
   final route map receive only WGS84 coordinates and neutral Compass labels.
 - CNG station selection retains its map/list interaction: tapping a station card highlights its

@@ -4,16 +4,24 @@ import asyncio
 import hashlib
 import json
 import time
+import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from math import asin, cos, isfinite, radians, sin, sqrt
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 import httpx
 
 from compass.candidates.geometry import decode_polyline6, encode_polyline5
-from compass.routing.domain import Coordinate, RoutingProviderError
+from compass.routing.domain import (
+    Coordinate,
+    NoRouteError,
+    RoutingProvider,
+    RoutingProviderError,
+    RoutingUnavailableError,
+    WaypointRouteRequest,
+)
 from compass.search.destination_domain import (
     DestinationProviderError,
     DestinationRateLimitedError,
@@ -36,6 +44,10 @@ GOOGLE_SEARCH_ALONG_ROUTE_FIELD_MASK = ",".join(
         "places.attributions",
         "nextPageToken",
     )
+)
+ROUTE_BIAS_LIMITATION = (
+    "I risultati sono orientati alla rotta dal provider; non rappresentano "
+    "un corridoio geometrico rigido."
 )
 
 
@@ -66,6 +78,22 @@ class AlongRouteContext:
     legs: tuple[AlongRouteLeg, ...]
     progress_shape_index: int | None = None
     insertion_leg_index: int | None = None
+    baseline_duration_seconds: float | None = None
+    current_duration_seconds: float | None = None
+    maximum_total_added_duration_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        durations = (
+            self.baseline_duration_seconds,
+            self.current_duration_seconds,
+            self.maximum_total_added_duration_seconds,
+        )
+        if any(value is not None and (not isfinite(value) or value < 0) for value in durations):
+            raise ValueError("along-route durations must be finite and non-negative")
+        if any(value is None for value in durations) and any(
+            value is not None for value in durations
+        ):
+            raise ValueError("along-route time policy must be provided completely")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +104,7 @@ class AlongRouteSearchRequest:
     route: AlongRouteContext | None
     language: str = "it"
     page_cursor: str | None = None
+    full_search: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +129,7 @@ class AlongRouteSearchResponse:
     results: tuple[DestinationSuggestion, ...]
     next_page_cursor: str | None
     mode: str = "route_biased"
-    limitation: str = (
-        "I risultati sono orientati alla rotta dal provider; non rappresentano "
-        "un corridoio geometrico rigido."
-    )
+    limitation: str = ROUTE_BIAS_LIMITATION
 
 
 class AlongRouteSearchProvider(Protocol):
@@ -114,7 +140,7 @@ class AlongRouteSearchProvider(Protocol):
         *,
         query: str,
         language: str,
-        encoded_polyline5: str,
+        encoded_polyline5: str | None,
         page_token: str | None,
     ) -> AlongRouteProviderResponse: ...
 
@@ -146,7 +172,7 @@ class GooglePlacesNewAlongRouteProvider:
         *,
         query: str,
         language: str,
-        encoded_polyline5: str,
+        encoded_polyline5: str | None,
         page_token: str | None,
     ) -> AlongRouteProviderResponse:
         payload: dict[str, Any] = {
@@ -154,8 +180,11 @@ class GooglePlacesNewAlongRouteProvider:
             "languageCode": language,
             "regionCode": self._region_code,
             "pageSize": self._page_size,
-            "searchAlongRouteParameters": {"polyline": {"encodedPolyline": encoded_polyline5}},
         }
+        if encoded_polyline5 is not None:
+            payload["searchAlongRouteParameters"] = {
+                "polyline": {"encodedPolyline": encoded_polyline5}
+            }
         if page_token is not None:
             payload["pageToken"] = page_token
         try:
@@ -216,6 +245,10 @@ class AlongRouteSearchMetrics:
     results_returned: int = 0
     stale_responses_discarded: int = 0
     resolutions_succeeded: int = 0
+    candidates_evaluated: int = 0
+    candidates_within_budget: int = 0
+    candidate_routing_errors: int = 0
+    candidates_timed_out: int = 0
 
     def snapshot(self) -> dict[str, int]:
         return {item.name: int(getattr(self, item.name)) for item in fields(self)}
@@ -229,11 +262,13 @@ class _AlongRouteSession:
     query_revision: int
     query: str
     language: str
+    full_search: bool
     results: dict[str, AlongRouteProviderResult] = field(default_factory=dict)
     page_tokens: dict[str, str] = field(default_factory=dict)
     updated_at: float = field(default_factory=time.monotonic)
     concluded_refs: set[str] = field(default_factory=set)
     last_response: AlongRouteSearchResponse | None = None
+    completion: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class AlongRouteSearchService:
@@ -247,6 +282,10 @@ class AlongRouteSearchService:
         max_concurrency: int,
         requests_per_user_minute: int,
         minimum_query_characters: int,
+        candidate_evaluation_limit: int = 10,
+        candidate_evaluation_timeout_seconds: float = 20,
+        recovery_call_limit: int = 2,
+        minimum_eligible_results: int = 3,
     ) -> None:
         self._provider = provider
         self._max_geometry_points = max_geometry_points
@@ -255,6 +294,10 @@ class AlongRouteSearchService:
         self._slots = asyncio.Semaphore(max_concurrency)
         self._limiter = PerUserRequestLimiter(requests_per_user_minute)
         self._minimum_query_characters = minimum_query_characters
+        self._candidate_evaluation_limit = candidate_evaluation_limit
+        self._candidate_evaluation_timeout_seconds = candidate_evaluation_timeout_seconds
+        self._recovery_call_limit = recovery_call_limit
+        self._minimum_eligible_results = minimum_eligible_results
         self._sessions: dict[tuple[str, str], _AlongRouteSession] = {}
         self._lock = asyncio.Lock()
         self.metrics = AlongRouteSearchMetrics()
@@ -263,6 +306,8 @@ class AlongRouteSearchService:
         self,
         owner: str,
         request: AlongRouteSearchRequest,
+        *,
+        routing_provider: RoutingProvider | None = None,
     ) -> AlongRouteSearchResponse:
         _require_uuid4(request.session_id)
         query = request.query.strip()
@@ -281,6 +326,7 @@ class AlongRouteSearchService:
             self.metrics.rate_limited += 1
             raise DestinationRateLimitedError(60)
         key = (owner, request.session_id)
+        wait_for: asyncio.Event | None = None
         async with self._lock:
             session = self._sessions.get(key)
             if request.page_cursor is None:
@@ -304,15 +350,24 @@ class AlongRouteSearchService:
                     and session.last_response is not None
                 ):
                     return session.last_response
-                session = _AlongRouteSession(
-                    route_id=route.route_id,
-                    route_revision=route.route_revision,
-                    route_fingerprint=fingerprint,
-                    query_revision=request.revision,
-                    query=query,
-                    language=request.language,
-                )
-                self._sessions[key] = session
+                if (
+                    session is not None
+                    and request.revision == session.query_revision
+                    and session.query == query
+                    and session.route_fingerprint == fingerprint
+                ):
+                    wait_for = session.completion
+                else:
+                    session = _AlongRouteSession(
+                        route_id=route.route_id,
+                        route_revision=route.route_revision,
+                        route_fingerprint=fingerprint,
+                        query_revision=request.revision,
+                        query=query,
+                        language=request.language,
+                        full_search=request.full_search,
+                    )
+                    self._sessions[key] = session
                 page_token = None
             else:
                 if session is None or not _session_matches(session, request, fingerprint, query):
@@ -320,30 +375,102 @@ class AlongRouteSearchService:
                 page_token = session.page_tokens.get(request.page_cursor)
                 if page_token is None:
                     raise StaleDestinationSelectionError("pagination cursor is stale")
-        started = time.monotonic()
-        self.metrics.provider_calls += 1
+        if wait_for is not None:
+            await wait_for.wait()
+            async with self._lock:
+                current = self._sessions.get(key)
+                if current is session and current.last_response is not None:
+                    return current.last_response
+            raise DestinationSearchUnavailableError("coalesced along-route search failed")
+        query_intent = classify_waypoint_query(query)
+        use_global_search = query_intent == "specific" or (
+            query_intent == "ambiguous" and request.full_search
+        )
+        provider_polyline = None if use_global_search else encoded
         try:
-            async with self._slots:
-                provider_response = await self._provider.search(
-                    query=query,
-                    language=request.language,
-                    encoded_polyline5=encoded,
-                    page_token=page_token,
-                )
-        except DestinationRateLimitedError:
-            self.metrics.rate_limited += 1
-            raise
+            provider_response = await self._provider_search(
+                query=query,
+                language=request.language,
+                encoded_polyline5=provider_polyline,
+                page_token=page_token,
+            )
         except Exception:
-            self.metrics.provider_errors += 1
+            session.completion.set()
             raise
-        finally:
-            self.metrics.latency_ms_total += round((time.monotonic() - started) * 1_000)
+        try:
+            evaluated_results = await self._evaluate_candidates(
+                provider_response.results,
+                route=route,
+                query_intent=query_intent,
+                routing_provider=routing_provider,
+                preserve_over_budget=use_global_search,
+            )
+        except Exception:
+            session.completion.set()
+            raise
+        if (
+            not use_global_search
+            and _has_time_policy(route)
+            and request.page_cursor is None
+            and len(evaluated_results) < self._minimum_eligible_results
+            and self._recovery_call_limit > 0
+        ):
+            known_refs = {item.suggestion.provider_ref for item in provider_response.results}
+            expanded = list(evaluated_results)
+            for recovery_polyline in build_google_route_recovery_polylines(
+                route,
+                max_points=self._max_geometry_points,
+                max_encoded_chars=self._max_encoded_polyline_chars,
+                segment_count=self._recovery_call_limit,
+            ):
+                if len(expanded) >= self._minimum_eligible_results:
+                    break
+                try:
+                    recovery = await self._provider_search(
+                        query=query,
+                        language=request.language,
+                        encoded_polyline5=recovery_polyline,
+                        page_token=None,
+                    )
+                    novel = tuple(
+                        item
+                        for item in recovery.results
+                        if item.suggestion.provider_ref not in known_refs
+                    )
+                    known_refs.update(item.suggestion.provider_ref for item in novel)
+                    expanded.extend(
+                        await self._evaluate_candidates(
+                            novel,
+                            route=route,
+                            query_intent=query_intent,
+                            routing_provider=routing_provider,
+                            preserve_over_budget=False,
+                        )
+                    )
+                except (
+                    DestinationRateLimitedError,
+                    DestinationProviderError,
+                    DestinationSearchUnavailableError,
+                ):
+                    break
+            evaluated_results = tuple(
+                sorted(
+                    expanded,
+                    key=lambda item: (
+                        item.suggestion.marginal_added_duration_seconds
+                        if item.suggestion.marginal_added_duration_seconds is not None
+                        else float("inf"),
+                        item.suggestion.provider_rank,
+                    ),
+                )
+            )
         async with self._lock:
             current = self._sessions.get(key)
             if current is not session or not _session_matches(current, request, fingerprint, query):
                 self.metrics.stale_responses_discarded += 1
+                session.completion.set()
                 raise StaleDestinationSelectionError("along-route response is stale")
-            for result in provider_response.results:
+            for result in evaluated_results:
                 current.results.setdefault(result.suggestion.provider_ref, result)
             if request.page_cursor is not None:
                 current.page_tokens.pop(request.page_cursor, None)
@@ -354,20 +481,171 @@ class AlongRouteSearchService:
                 ).hexdigest()[:32]
                 current.page_tokens = {next_cursor: provider_response.next_page_token}
             current.updated_at = time.monotonic()
-        self.metrics.results_returned += len(provider_response.results)
+        self.metrics.results_returned += len(evaluated_results)
+        mode = (
+            "global_specific"
+            if use_global_search
+            else "route_time_filtered"
+            if _has_time_policy(route)
+            else "route_biased"
+        )
         response = AlongRouteSearchResponse(
             session_id=request.session_id,
             revision=request.revision,
             route_id=route.route_id,
             route_revision=route.route_revision,
             route_fingerprint=fingerprint,
-            results=tuple(item.suggestion for item in provider_response.results),
+            results=tuple(item.suggestion for item in evaluated_results),
             next_page_cursor=next_cursor,
+            mode=mode,
+            limitation=(
+                "I candidati generici sono verificati con Valhalla rispetto al budget "
+                "temporale cumulativo; Search Along Route non è un corridoio geometrico rigido."
+                if not use_global_search and _has_time_policy(route)
+                else "La ricerca specifica può includere luoghi oltre il budget; la conferma "
+                "richiede comunque un'anteprima Valhalla."
+                if use_global_search
+                else ROUTE_BIAS_LIMITATION
+            ),
         )
         async with self._lock:
             if self._sessions.get(key) is session and request.page_cursor is None:
                 session.last_response = response
+                session.completion.set()
         return response
+
+    async def _provider_search(
+        self,
+        *,
+        query: str,
+        language: str,
+        encoded_polyline5: str | None,
+        page_token: str | None,
+    ) -> AlongRouteProviderResponse:
+        started = time.monotonic()
+        self.metrics.provider_calls += 1
+        try:
+            async with self._slots:
+                return await self._provider.search(
+                    query=query,
+                    language=language,
+                    encoded_polyline5=encoded_polyline5,
+                    page_token=page_token,
+                )
+        except DestinationRateLimitedError:
+            self.metrics.rate_limited += 1
+            raise
+        except Exception:
+            self.metrics.provider_errors += 1
+            raise
+        finally:
+            self.metrics.latency_ms_total += round((time.monotonic() - started) * 1_000)
+
+    async def _evaluate_candidates(
+        self,
+        results: tuple[AlongRouteProviderResult, ...],
+        *,
+        route: AlongRouteContext,
+        query_intent: Literal["generic", "specific", "ambiguous"],
+        routing_provider: RoutingProvider | None,
+        preserve_over_budget: bool,
+    ) -> tuple[AlongRouteProviderResult, ...]:
+        if not _has_time_policy(route):
+            return tuple(
+                replace(item, suggestion=replace(item.suggestion, search_intent=query_intent))
+                for item in results
+            )
+        if routing_provider is None:
+            raise DestinationSearchUnavailableError(
+                "Valhalla is required to evaluate along-route candidates"
+            )
+        baseline = route.baseline_duration_seconds
+        current = route.current_duration_seconds
+        maximum = route.maximum_total_added_duration_seconds
+        assert baseline is not None and current is not None and maximum is not None
+        if not results:
+            return ()
+
+        async def evaluate(item: AlongRouteProviderResult):
+            waypoints = list(route.remaining_waypoints)
+            insertion_index = (
+                route.insertion_leg_index
+                if route.insertion_leg_index is not None
+                else len(waypoints)
+            )
+            waypoints.insert(insertion_index, item.selection.coordinate)
+            try:
+                async with self._slots:
+                    candidate = await routing_provider.route_with_waypoints(
+                        WaypointRouteRequest(
+                            origin=route.origin,
+                            destination=route.final_destination,
+                            waypoints=tuple(waypoints),
+                            language="it-IT",
+                        )
+                    )
+            except (NoRouteError, RoutingUnavailableError, RoutingProviderError, ValueError):
+                self.metrics.candidate_routing_errors += 1
+                if preserve_over_budget:
+                    return replace(
+                        item,
+                        suggestion=replace(item.suggestion, search_intent=query_intent),
+                    )
+                return None
+            self.metrics.candidates_evaluated += 1
+            total_added = candidate.duration_seconds - baseline
+            marginal_added = candidate.duration_seconds - current
+            within = is_within_time_budget(
+                candidate_duration_seconds=candidate.duration_seconds,
+                baseline_duration_seconds=baseline,
+                maximum_total_added_duration_seconds=maximum,
+            )
+            if within:
+                self.metrics.candidates_within_budget += 1
+            suggestion = replace(
+                item.suggestion,
+                search_intent=query_intent,
+                marginal_added_duration_seconds=max(0.0, marginal_added),
+                total_added_duration_seconds=max(0.0, total_added),
+                within_time_budget=within,
+            )
+            return replace(item, suggestion=suggestion)
+
+        candidates = results[: self._candidate_evaluation_limit]
+        tasks = {asyncio.create_task(evaluate(item)) for item in candidates}
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=self._candidate_evaluation_timeout_seconds,
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self.metrics.candidates_timed_out += len(pending)
+        evaluated = tuple(
+            sorted(
+                (item for task in done if (item := task.result()) is not None),
+                key=lambda item: item.suggestion.provider_rank,
+            )
+        )
+        if results and not evaluated:
+            raise DestinationSearchUnavailableError(
+                "Valhalla could not evaluate any place candidate"
+            )
+        if preserve_over_budget:
+            return evaluated
+        eligible = tuple(item for item in evaluated if item.suggestion.within_time_budget)
+        return tuple(
+            sorted(
+                eligible,
+                key=lambda item: (
+                    item.suggestion.marginal_added_duration_seconds
+                    if item.suggestion.marginal_added_duration_seconds is not None
+                    else float("inf"),
+                    item.suggestion.provider_rank,
+                ),
+            )
+        )
 
     async def resolve(
         self,
@@ -426,6 +704,58 @@ def build_google_route_polyline(
     max_points: int,
     max_encoded_chars: int,
 ) -> tuple[str, str]:
+    coordinates = _route_coordinates(context, max_points=max_points)
+    encoded = encode_polyline5(coordinates)
+    if len(encoded) > max_encoded_chars:
+        raise InvalidRouteContextError("route geometry exceeds the configured encoded size")
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "route_id": context.route_id,
+                "route_revision": context.route_revision,
+                "progress": context.progress_shape_index,
+                "leg": context.insertion_leg_index,
+                "baseline_duration_seconds": context.baseline_duration_seconds,
+                "current_duration_seconds": context.current_duration_seconds,
+                "maximum_total_added_duration_seconds": (
+                    context.maximum_total_added_duration_seconds
+                ),
+                "polyline": encoded,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    return encoded, fingerprint
+
+
+def build_google_route_recovery_polylines(
+    context: AlongRouteContext,
+    *,
+    max_points: int,
+    max_encoded_chars: int,
+    segment_count: int = 2,
+) -> tuple[str, ...]:
+    coordinates = _route_coordinates(context, max_points=max_points)
+    if len(coordinates) < 4 or segment_count < 2:
+        return ()
+    segment_size = max(2, (len(coordinates) + segment_count - 1) // segment_count)
+    result: list[str] = []
+    start = 0
+    while start < len(coordinates) - 1 and len(result) < segment_count:
+        end = min(len(coordinates), start + segment_size + 1)
+        encoded = encode_polyline5(coordinates[start:end])
+        if len(encoded) <= max_encoded_chars:
+            result.append(encoded)
+        start = end - 1
+    return tuple(result)
+
+
+def _route_coordinates(
+    context: AlongRouteContext,
+    *,
+    max_points: int,
+) -> tuple[Coordinate, ...]:
     if not context.route_id.strip() or context.route_revision < 0:
         raise InvalidRouteContextError("route identity or revision is invalid")
     if not context.legs:
@@ -482,25 +812,85 @@ def build_google_route_polyline(
         coordinates = coordinates[context.progress_shape_index :]
     if len(coordinates) < 2:
         raise InvalidRouteContextError("remaining route geometry is empty")
-    if _distance_meters(coordinates[0], coordinates[-1]) < 10 and _path_length(coordinates) > 1_000:
-        raise UnsupportedRouteGeometryError("circular routes are not supported by this provider")
-    encoded = encode_polyline5(tuple(coordinates))
-    if len(encoded) > max_encoded_chars:
-        raise InvalidRouteContextError("route geometry exceeds the configured encoded size")
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            {
-                "route_id": context.route_id,
-                "route_revision": context.route_revision,
-                "progress": context.progress_shape_index,
-                "leg": context.insertion_leg_index,
-                "polyline": encoded,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
-    return encoded, fingerprint
+    return tuple(coordinates)
+
+
+def _has_time_policy(context: AlongRouteContext) -> bool:
+    return context.baseline_duration_seconds is not None
+
+
+def is_within_time_budget(
+    *,
+    candidate_duration_seconds: float,
+    baseline_duration_seconds: float,
+    maximum_total_added_duration_seconds: float,
+) -> bool:
+    values = (
+        candidate_duration_seconds,
+        baseline_duration_seconds,
+        maximum_total_added_duration_seconds,
+    )
+    if any(not isfinite(value) or value < 0 for value in values):
+        raise ValueError("time budget inputs must be finite and non-negative")
+    return candidate_duration_seconds <= (
+        baseline_duration_seconds + maximum_total_added_duration_seconds
+    )
+
+
+_GENERIC_WAYPOINT_TERMS = frozenset(
+    {
+        "alimentari",
+        "bancomat",
+        "bar",
+        "benzinaio",
+        "caffe",
+        "caffetteria",
+        "edicola",
+        "farmacia",
+        "farmacie",
+        "hotel",
+        "ospedale",
+        "parcheggio",
+        "pizzeria",
+        "pizzerie",
+        "ristorante",
+        "ristoranti",
+        "supermercato",
+        "supermercati",
+        "tabaccheria",
+        "tabaccherie",
+    }
+)
+_ADDRESS_TERMS = frozenset(
+    {"via", "viale", "piazza", "corso", "strada", "vicolo", "largo", "localita"}
+)
+_GENERIC_QUALIFIERS = frozenset(
+    {"aperto", "aperta", "adesso", "vegetariano", "vegetariana", "vegano", "vegana", "24h"}
+)
+
+
+def classify_waypoint_query(query: str) -> Literal["generic", "specific", "ambiguous"]:
+    """Classify without provider calls; the result controls route filtering semantics."""
+    plain = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", query)
+        if not unicodedata.combining(character)
+    )
+    normalized = "".join(
+        character.lower() if character.isalnum() else " " for character in plain.strip()
+    )
+    tokens = tuple(token for token in normalized.split() if token)
+    token_set = set(tokens)
+    if any(token.isdigit() for token in tokens) and token_set & _ADDRESS_TERMS:
+        return "specific"
+    if "," in query or (token_set & _ADDRESS_TERMS and len(tokens) >= 3):
+        return "specific"
+    if "a" in token_set and token_set & _GENERIC_WAYPOINT_TERMS:
+        return "specific"
+    categories = token_set & _GENERIC_WAYPOINT_TERMS
+    if categories and token_set <= categories | _GENERIC_QUALIFIERS:
+        return "generic"
+    return "ambiguous"
 
 
 def _normalize_google_place(raw: Any, rank: int) -> AlongRouteProviderResult:
@@ -588,6 +978,7 @@ def _session_matches(
         session.query_revision == request.revision
         and session.query == query
         and session.language == request.language
+        and session.full_search == request.full_search
         and session.route_id == route.route_id
         and session.route_revision == route.route_revision
         and session.route_fingerprint == fingerprint

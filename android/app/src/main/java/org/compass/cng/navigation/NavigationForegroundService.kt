@@ -120,7 +120,10 @@ class NavigationForegroundService : Service(), LocationListener {
             return START_STICKY
         }
         if (intent?.action == ACTION_SET_VOICE_GUIDANCE) {
-            val enabled = intent.getBooleanExtra(EXTRA_VOICE_GUIDANCE_ENABLED, true)
+            val enabled = intent.getBooleanExtra(
+                EXTRA_VOICE_GUIDANCE_ENABLED,
+                session.state.value.voiceGuidanceEnabled,
+            )
             session.setVoiceGuidanceEnabled(enabled)
             if (!enabled) voiceGuidance.stop()
             Log.i(LOG_TAG, "voice guidance enabled=$enabled")
@@ -323,8 +326,12 @@ class NavigationForegroundService : Service(), LocationListener {
             )
             lastLoggedOffRouteStatus = state.offRouteStatus
         }
-        maneuverController.nextAnnouncement(state)?.let { announcement ->
-            if (state.voiceGuidanceEnabled) {
+        if (state.voiceGuidanceEnabled) {
+            maneuverController.nextAnnouncement(state)?.let { announcement ->
+                Log.i(
+                    LOG_TAG,
+                    "voice announcement: kind=${announcement.kind} stage=${announcement.stage}",
+                )
                 voiceGuidance.speak(announcement)
                 session.recordSpokenInstruction(announcement.text)
             }

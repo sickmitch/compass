@@ -28,6 +28,7 @@ from compass.search.destination_service import DestinationSearchService
 from compass.search.google_places import (
     GOOGLE_PLACES_AUTOCOMPLETE_FIELD_MASK,
     GOOGLE_PLACES_DETAILS_FIELD_MASK,
+    GOOGLE_PLACES_TEXT_SEARCH_FIELD_MASK,
     GooglePlacesNewDestinationProvider,
 )
 
@@ -37,6 +38,7 @@ def _request(*, revision: int = 1, query: str = "Libreria Verona", session: str 
         query=query,
         session_id=session or str(uuid4()),
         revision=revision,
+        intent="DESTINATION_SEARCH",
         context=DestinationSearchContext(Coordinate(45.4384, 10.9916), 25_000),
     )
 
@@ -103,6 +105,68 @@ def test_google_autocomplete_contract_and_exact_place_id_deduplication() -> None
     assert "locationRestriction" not in payload
 
 
+def test_local_suggestions_are_sorted_by_geodesic_distance_with_stable_ties() -> None:
+    class Provider(_Provider):
+        async def suggest(self, request, provider_session_token):
+            return (
+                DestinationSuggestion(
+                    "far",
+                    self.provider_name,
+                    "far",
+                    "business",
+                    "Far",
+                    None,
+                    None,
+                    900,
+                    0,
+                ),
+                DestinationSuggestion(
+                    "unknown",
+                    self.provider_name,
+                    "unknown",
+                    "business",
+                    "Unknown",
+                    None,
+                    None,
+                    None,
+                    1,
+                ),
+                DestinationSuggestion(
+                    "near-b",
+                    self.provider_name,
+                    "near-b",
+                    "business",
+                    "Near B",
+                    None,
+                    None,
+                    100,
+                    3,
+                ),
+                DestinationSuggestion(
+                    "near-a",
+                    self.provider_name,
+                    "near-a",
+                    "business",
+                    "Near A",
+                    None,
+                    None,
+                    100,
+                    2,
+                ),
+            )
+
+    async def run():
+        service = DestinationSearchService(providers=(Provider(),))
+        return await service.suggest("driver", _request())
+
+    assert [item.provider_ref for item in asyncio.run(run())] == [
+        "near-a",
+        "near-b",
+        "far",
+        "unknown",
+    ]
+
+
 def test_google_autocomplete_restricts_results_to_route_rectangle() -> None:
     captured: list[httpx.Request] = []
 
@@ -114,6 +178,7 @@ def test_google_autocomplete_restricts_results_to_route_rectangle() -> None:
         query="farmacia",
         session_id=str(uuid4()),
         revision=1,
+        intent="DESTINATION_SEARCH",
         context=DestinationSearchContext(
             location=Coordinate(45.4, 10.9),
             route_bounds=(Coordinate(44.9, 10.3), Coordinate(45.8, 11.7)),
@@ -140,6 +205,79 @@ def test_google_autocomplete_restricts_results_to_route_rectangle() -> None:
         }
     }
     assert "locationBias" not in payload
+
+
+def test_explicit_search_uses_text_search_and_orders_locations_without_session_token() -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.url.path.endswith("places:searchText"):
+            return httpx.Response(
+                200,
+                json={
+                    "places": [
+                        {
+                            "id": "far",
+                            "displayName": {"text": "Far"},
+                            "formattedAddress": "Far address",
+                            "location": {"latitude": 45.50, "longitude": 11.00},
+                            "types": ["establishment"],
+                        },
+                        {
+                            "id": "near",
+                            "displayName": {"text": "Near"},
+                            "formattedAddress": "Near address",
+                            "location": {"latitude": 45.439, "longitude": 10.992},
+                            "types": ["establishment"],
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "near",
+                "formattedAddress": "Near address",
+                "location": {"latitude": 45.439, "longitude": 10.992},
+                "types": ["establishment"],
+            },
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GooglePlacesNewDestinationProvider(
+                base_url="https://places.googleapis.com/v1",
+                api_key="secret",
+                timeout_seconds=2,
+                client=client,
+            )
+            request = DestinationSuggestRequest(
+                query="farmacia",
+                session_id=str(uuid4()),
+                revision=2,
+                intent="DESTINATION_SEARCH",
+                operation="text_search",
+                context=DestinationSearchContext(Coordinate(45.4384, 10.9916), 25_000),
+            )
+            results = await DestinationSearchService(providers=(provider,)).suggest(
+                "driver", request
+            )
+            await provider.resolve("near", language="it", provider_session_token=None)
+            return results
+
+    results = asyncio.run(run())
+    assert [item.provider_ref for item in results] == ["near", "far"]
+    text_request, details_request = captured
+    assert text_request.headers["X-Goog-FieldMask"] == GOOGLE_PLACES_TEXT_SEARCH_FIELD_MASK
+    payload = json.loads(text_request.content)
+    assert payload["rankPreference"] == "DISTANCE"
+    assert payload["locationBias"]["circle"]["center"] == {
+        "latitude": 45.4384,
+        "longitude": 10.9916,
+    }
+    assert "sessionToken" not in payload
+    assert "sessionToken" not in details_request.url.params
 
 
 def test_google_details_resolves_selected_id_and_components_by_type() -> None:
@@ -451,6 +589,7 @@ def test_destination_api_keeps_selection_text_separate_from_map_target() -> None
             suggested = await client.post(
                 "/api/v1/destinations/suggest",
                 json={
+                    "intent": "DESTINATION_SEARCH",
                     "query": "Libreria Verona",
                     "session_id": session,
                     "revision": 1,
@@ -506,7 +645,12 @@ def test_destination_api_maps_stale_and_malformed_sessions() -> None:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             malformed = await client.post(
                 "/api/v1/destinations/suggest",
-                json={"query": "Verona", "session_id": "0" * 36, "revision": 1},
+                json={
+                    "intent": "DESTINATION_SEARCH",
+                    "query": "Verona",
+                    "session_id": "0" * 36,
+                    "revision": 1,
+                },
             )
             stale = await client.post(
                 "/api/v1/destinations/resolve",
@@ -529,3 +673,34 @@ def test_destination_api_maps_stale_and_malformed_sessions() -> None:
     assert malformed.json()["code"] == "invalid_request"
     assert stale.status_code == 409
     assert stale.json()["code"] == "stale_selection"
+
+
+def test_generic_destination_endpoint_rejects_along_route_intent() -> None:
+    service = DestinationSearchService(providers=(_Provider(),))
+
+    async def override_service():
+        return service
+
+    async def override_settings():
+        return Settings(_env_file=None, geocoding_provider="none")
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/api/v1/destinations/suggest",
+                json={
+                    "intent": "ADD_STOP_ALONG_ROUTE",
+                    "query": "farmacia",
+                    "session_id": str(uuid4()),
+                    "revision": 1,
+                },
+            )
+
+    app.dependency_overrides[get_destination_search_service] = override_service
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        assert asyncio.run(run()).status_code == 422
+    finally:
+        app.dependency_overrides.clear()

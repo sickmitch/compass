@@ -81,6 +81,7 @@ class NavigationEngine(
         source: NavigationRouteSource = NavigationRouteSource.LIVE,
         cachedAtEpochMillis: Long? = null,
     ) {
+        val voiceGuidanceEnabled = mutableState.value.voiceGuidanceEnabled
         resetTracking(route)
         val plannedFuelStops = plannedFuelStopProgress()
         val plannedIntermediateStops = plannedIntermediateStopProgress()
@@ -98,6 +99,7 @@ class NavigationEngine(
             intermediateStopProgress = plannedIntermediateStops,
             routeSource = source,
             routeCachedAtEpochMillis = cachedAtEpochMillis,
+            voiceGuidanceEnabled = voiceGuidanceEnabled,
         )
     }
 
@@ -620,6 +622,7 @@ class NavigationEngine(
             routeSource = NavigationRouteSource.LIVE,
             connectivity = NavigationConnectivity.ONLINE,
             locationMode = previousState.locationMode,
+            voiceGuidanceEnabled = previousState.voiceGuidanceEnabled,
         )
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
         currentLocation?.let {

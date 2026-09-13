@@ -38,6 +38,22 @@
       "AlongRouteMetricsResponse": {
         "additionalProperties": false,
         "properties": {
+          "candidate_routing_errors": {
+            "title": "Candidate Routing Errors",
+            "type": "integer"
+          },
+          "candidates_evaluated": {
+            "title": "Candidates Evaluated",
+            "type": "integer"
+          },
+          "candidates_timed_out": {
+            "title": "Candidates Timed Out",
+            "type": "integer"
+          },
+          "candidates_within_budget": {
+            "title": "Candidates Within Budget",
+            "type": "integer"
+          },
           "latency_ms_total": {
             "title": "Latency Ms Total",
             "type": "integer"
@@ -74,7 +90,11 @@
           "rate_limited",
           "results_returned",
           "stale_responses_discarded",
-          "resolutions_succeeded"
+          "resolutions_succeeded",
+          "candidates_evaluated",
+          "candidates_within_budget",
+          "candidate_routing_errors",
+          "candidates_timed_out"
         ],
         "title": "AlongRouteMetricsResponse",
         "type": "object"
@@ -177,6 +197,11 @@
       "AlongRouteSearchRequest": {
         "additionalProperties": false,
         "properties": {
+          "full_search": {
+            "default": false,
+            "title": "Full Search",
+            "type": "boolean"
+          },
           "intent": {
             "const": "ADD_STOP_ALONG_ROUTE",
             "title": "Intent",
@@ -246,7 +271,11 @@
             "type": "string"
           },
           "mode": {
-            "const": "route_biased",
+            "enum": [
+              "route_biased",
+              "route_time_filtered",
+              "global_specific"
+            ],
             "title": "Mode",
             "type": "string"
           },
@@ -361,6 +390,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -678,6 +735,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -1157,10 +1242,27 @@
               }
             ]
           },
+          "intent": {
+            "enum": [
+              "ORIGIN_SEARCH",
+              "DESTINATION_SEARCH"
+            ],
+            "title": "Intent",
+            "type": "string"
+          },
           "language": {
             "default": "it",
             "pattern": "^[a-z]{2}$",
             "title": "Language",
+            "type": "string"
+          },
+          "operation": {
+            "default": "autocomplete",
+            "enum": [
+              "autocomplete",
+              "text_search"
+            ],
+            "title": "Operation",
             "type": "string"
           },
           "query": {
@@ -1182,6 +1284,7 @@
           }
         },
         "required": [
+          "intent",
           "query",
           "session_id",
           "revision"
@@ -1194,6 +1297,8 @@
         "properties": {
           "maximum_results": {
             "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
             "title": "Maximum Results",
             "type": "integer"
           },
@@ -1271,6 +1376,10 @@
             "title": "Kind",
             "type": "string"
           },
+          "marginal_added_duration_seconds": {
+            "title": "Marginal Added Duration Seconds",
+            "type": "null"
+          },
           "provider": {
             "const": "google_places_new",
             "title": "Provider",
@@ -1289,6 +1398,10 @@
             "title": "Requires Resolution",
             "type": "boolean"
           },
+          "search_intent": {
+            "title": "Search Intent",
+            "type": "null"
+          },
           "subtitle": {
             "anyOf": [
               {
@@ -1303,6 +1416,14 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "total_added_duration_seconds": {
+            "title": "Total Added Duration Seconds",
+            "type": "null"
+          },
+          "within_time_budget": {
+            "title": "Within Time Budget",
+            "type": "null"
           }
         },
         "required": [
@@ -1367,6 +1488,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -1863,6 +2012,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -2000,6 +2177,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -2917,6 +3122,34 @@
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
+          },
           "reserve_cng_range_km": {
             "description": "Safety range that must remain on arrival at a suggested station.",
             "exclusiveMaximum": 2000.0,
@@ -3794,6 +4027,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -4121,6 +4382,30 @@
       "RouteContextRequest": {
         "additionalProperties": false,
         "properties": {
+          "baseline_duration_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Duration Seconds"
+          },
+          "current_duration_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Duration Seconds"
+          },
           "final_destination": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
@@ -4145,6 +4430,18 @@
             "minItems": 1,
             "title": "Legs",
             "type": "array"
+          },
+          "maximum_total_added_duration_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Total Added Duration Seconds"
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
@@ -4395,6 +4692,34 @@
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
           },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
+          },
           "reserve_cng_range_km": {
             "exclusiveMaximum": 2000.0,
             "minimum": 0.0,
@@ -4515,6 +4840,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/CoordinateRequest"
+          },
+          "origin_heading_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed travel heading at the origin. Used for a moving off-route recalculation so the new route departs in the current direction.",
+            "title": "Origin Heading Degrees"
+          },
+          "origin_heading_tolerance_degrees": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum angular difference accepted at the routed origin.",
+            "title": "Origin Heading Tolerance Degrees"
           }
         },
         "required": [
@@ -5385,6 +5738,18 @@
             "title": "Kind",
             "type": "string"
           },
+          "marginal_added_duration_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marginal Added Duration Seconds"
+          },
           "provider": {
             "const": "google_places_new",
             "title": "Provider",
@@ -5402,6 +5767,22 @@
             "title": "Requires Resolution",
             "type": "boolean"
           },
+          "search_intent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "generic",
+                  "specific",
+                  "ambiguous"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Intent"
+          },
           "subtitle": {
             "anyOf": [
               {
@@ -5416,6 +5797,29 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "total_added_duration_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Added Duration Seconds"
+          },
+          "within_time_budget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Within Time Budget"
           }
         },
         "required": [

@@ -24,12 +24,44 @@ the debug replay was slowed from eight geometry points per second to one point e
 the simulated fix still reports road speed independently for maneuver timing.
 Debug API calls emit bounded `CompassApi` logcat events containing endpoint, outcome, duration and
 exception classes. Payloads and response bodies are deliberately excluded from these diagnostics.
+Search workflow transitions and route-context cardinalities use the separate `CompassPlanner` tag;
+they likewise omit queries, coordinates, Place IDs and encoded polylines. Backend request-validation
+logs contain only the rejected field path and validation category.
 Ordinary calls retain the short global network limits. Predictive candidate evaluation alone uses a
 240-second read/call limit because a bounded full-range itinerary may require multiple sequential
 Valhalla matrix batches; its actual elapsed time is recorded in the same event stream.
 Navigation Stage 4 adds an explicit next-stop skip/replacement confirmation. It replans from the
 snapped position with the unavailable MIMIT ID excluded and commits only a complete range-safe
 itinerary. Its physical-device gate passed on 2026-09-02.
+
+Android 0.27.3 constrains a confirmed off-route recalculation to the raw GPS direction of travel
+when speed is at least 4 m/s. The request carries a 45-degree origin tolerance through every direct,
+ordinary-waypoint and CNG-aware reroute path. Traffic refreshes, connectivity recovery and manual
+route updates do not add this constraint, and low-speed fixes deliberately fall back to normal
+Valhalla origin snapping because their bearing is not reliable enough.
+
+Android 0.28.0 activates `Posizioni preferite` for partenza, destinazione and ordinary intermediate
+stops. Favorites live in app-private `SharedPreferences`, survive process restarts and can be
+created, renamed, selected and deleted from one mapless Material screen. A record contains only a
+UUID, the private label entered by the user and a WGS84 coordinate; it deliberately excludes Google
+titles, addresses, provider references, attributions and raw Places payloads. Android backup is
+disabled for the application. Selecting a favorite endpoint is entirely local; selecting one as an
+ordinary stop reuses the existing Valhalla insertion preview and still requires explicit `Scegli`
+before the itinerary changes.
+
+Android 0.28.1 reserves the Material error palette for failures that require attention. Ordinary
+edit/delete/stop actions are neutral, while degraded-but-operational states use the warning palette.
+The active-navigation voice and trip-detail controls, and the route-free create-trip control, are
+compact icon-only map controls with accessibility descriptions. Voice preference remains part of
+the authoritative navigation state: route previews and live route replacements preserve it, the
+foreground service never treats a missing command extra as an instruction to enable speech, and the
+existing durable checkpoint restores it after process recreation.
+
+Android 0.28.2 expresses the ordinary-waypoint eligibility limit as added driving minutes instead
+of added kilometres. The default is exactly one third of the direct route's Valhalla duration,
+shown with one decimal minute; a custom non-negative minute value replaces it. Selection still
+calculates one exact waypoint route and compares like-for-like Valhalla durations. Generic stops
+remain zero-dwell, and CNG maximum-detour policy is unchanged.
 
 Navigation Stage 5 adds local vehicle profiles and an explicit gasoline fallback. A profile stores
 effective full range and reserve for both fuels and is selected across app restarts. Predictive CNG
@@ -56,14 +88,21 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.22.1` (`versionCode=28`).
+Android version is `0.28.8` (`versionCode=54`).
 
-Destination search uses Compass `POST /api/v1/destinations/suggest` after a configurable 300 ms
-debounce and `POST /api/v1/destinations/resolve` only after selection. Results and full Google
+Destination search uses Compass `POST /api/v1/destinations/suggest` after one configurable 600 ms
+trailing-edge debounce and `POST /api/v1/destinations/resolve` only after selection. Both a settled
+query and Cerca/IME use localized Google Text Search; explicit submission cancels the pending timer
+and starts one new revision. Category queries therefore use the same distance-oriented provider
+contract in both cases. Results and full Google
 addresses are displayed on a mapless screen with attribution. Entering any MapLibre surface replaces
 that text with `Destinazione selezionata`; routing receives the resolved coordinate directly. Search
 sessions survive recomposition/rotation with the ViewModel but are not persisted across process
 death, and no Google content enters the legacy place-search cache.
+For destination searches, the selected origin coordinate is used as Google `origin` and location
+bias regardless of whether it came from GPS, map selection, coordinates, search or a favourite.
+Until an origin has been selected, a recent valid GPS fix is used instead. This makes the displayed
+straight-line distances and local ordering share the same explicit reference point.
 
 The Google-only destination live gate was accepted on the live backend and a physical device on
 2026-09-07. Eight applicable manual cases passed. The ninth proposed case—editing the destination
@@ -130,9 +169,10 @@ Navigation UI Phase 15 adds up to eight ordered ordinary waypoints between depar
 destination. The waypoint selector reuses all endpoint acquisition modes. Its original
 route-rectangle search was superseded by the dedicated Search Along Route contract documented
 below; selection remains mapless and resolves one provider result only. The ViewModel then asks
-Valhalla for the direct route and the exact
-origin→waypoint→destination route, accepting the waypoint only when the latter's added road distance
-does not exceed the chosen kilometre limit. The default is 30% of direct-route length.
+Valhalla for the direct route and the exact origin→waypoint→destination route, accepting the
+waypoint only when the latter's added driving time does not exceed the chosen minute limit. Android
+0.28.2 changes the default to one third of the direct route's driving duration; the driver can
+override that value for the current itinerary.
 
 The waypoint enters navigation as a Compass-owned neutral `Tappa intermedia`, never as persisted
 Google display text. A selected result first receives an exact-route MapLibre preview with a
@@ -240,7 +280,7 @@ foreground-only listener stops with the Activity and before the navigation foreg
 starts, so route guidance continues to have a single location owner.
 
 The `Crea viaggio` control replaces `Viaggio` only on that route-free surface. Its selector offers
-`Posizione attuale`, a disabled `Posizioni preferite` placeholder, `Ricerca` and `Coordinate` as
+`Posizione attuale`, `Posizioni preferite`, `Ricerca` and `Coordinate` as
 content-width buttons that wrap onto additional rows. Departure puts current position first;
 destination puts it last. The existing normalized place search can now fill either endpoint and
 routing begins only after both endpoint values validate. Current-position acquisition reports its

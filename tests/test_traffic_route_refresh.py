@@ -92,6 +92,29 @@ def test_route_geometry_is_sampled_with_spacing_and_hard_probe_cap() -> None:
     assert probes[-1] == Coordinate(44.4949, 11.3426)
 
 
+def test_short_route_includes_an_interior_probe() -> None:
+    encoded = _encode_polyline6(
+        (
+            Coordinate(45.4300, 10.9800),
+            Coordinate(45.4350, 10.9900),
+            Coordinate(45.4400, 11.0000),
+        )
+    )
+
+    probes = sample_route_probe_points(
+        (encoded,),
+        spacing_km=25,
+        max_probes=16,
+        max_geometry_points=100,
+    )
+
+    assert len(probes) == 3
+    assert probes[0] == Coordinate(45.43, 10.98)
+    assert probes[-1] == Coordinate(45.44, 11.0)
+    assert probes[0].latitude < probes[1].latitude < probes[-1].latitude
+    assert probes[0].longitude < probes[1].longitude < probes[-1].longitude
+
+
 def test_route_refresh_ledger_is_tileset_bound_and_skips_for_five_minutes(
     tmp_path,
 ) -> None:

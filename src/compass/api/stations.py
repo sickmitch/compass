@@ -20,6 +20,7 @@ from compass.api.routes import (
     RouteSpeedLimitResponse,
     _navigation_timing_response,
     _navigation_traffic,
+    route_origin_direction,
 )
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
@@ -271,6 +272,7 @@ async def route_with_cng_stop(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     try:
         route = await provider.route_with_waypoints(route_request)
@@ -417,6 +419,7 @@ async def route_with_cng_itinerary(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     try:
         route = await provider.route_with_waypoints(route_request)

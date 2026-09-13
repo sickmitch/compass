@@ -17,6 +17,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DEFAULT_CNG_REFUEL_DWELL_SECONDS
 import org.compass.cng.domain.server.ServerConnection
@@ -111,13 +112,37 @@ class CompassApiClient(
 
     suspend fun searchAlongRoute(
         request: ApiAlongRouteSearchRequest,
-    ): ApiAlongRouteSearchResults = try {
-        post<AlongRouteSearchResponseDto>(
+    ): ApiAlongRouteSearchResults {
+        val route = request.route
+        eventLogger(
+            "along_route prepared: revision=${request.revision} " +
+                "route_revision=${route?.routeRevision ?: -1} " +
+                "legs=${route?.legs?.size ?: 0} " +
+                "waypoints=${route?.remainingWaypoints?.size ?: 0} " +
+                "time_policy=${route?.hasCompleteTimePolicy() == true} " +
+                "pagination=${request.pageCursor != null} full_search=${request.fullSearch}",
+        )
+        return try {
+            post<AlongRouteSearchResponseDto>(
             alongRouteSearchUrl,
             json.encodeToString(AlongRouteSearchRequestDto.fromApi(request)),
-        ).toApi()
-    } catch (error: IllegalArgumentException) {
-        throw ApiClientException.InvalidResponse(error)
+            ).toApi().also { response ->
+                eventLogger(
+                    "along_route accepted: revision=${response.revision} " +
+                        "route_revision=${response.routeRevision} mode=${response.mode} " +
+                        "results=${response.results.size}",
+                )
+            }
+        } catch (error: ApiClientException.Http) {
+            eventLogger(
+                "along_route rejected: revision=${request.revision} " +
+                    "route_revision=${route?.routeRevision ?: -1} " +
+                    "status=${error.statusCode} code=${error.code}",
+            )
+            throw error
+        } catch (error: IllegalArgumentException) {
+            throw ApiClientException.InvalidResponse(error)
+        }
     }
 
     suspend fun resolveAlongRoute(
@@ -147,12 +172,15 @@ class CompassApiClient(
     suspend fun getRoute(
         origin: Coordinate,
         destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
     ): ApiRoute {
         val payload = RouteRequestDto(
             origin = origin.toDto(),
             destination = destination.toDto(),
             costing = "auto",
             language = "it-IT",
+            originHeadingDegrees = originDirection?.headingDegrees,
+            originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
         )
         val response = post<RouteResponseDto>(routeUrl, json.encodeToString(payload))
         return try {
@@ -176,6 +204,7 @@ class CompassApiClient(
         origin: Coordinate,
         intermediateStop: Coordinate,
         destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
     ): ApiRouteWithIntermediateStop {
         val payload = RouteWithIntermediateStopRequestDto(
             origin = origin.toDto(),
@@ -183,6 +212,8 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = "auto",
             language = "it-IT",
+            originHeadingDegrees = originDirection?.headingDegrees,
+            originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
         )
         val response = post<RouteWithIntermediateStopResponseDto>(
             routeWithIntermediateStopUrl,
@@ -199,6 +230,7 @@ class CompassApiClient(
         origin: Coordinate,
         intermediateStops: List<Coordinate>,
         destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
     ): ApiRouteWithIntermediateStops {
         require(intermediateStops.size in 1..8) { "between one and eight stops are required" }
         val payload = RouteWithIntermediateStopsRequestDto(
@@ -207,6 +239,8 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = "auto",
             language = "it-IT",
+            originHeadingDegrees = originDirection?.headingDegrees,
+            originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
         )
         val response = post<RouteWithIntermediateStopsResponseDto>(
             routeWithIntermediateStopsUrl,
@@ -246,6 +280,7 @@ class CompassApiClient(
         origin: Coordinate,
         destination: Coordinate,
         mimitStationId: String,
+        originDirection: RouteOriginDirection? = null,
     ): ApiRouteWithCngStop {
         val payload = RouteWithCngStopRequestDto(
             origin = origin.toDto(),
@@ -253,6 +288,8 @@ class CompassApiClient(
             costing = "auto",
             language = "it-IT",
             mimitStationId = mimitStationId,
+            originHeadingDegrees = originDirection?.headingDegrees,
+            originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
         )
         return post<RouteWithCngStopResponseDto>(
             routeWithCngStopUrl,
@@ -271,6 +308,7 @@ class CompassApiClient(
         excludedMimitStationIds: Set<String> = emptySet(),
         estimatedRemainingGasolineRangeKm: Double? = null,
         reserveGasolineRangeKm: Double? = null,
+        originDirection: RouteOriginDirection? = null,
     ): ApiPredictiveCandidates {
         val payload = PredictiveCandidatesRequestDto(
             origin = origin.toDto(),
@@ -286,6 +324,8 @@ class CompassApiClient(
             departureAt = departureAt,
             includeClosed = false,
             excludedMimitStationIds = excludedMimitStationIds.sorted(),
+            originHeadingDegrees = originDirection?.headingDegrees,
+            originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
         )
         return post<PredictiveCandidatesResponseDto>(
             predictiveCandidatesUrl,
@@ -301,6 +341,7 @@ class CompassApiClient(
         effectiveCngRangeKm: Double,
         estimatedRemainingCngRangeKm: Double,
         reserveCngRangeKm: Double,
+        originDirection: RouteOriginDirection? = null,
     ): ApiRouteWithCngItinerary {
         val payload = RouteWithCngItineraryRequestDto(
             origin = origin.toDto(),
@@ -311,6 +352,8 @@ class CompassApiClient(
             effectiveCngRangeKm = effectiveCngRangeKm,
             estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
             reserveCngRangeKm = reserveCngRangeKm,
+            originHeadingDegrees = originDirection?.headingDegrees,
+            originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
         )
         return post<RouteWithCngItineraryResponseDto>(
             routeWithCngItineraryUrl,
@@ -348,6 +391,11 @@ class CompassApiClient(
                 if (!response.isSuccessful) {
                     val error = runCatching { json.decodeFromString<ErrorResponseDto>(body) }
                         .getOrNull()
+                    eventLogger(
+                        "request rejected: method=POST endpoint=$endpoint status=${response.code} " +
+                            "code=${error?.code ?: "http_${response.code}"} " +
+                            "duration_ms=${elapsedMillis(startedAtNanos)}",
+                    )
                     throw ApiClientException.Http(
                         statusCode = response.code,
                         code = error?.code ?: "http_${response.code}",
@@ -464,6 +512,8 @@ private data class PlaceSearchResponseDto(
 
 @Serializable
 private data class DestinationSuggestRequestDto(
+    val intent: String,
+    val operation: String,
     val query: String,
     @SerialName("session_id") val sessionId: String,
     val revision: Int,
@@ -472,6 +522,8 @@ private data class DestinationSuggestRequestDto(
 ) {
     companion object {
         fun fromApi(value: ApiDestinationSuggestRequest) = DestinationSuggestRequestDto(
+            intent = value.intent,
+            operation = value.operation,
             query = value.query,
             sessionId = value.sessionId,
             revision = value.revision,
@@ -536,6 +588,11 @@ private data class DestinationSuggestionDto(
     @SerialName("provider_rank") val providerRank: Int,
     @SerialName("requires_resolution") val requiresResolution: Boolean,
     val attribution: String,
+    @SerialName("search_intent") val searchIntent: String? = null,
+    @SerialName("marginal_added_duration_seconds")
+    val marginalAddedDurationSeconds: Double? = null,
+    @SerialName("total_added_duration_seconds") val totalAddedDurationSeconds: Double? = null,
+    @SerialName("within_time_budget") val withinTimeBudget: Boolean? = null,
 )
 
 @Serializable
@@ -563,6 +620,7 @@ private data class AlongRouteSearchRequestDto(
     val language: String = "it",
     val route: AlongRouteContextDto?,
     @SerialName("page_cursor") val pageCursor: String?,
+    @SerialName("full_search") val fullSearch: Boolean,
 ) {
     companion object {
         fun fromApi(value: ApiAlongRouteSearchRequest) = AlongRouteSearchRequestDto(
@@ -571,6 +629,7 @@ private data class AlongRouteSearchRequestDto(
             sessionId = value.sessionId,
             revision = value.revision,
             pageCursor = value.pageCursor,
+            fullSearch = value.fullSearch,
             route = value.route?.toDto(),
         )
     }
@@ -586,6 +645,10 @@ private data class AlongRouteContextDto(
     val legs: List<AlongRouteLegDto>,
     @SerialName("progress_shape_index") val progressShapeIndex: Int?,
     @SerialName("insertion_leg_index") val insertionLegIndex: Int?,
+    @SerialName("baseline_duration_seconds") val baselineDurationSeconds: Double?,
+    @SerialName("current_duration_seconds") val currentDurationSeconds: Double?,
+    @SerialName("maximum_total_added_duration_seconds")
+    val maximumTotalAddedDurationSeconds: Double?,
 )
 
 @Serializable
@@ -603,7 +666,15 @@ private fun org.compass.cng.domain.model.AlongRouteContext.toDto() = AlongRouteC
     legs = legs.map { AlongRouteLegDto(it.encodedPolyline6, precision = 6) },
     progressShapeIndex = progressShapeIndex,
     insertionLegIndex = insertionLegIndex,
+    baselineDurationSeconds = baselineDurationSeconds,
+    currentDurationSeconds = currentDurationSeconds,
+    maximumTotalAddedDurationSeconds = maximumTotalAddedDurationSeconds,
 )
+
+private fun org.compass.cng.domain.model.AlongRouteContext.hasCompleteTimePolicy(): Boolean =
+    baselineDurationSeconds != null &&
+        currentDurationSeconds != null &&
+        maximumTotalAddedDurationSeconds != null
 
 @Serializable
 private data class AlongRouteSearchResponseDto(
@@ -734,6 +805,9 @@ private data class RouteRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
+    @SerialName("origin_heading_tolerance_degrees")
+    val originHeadingToleranceDegrees: Int? = null,
 )
 
 @Serializable
@@ -743,6 +817,9 @@ private data class RouteWithIntermediateStopRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
+    @SerialName("origin_heading_tolerance_degrees")
+    val originHeadingToleranceDegrees: Int? = null,
 )
 
 @Serializable
@@ -752,6 +829,9 @@ private data class RouteWithIntermediateStopsRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
+    @SerialName("origin_heading_tolerance_degrees")
+    val originHeadingToleranceDegrees: Int? = null,
 )
 
 @Serializable
@@ -783,6 +863,9 @@ private data class PredictiveCandidatesRequestDto(
     @SerialName("departure_at") val departureAt: String,
     @SerialName("include_closed") val includeClosed: Boolean,
     @SerialName("excluded_mimit_station_ids") val excludedMimitStationIds: List<String>,
+    @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
+    @SerialName("origin_heading_tolerance_degrees")
+    val originHeadingToleranceDegrees: Int? = null,
 )
 
 @Serializable
@@ -792,6 +875,9 @@ private data class RouteWithCngStopRequestDto(
     val costing: String,
     val language: String,
     @SerialName("mimit_station_id") val mimitStationId: String,
+    @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
+    @SerialName("origin_heading_tolerance_degrees")
+    val originHeadingToleranceDegrees: Int? = null,
 )
 
 @Serializable
@@ -805,6 +891,9 @@ private data class RouteWithCngItineraryRequestDto(
     @SerialName("estimated_remaining_cng_range_km")
     val estimatedRemainingCngRangeKm: Double,
     @SerialName("reserve_cng_range_km") val reserveCngRangeKm: Double,
+    @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
+    @SerialName("origin_heading_tolerance_degrees")
+    val originHeadingToleranceDegrees: Int? = null,
 )
 
 @Serializable
@@ -1328,7 +1417,7 @@ private fun PlaceSearchResponseDto.toApiPlaceSearchResults(): ApiPlaceSearchResu
     )
 
 private fun DestinationSuggestResponseDto.toApi(): ApiDestinationSuggestions {
-    require(provider == "google_places_new" && maximumResults == 5)
+    require(provider == "google_places_new" && maximumResults in setOf(5, 10))
     return ApiDestinationSuggestions(
         sessionId = sessionId,
         revision = revision,
@@ -1346,13 +1435,17 @@ private fun DestinationSuggestResponseDto.toApi(): ApiDestinationSuggestions {
                 distanceMeters = result.distanceMeters,
                 providerRank = result.providerRank,
                 attribution = result.attribution,
+                searchIntent = result.searchIntent,
+                marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
+                totalAddedDurationSeconds = result.totalAddedDurationSeconds,
+                withinTimeBudget = result.withinTimeBudget,
             )
         },
     )
 }
 
 private fun AlongRouteSearchResponseDto.toApi(): ApiAlongRouteSearchResults {
-    require(mode == "route_biased")
+    require(mode in setOf("route_biased", "route_time_filtered", "global_specific"))
     return ApiAlongRouteSearchResults(
         sessionId = sessionId,
         revision = revision,
@@ -1376,6 +1469,10 @@ private fun AlongRouteSearchResponseDto.toApi(): ApiAlongRouteSearchResults {
                 distanceMeters = result.distanceMeters,
                 providerRank = result.providerRank,
                 attribution = result.attribution,
+                searchIntent = result.searchIntent,
+                marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
+                totalAddedDurationSeconds = result.totalAddedDurationSeconds,
+                withinTimeBudget = result.withinTimeBudget,
             )
         },
     )

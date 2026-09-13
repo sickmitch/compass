@@ -7,10 +7,18 @@ are rejected. Errors use `{"code":"...","message":"..."}` except dependency-stat
 ## Ordinary stops along a selected route
 
 `POST /api/v1/places/search-along-route` is reserved for the explicit
-`ADD_STOP_ALONG_ROUTE` intent. The request carries a route ID/revision, ordered waypoints and one
-E6 polyline per selected Valhalla leg. A missing route returns `route_required`; invalid, circular or
-obsolete contexts are never replaced with a global search. The response reports `mode=route_biased`,
-the route fingerprint, normalized Google results and an optional opaque pagination cursor.
+`ADD_STOP_ALONG_ROUTE` intent. The request carries a route ID/revision, ordered waypoints, one E6
+polyline per selected Valhalla leg, baseline/current durations and the cumulative added-time budget.
+A missing route returns `route_required`; obsolete contexts are never reused. The response reports
+`route_biased`, `route_time_filtered` or `global_specific`, the route fingerprint, normalized Google
+results and an optional opaque pagination cursor. Result fields distinguish marginal added time,
+total added time and the nullable time-budget outcome.
+
+Generic queries are Search Along Route candidates verified through full Valhalla waypoint routes;
+only eligible candidates are returned, ordered by marginal added seconds. Specific queries (and an
+ambiguous query explicitly submitted with `full_search=true`) may return over-budget or unverified
+results so that the route-preview confirmation is an informed override. Default bounded evaluation:
+10 candidates, 20 seconds total, up to two recovery segment calls, target of three eligible results.
 
 `POST /api/v1/places/search-along-route/resolve` resolves only a result retained in the same
 transient owner/session/query/route context. It returns text for the mapless selection flow and a
@@ -71,9 +79,13 @@ POST /api/v1/destinations/resolve
 GET /api/v1/destinations/metrics
 ```
 
-`suggest` accepts `query`, a Compass UUID-v4 `session_id`, monotonically increasing `revision`,
-language and optional location/bias context. It returns at most five normalized Google predictions
-without coordinates. `resolve` accepts a suggestion's session, revision, provider and
+`suggest` requires an explicit `intent` (`ORIGIN_SEARCH` or `DESTINATION_SEARCH`) and accepts
+`query`, a Compass UUID-v4 `session_id`, monotonically increasing `revision`, `operation`, language
+and optional location/bias context. `operation=autocomplete` returns at most five predictions while
+typing; `operation=text_search` performs the explicit full search and returns at most ten selected
+results. When a valid current location is present Compass orders known geodesic distances ascending,
+uses provider rank for ties and places unknown distances last. `resolve` accepts a suggestion's
+session, revision, provider and
 `provider_ref`; it returns a text-capable `selection` plus a separate `navigation_target` containing
 only WGS84 `location`, optional Place ID and the literal map label `Destinazione selezionata`.
 Errors distinguish `rate_limited`, `place_not_found`, `destination_unresolvable`, `stale_selection`,
@@ -156,6 +168,12 @@ fuel plan changes. Selected stops expose `expected_arrival_at` and `dwell_time_s
 `traffic_delay_state=unavailable` pairs with a null delay when no defensible separate live-delay
 estimate exists; the client must not turn that into zero delay.
 
+Route requests optionally accept `origin_heading_degrees` in `[0, 360)` together with
+`origin_heading_tolerance_degrees` in `[0, 180]`. Compass uses these fields only for a moving
+off-route recalculation; the Valhalla adapter adds `heading` and `heading_tolerance` to the origin
+location and never to the destination or intermediate stops. Supplying a tolerance without a
+heading is rejected. Ordinary route creation omits both fields.
+
 ## Route through ordinary intermediate waypoints
 
 `POST /api/v1/routes/with-intermediate-stops` accepts WGS84 departure, one to eight ordered ordinary
@@ -178,11 +196,12 @@ waypoint-route path as other Compass routes. The singular endpoint remains for o
 }
 ```
 
-The endpoint returns route costs; it does not decide the Android search corridor. During Phase 15,
-Android first calculates the direct route and compares its distance with the waypoint route. The
-accepted maximum added distance defaults to 30% of the direct route and can be overridden for the
-current stop-list search. Google suggestions receive only a route-derived rectangular restriction;
-the final eligibility decision is always the Valhalla road-distance comparison.
+The endpoint returns route costs; it does not decide the Android search corridor. Android first
+calculates the direct route and compares its duration with the waypoint route. The accepted maximum
+added driving time defaults to one third of the direct route duration and can be overridden in
+minutes for the current stop list. Search Along Route only biases Google results to the selected
+route; the final eligibility decision is the like-for-like Valhalla duration comparison after the
+user selects a result.
 
 When a current provider snapshot and native Valhalla overlay are both usable, `navigation` also
 contains `traffic_state=fresh`, `traffic_aware=true`, `traffic_observed_at` and

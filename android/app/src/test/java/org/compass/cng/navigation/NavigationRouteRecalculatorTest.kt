@@ -2,6 +2,7 @@ package org.compass.cng.navigation
 
 import java.time.OffsetDateTime
 import kotlinx.coroutines.test.runTest
+import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
@@ -43,14 +44,34 @@ class NavigationRouteRecalculatorTest {
 
         recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
         assertEquals(raw, repository.lastOrigin)
+        assertEquals(RouteOriginDirection(90.0, 45), repository.lastOriginDirection)
 
         recalculator.recalculate(state, RouteUpdateReason.TRAFFIC_REFRESH)
         assertEquals(snapped, repository.lastOrigin)
+        assertEquals(null, repository.lastOriginDirection)
         assertEquals(original.destination, repository.lastDestination)
 
         recalculator.recalculate(state, RouteUpdateReason.CONNECTIVITY_RECOVERY)
         assertEquals(snapped, repository.lastOrigin)
         assertEquals(original.destination, repository.lastDestination)
+    }
+
+    @Test
+    fun offRouteWithoutReliableMovementDoesNotConstrainDepartureHeading() = runTest {
+        val repository = RecordingRepository()
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val route = repository.route(origin, Coordinate(44.0, 11.0)).toNavigationRoute()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            rawLocation = NavigationLocation(origin, 5.0, 3.9, 270.0, 1_000),
+            navigationPosition = position(origin),
+        )
+
+        recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
+
+        assertEquals(null, repository.lastOriginDirection)
     }
 
     @Test
@@ -79,6 +100,7 @@ class NavigationRouteRecalculatorTest {
         val recalculated = recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
 
         assertEquals(intermediate, repository.lastIntermediateStop)
+        assertEquals(RouteOriginDirection(90.0, 45), repository.lastOriginDirection)
         assertEquals(listOf(intermediate), recalculated.intermediateStops.map { it.location })
         assertEquals(
             recalculated.drivingDurationSeconds,
@@ -221,6 +243,7 @@ class NavigationRouteRecalculatorTest {
         val state = NavigationState(
             phase = NavigationPhase.NAVIGATING,
             route = route,
+            rawLocation = NavigationLocation(origin, 5.0, 12.0, 135.0, 1_000),
             navigationPosition = position(origin),
             nextFuelStop = NavigationFuelStopProgress(stop, 9_000.0),
         )
@@ -230,6 +253,7 @@ class NavigationRouteRecalculatorTest {
         assertTrue(replacement.fuelStops.isEmpty())
         assertEquals(setOf("1001"), repository.lastExcludedIds)
         assertEquals(12.0, repository.lastMaximumDetourMinutes)
+        assertEquals(RouteOriginDirection(135.0, 45), repository.lastOriginDirection)
     }
 
     private fun fuelStop(sequence: Int, id: String, location: Coordinate) = NavigationFuelStop(
@@ -295,14 +319,17 @@ class NavigationRouteRecalculatorTest {
         var lastMaximumDetourMinutes: Double? = null
         var lastExcludedIds: Set<String>? = null
         var lastIntermediateStop: Coordinate? = null
+        var lastOriginDirection: RouteOriginDirection? = null
         var failNextItinerary: Boolean = false
 
         override suspend fun previewRoute(
             origin: Coordinate,
             destination: Coordinate,
+            originDirection: RouteOriginDirection?,
         ): RoutePreview {
             lastOrigin = origin
             lastDestination = destination
+            lastOriginDirection = originDirection
             return route(origin, destination)
         }
 
@@ -320,10 +347,12 @@ class NavigationRouteRecalculatorTest {
             origin: Coordinate,
             intermediateStop: Coordinate,
             destination: Coordinate,
+            originDirection: RouteOriginDirection?,
         ): RouteWithIntermediateStop {
             lastOrigin = origin
             lastIntermediateStop = intermediateStop
             lastDestination = destination
+            lastOriginDirection = originDirection
             val legs = listOf(
                 route(origin, intermediateStop),
                 route(intermediateStop, destination),
@@ -361,7 +390,9 @@ class NavigationRouteRecalculatorTest {
             origin: Coordinate,
             destination: Coordinate,
             mimitStationId: String,
+            originDirection: RouteOriginDirection?,
         ): RouteWithCngStop {
+            lastOriginDirection = originDirection
             val stop = SelectedCngStop(
                 mimitStationId = mimitStationId,
                 name = null,
@@ -396,6 +427,7 @@ class NavigationRouteRecalculatorTest {
             excludedMimitStationIds: Set<String>,
             estimatedRemainingGasolineRangeKm: Double?,
             reserveGasolineRangeKm: Double?,
+            originDirection: RouteOriginDirection?,
         ): PredictiveCngSuggestion {
             lastOrigin = origin
             lastDestination = destination
@@ -404,6 +436,7 @@ class NavigationRouteRecalculatorTest {
             lastReserveRangeKm = reserveCngRangeKm
             lastMaximumDetourMinutes = maximumDetourMinutes
             lastExcludedIds = excludedMimitStationIds
+            lastOriginDirection = originDirection
             return PredictiveCngSuggestion(
                 state = PredictiveSuggestionState.NOT_NEEDED,
                 departureAt = departureAt,
@@ -434,7 +467,9 @@ class NavigationRouteRecalculatorTest {
             effectiveCngRangeKm: Double,
             estimatedRemainingCngRangeKm: Double,
             reserveCngRangeKm: Double,
+            originDirection: RouteOriginDirection?,
         ): RouteWithCngItinerary {
+            lastOriginDirection = originDirection
             if (failNextItinerary) {
                 failNextItinerary = false
                 throw RoutePreviewException(RoutePreviewFailure.STATION_UNAVAILABLE)

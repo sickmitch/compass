@@ -5,10 +5,15 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
+import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.domain.RoutingRepository
+import org.compass.cng.domain.favorite.FavoritePlace
+import org.compass.cng.domain.favorite.InMemoryFavoritePlaceRepository
 import org.compass.cng.domain.geometry.Polyline6Encoder
 import org.compass.cng.domain.model.AlongRouteLeg
 import org.compass.cng.domain.model.CngPrice
@@ -70,6 +75,70 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
+    @Test
+    fun destinationSearchDebouncesOneLocalizedTextSearchBySixHundredMilliseconds() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 2, emptyList()),
+        )
+
+        viewModel.updatePlaceSearchQuery("farma")
+        runCurrent()
+        advanceTimeBy(599)
+        runCurrent()
+        assertEquals(0, repository.destinationSuggestCalls)
+
+        viewModel.updatePlaceSearchQuery("farmacia")
+        runCurrent()
+        advanceTimeBy(599)
+        runCurrent()
+        assertEquals(0, repository.destinationSuggestCalls)
+        advanceTimeBy(1)
+        runCurrent()
+
+        assertEquals(1, repository.destinationSuggestCalls)
+        assertEquals(
+            org.compass.cng.domain.model.DestinationSearchOperation.TEXT_SEARCH,
+            repository.lastDestinationSuggestRequest?.operation,
+        )
+    }
+
+    @Test
+    fun explicitSearchCancelsDelayedLocalizedSearchAndUsesTextSearchOnce() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 2, emptyList()),
+        )
+
+        viewModel.updatePlaceSearchQuery("farmacia")
+        runCurrent()
+        viewModel.searchDestinations()
+        runCurrent()
+        advanceTimeBy(600)
+        runCurrent()
+
+        assertEquals(1, repository.destinationSuggestCalls)
+        assertEquals(
+            org.compass.cng.domain.model.DestinationSearchOperation.TEXT_SEARCH,
+            repository.lastDestinationSuggestRequest?.operation,
+        )
+    }
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
 
@@ -243,33 +312,35 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun intermediateStopDefaultsToThirtyPercentAndUsesWaypointRouting() = runTest {
-        val direct = sampleRoute(distanceMeters = 100_000.0)
+    fun intermediateStopDefaultsToOneThirdOfDrivingTimeAndUsesWaypointRouting() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0, durationSeconds = 3_600.0)
         val stop = Coordinate(45.0, 10.0)
         val via = RouteWithIntermediateStop(
             stop = stop,
-            distanceMeters = 125_000.0,
-            durationSeconds = 4_000.0,
+            // Added distance deliberately exceeds the former 30 km gate: eligibility is now
+            // based only on the ten added driving minutes.
+            distanceMeters = 150_000.0,
+            durationSeconds = 4_200.0,
             legs = listOf(
                 sampleRoute(
                     origin = direct.origin,
                     destination = stop,
                     distanceMeters = 50_000.0,
-                    durationSeconds = 1_600.0,
+                    durationSeconds = 1_800.0,
                 ),
                 sampleRoute(
                     origin = stop,
                     destination = direct.destination,
-                    distanceMeters = 75_000.0,
+                    distanceMeters = 100_000.0,
                     durationSeconds = 2_400.0,
                 ),
             ),
             provider = "valhalla",
             navigation = direct.navigation.copy(
                 routeId = "route_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                drivingDurationSeconds = 4_000.0,
-                remainingDrivingDurationSeconds = 4_000.0,
-                totalTripDurationSeconds = 4_000.0,
+                drivingDurationSeconds = 4_200.0,
+                remainingDrivingDurationSeconds = 4_200.0,
+                totalTripDurationSeconds = 4_200.0,
             ),
         )
         val repository = FakeRoutingRepository(
@@ -280,7 +351,7 @@ class RoutePlannerViewModelTest {
         viewModel.openRouteConfiguration()
 
         viewModel.addIntermediateStop()
-        assertEquals("30,0", viewModel.uiState.value.intermediateStopMaximumDeviationKmInput)
+        assertEquals("20,0", viewModel.uiState.value.intermediateStopMaximumAddedMinutesInput)
         viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
         viewModel.updateMapPickerCoordinate(stop)
         viewModel.confirmMapPointPicker()
@@ -291,6 +362,55 @@ class RoutePlannerViewModelTest {
         assertEquals(via.asMultiple(), viewModel.uiState.value.intermediateStopsRoute)
         assertEquals(listOf(stop), viewModel.uiState.value.plannedIntermediateStops.map { it.location })
         assertFalse(viewModel.uiState.value.routeInputsDirty)
+    }
+
+    @Test
+    fun intermediateStopCustomAddedTimeLimitOverridesDefault() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0, durationSeconds = 3_600.0)
+        val stop = Coordinate(45.0, 10.0)
+        val via = RouteWithIntermediateStop(
+            stop = stop,
+            distanceMeters = 101_000.0,
+            durationSeconds = 3_960.0,
+            legs = listOf(
+                sampleRoute(
+                    origin = direct.origin,
+                    destination = stop,
+                    distanceMeters = 50_000.0,
+                    durationSeconds = 1_980.0,
+                ),
+                sampleRoute(
+                    origin = stop,
+                    destination = direct.destination,
+                    distanceMeters = 51_000.0,
+                    durationSeconds = 1_980.0,
+                ),
+            ),
+            provider = "valhalla",
+            navigation = direct.navigation.copy(
+                routeId = "route_custom_added_time_limit",
+                drivingDurationSeconds = 3_960.0,
+                remainingDrivingDurationSeconds = 3_960.0,
+                totalTripDurationSeconds = 3_960.0,
+            ),
+        )
+        val viewModel = RoutePlannerViewModel(
+            FakeRoutingRepository(
+                baseResult = Result.success(direct),
+                intermediateRouteResult = Result.success(via),
+            ),
+        )
+
+        viewModel.openRouteConfiguration()
+        viewModel.addIntermediateStop()
+        viewModel.updateIntermediateStopMaximumAddedMinutes("5")
+        viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.updateMapPickerCoordinate(stop)
+        viewModel.confirmMapPointPicker()
+
+        assertTrue(viewModel.uiState.value.plannedIntermediateStops.isEmpty())
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("6,0 min"))
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("5,0 min"))
     }
 
     @Test
@@ -342,6 +462,145 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
+    fun recalculatingEndpointsClearsCommittedStopStateAtomically() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0, durationSeconds = 3_600.0)
+        val stop = Coordinate(45.4, 11.0)
+        val via = RouteWithIntermediateStop(
+            stop = stop,
+            distanceMeters = 105_000.0,
+            durationSeconds = 3_900.0,
+            legs = listOf(
+                sampleRoute(origin = direct.origin, destination = stop),
+                sampleRoute(origin = stop, destination = direct.destination),
+            ),
+            provider = "valhalla",
+            navigation = direct.navigation,
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            intermediateRouteResult = Result.success(via),
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        viewModel.openRouteConfiguration()
+        viewModel.addIntermediateStop()
+        viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.updateMapPickerCoordinate(stop)
+        viewModel.confirmMapPointPicker()
+        viewModel.chooseIntermediateStop()
+        assertTrue(viewModel.uiState.value.intermediateStopEnabled)
+        assertEquals(1, viewModel.uiState.value.plannedIntermediateStops.size)
+
+        viewModel.openRouteConfiguration()
+        viewModel.applyRouteInputs()
+
+        val recalculated = viewModel.uiState.value
+        assertFalse(recalculated.intermediateStopEnabled)
+        assertTrue(recalculated.plannedIntermediateStops.isEmpty())
+        assertNull(recalculated.intermediateStopsRoute)
+        assertEquals("", recalculated.intermediateStopLatitudeInput)
+        assertEquals("", recalculated.intermediateStopLongitudeInput)
+    }
+
+    @Test
+    fun favoritePlaceCanBeSavedRenamedSelectedAndDeletedWithoutSearchCalls() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val favoriteRepository = InMemoryFavoritePlaceRepository()
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            favoritePlaceRepository = favoriteRepository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        val home = Coordinate(45.4384, 10.9916)
+        viewModel.openRouteConfiguration()
+        viewModel.openMapPointPicker(RouteEndpoint.DESTINATION)
+        viewModel.updateMapPickerCoordinate(home)
+        viewModel.confirmMapPointPicker()
+
+        viewModel.openFavoritePlaces(RouteEndpoint.DESTINATION)
+        viewModel.updateFavoritePlaceName("Casa")
+        viewModel.saveFavoritePlace()
+
+        val placeId = viewModel.uiState.value.favoritePlaces.single().id
+        assertEquals("Casa", favoriteRepository.load().single().name)
+        viewModel.editFavoritePlace(placeId)
+        viewModel.updateFavoritePlaceName("Abitazione")
+        viewModel.saveFavoritePlace()
+        viewModel.selectFavoritePlace(placeId)
+
+        val selected = viewModel.uiState.value
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, selected.stage)
+        assertEquals(RouteLocationMethod.FAVORITES, selected.destinationLocationMethod)
+        assertEquals("Abitazione", selected.destinationDisplayName)
+        assertEquals("45.438400", selected.destinationLatitudeInput)
+        assertEquals("10.991600", selected.destinationLongitudeInput)
+        assertEquals(0, repository.destinationSuggestCalls)
+        assertEquals(0, repository.destinationResolveCalls)
+
+        viewModel.openFavoritePlaces(RouteEndpoint.DESTINATION)
+        viewModel.deleteFavoritePlace(placeId)
+        assertTrue(viewModel.uiState.value.favoritePlaces.isEmpty())
+        assertTrue(favoriteRepository.load().isEmpty())
+    }
+
+    @Test
+    fun favoriteRepositorySurvivesPlannerRecreation() = runTest {
+        val favoriteRepository = InMemoryFavoritePlaceRepository(
+            listOf(FavoritePlace("home", "Casa", Coordinate(45.4384, 10.9916))),
+        )
+        val first = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(Result.success(sampleRoute())),
+            favoritePlaceRepository = favoriteRepository,
+        )
+        val recreated = RoutePlannerViewModel(
+            routingRepository = FakeRoutingRepository(Result.success(sampleRoute())),
+            favoritePlaceRepository = favoriteRepository,
+        )
+
+        assertEquals(first.uiState.value.favoritePlaces, recreated.uiState.value.favoritePlaces)
+        assertEquals("Casa", recreated.uiState.value.favoritePlaces.single().name)
+    }
+
+    @Test
+    fun favoriteIntermediateStopUsesExistingPreviewAndExplicitConfirmation() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0)
+        val stop = Coordinate(45.45, 10.99)
+        val via = RouteWithIntermediateStop(
+            stop = stop,
+            distanceMeters = 110_000.0,
+            durationSeconds = 4_000.0,
+            legs = listOf(
+                sampleRoute(origin = direct.origin, destination = stop),
+                sampleRoute(origin = stop, destination = direct.destination),
+            ),
+            provider = "valhalla",
+            navigation = direct.navigation,
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            intermediateRouteResult = Result.success(via),
+        )
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(
+                listOf(FavoritePlace("pharmacy", "Farmacia", stop)),
+            ),
+        )
+
+        viewModel.addIntermediateStop()
+        viewModel.openFavoritePlaces(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.selectFavoritePlace("pharmacy")
+
+        assertEquals(PlannerStage.INTERMEDIATE_STOP_PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(listOf(stop), repository.lastIntermediateStops)
+        assertTrue(viewModel.uiState.value.plannedIntermediateStops.isEmpty())
+        viewModel.chooseIntermediateStop()
+        assertEquals(listOf(stop), viewModel.uiState.value.plannedIntermediateStops.map { it.location })
+        assertEquals("Farmacia", viewModel.uiState.value.plannedIntermediateStops.single().privateDisplayName)
+        assertEquals(direct.destination, viewModel.uiState.value.baseRoute?.destination)
+    }
+
+    @Test
     fun intermediateStopSearchUsesDedicatedAlongRouteIntent() = runTest {
         val repository = FakeRoutingRepository(
             baseResult = Result.success(sampleRoute(distanceMeters = 100_000.0)),
@@ -358,7 +617,7 @@ class RoutePlannerViewModelTest {
         repository.alongRouteSearchResult = Result.success(
             AlongRouteSearchResults(
                 sessionId = session,
-                revision = 1,
+                revision = 2,
                 routeId = route.navigation.routeId,
                 routeRevision = alongRouteRevision(
                     route.navigation.routeId,
@@ -382,6 +641,15 @@ class RoutePlannerViewModelTest {
         assertEquals(route.origin, context.origin)
         assertEquals(route.destination, context.finalDestination)
         assertEquals(1, context.legs.size)
+        assertEquals(route.durationSeconds, context.baselineDurationSeconds)
+        assertEquals(route.durationSeconds, context.currentDurationSeconds)
+        assertEquals(
+            viewModel.uiState.value.intermediateStopMaximumAddedMinutesInput
+                .replace(',', '.')
+                .toDouble() * 60.0,
+            requireNotNull(context.maximumTotalAddedDurationSeconds),
+            0.001,
+        )
         assertEquals(0, repository.destinationSuggestCalls)
     }
 
@@ -451,11 +719,13 @@ class RoutePlannerViewModelTest {
         )
         repository.alongRouteSearchResult = Result.success(
             AlongRouteSearchResults(
-                session, 1, direct.navigation.routeId, routeRevision, "b".repeat(64),
+                session, 2, direct.navigation.routeId, routeRevision, "b".repeat(64),
                 "route_biased", "provider bias", null, listOf(suggestion),
             ),
         )
-        repository.alongRouteResolvedResult = Result.success(resolved.copy(sessionId = session))
+        repository.alongRouteResolvedResult = Result.success(
+            resolved.copy(sessionId = session, revision = 2),
+        )
         viewModel.updatePlaceSearchQuery("Duomo di Milano")
         viewModel.searchDestinations()
 
@@ -480,13 +750,13 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun intermediateStopOverExactRoadDeviationIsRejected() = runTest {
-        val direct = sampleRoute(distanceMeters = 100_000.0)
+    fun intermediateStopOverExactAddedDrivingTimeIsRejected() = runTest {
+        val direct = sampleRoute(distanceMeters = 100_000.0, durationSeconds = 3_600.0)
         val stop = Coordinate(45.0, 10.0)
         val via = RouteWithIntermediateStop(
             stop = stop,
             distanceMeters = 140_000.0,
-            durationSeconds = 4_000.0,
+            durationSeconds = 5_000.0,
             legs = listOf(
                 sampleRoute(
                     origin = direct.origin,
@@ -502,9 +772,9 @@ class RoutePlannerViewModelTest {
             provider = "valhalla",
             navigation = direct.navigation.copy(
                 routeId = "route_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                drivingDurationSeconds = 4_000.0,
-                remainingDrivingDurationSeconds = 4_000.0,
-                totalTripDurationSeconds = 4_000.0,
+                drivingDurationSeconds = 5_000.0,
+                remainingDrivingDurationSeconds = 5_000.0,
+                totalTripDurationSeconds = 5_000.0,
             ),
         )
         val viewModel = RoutePlannerViewModel(
@@ -521,8 +791,8 @@ class RoutePlannerViewModelTest {
 
         assertNull(viewModel.uiState.value.intermediateStopsRoute)
         assertTrue(viewModel.uiState.value.plannedIntermediateStops.isEmpty())
-        assertTrue(viewModel.uiState.value.message.orEmpty().contains("40,0 km"))
-        assertTrue(viewModel.uiState.value.message.orEmpty().contains("30,0 km"))
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("23,3 min"))
+        assertTrue(viewModel.uiState.value.message.orEmpty().contains("20,0 min"))
     }
 
     @Test
@@ -807,9 +1077,11 @@ class RoutePlannerViewModelTest {
         viewModel.openDestinationSearch()
         val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
         repository.destinationSuggestionsResult = Result.success(
-            DestinationSuggestions(session, 1, listOf(suggestion)),
+            DestinationSuggestions(session, 2, listOf(suggestion)),
         )
-        repository.resolvedDestinationResult = Result.success(resolved.copy(sessionId = session))
+        repository.resolvedDestinationResult = Result.success(
+            resolved.copy(sessionId = session, revision = 2),
+        )
         viewModel.updatePlaceSearchQuery("Duomo di Milano")
         viewModel.searchDestinations()
 
@@ -837,10 +1109,10 @@ class RoutePlannerViewModelTest {
         viewModel.openDestinationSearch()
         val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
         repository.destinationSuggestionsResult = Result.success(
-            DestinationSuggestions(session, 1, listOf(suggestion)),
+            DestinationSuggestions(session, 2, listOf(suggestion)),
         )
         repository.resolvedDestinationResult = Result.success(
-            resolvedDestination(suggestion).copy(sessionId = session),
+            resolvedDestination(suggestion).copy(sessionId = session, revision = 2),
         )
         viewModel.updatePlaceSearchQuery("Duomo di Milano")
         viewModel.searchDestinations()
@@ -886,7 +1158,7 @@ class RoutePlannerViewModelTest {
         viewModel.openDestinationSearch()
         val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
         repository.destinationSuggestionsResult = Result.success(
-            DestinationSuggestions(session, 1, emptyList()),
+            DestinationSuggestions(session, 2, emptyList()),
         )
 
         viewModel.updatePlaceSearchQuery("Roma")
@@ -920,7 +1192,7 @@ class RoutePlannerViewModelTest {
         viewModel.openDestinationSearch()
         val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
         repository.destinationSuggestionsResult = Result.success(
-            DestinationSuggestions(session, 1, emptyList()),
+            DestinationSuggestions(session, 2, emptyList()),
         )
 
         viewModel.updatePlaceSearchQuery("farmacia")
@@ -935,6 +1207,72 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
+    fun destinationSearchUsesTheSelectedOriginForBiasAndDistanceContext() = runTest {
+        val sanGiovanniLupatoto = Coordinate(45.37913, 11.043577)
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.openMapPointPicker(RouteEndpoint.ORIGIN)
+        viewModel.updateMapPickerCoordinate(sanGiovanniLupatoto)
+        viewModel.confirmMapPointPicker()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 2, emptyList()),
+        )
+
+        viewModel.updatePlaceSearchQuery("farmacia")
+        viewModel.searchDestinations()
+
+        assertEquals(
+            sanGiovanniLupatoto,
+            repository.lastDestinationSuggestRequest?.context?.location,
+        )
+        assertEquals(
+            25_000.0,
+            requireNotNull(repository.lastDestinationSuggestRequest?.context?.biasRadiusMeters),
+            0.0,
+        )
+    }
+
+    @Test
+    fun settledCategorySearchUsesSelectedOriginWithoutExplicitSubmit() = runTest {
+        val sanGiovanniLupatoto = Coordinate(45.37913, 11.043577)
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            serverConnectionRepository = configuredServerRepository(),
+            startInFollowMode = true,
+        )
+        viewModel.openRouteConfiguration()
+        viewModel.openMapPointPicker(RouteEndpoint.ORIGIN)
+        viewModel.updateMapPickerCoordinate(sanGiovanniLupatoto)
+        viewModel.confirmMapPointPicker()
+        viewModel.openDestinationSearch()
+        val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
+        repository.destinationSuggestionsResult = Result.success(
+            DestinationSuggestions(session, 1, emptyList()),
+        )
+
+        viewModel.updatePlaceSearchQuery("farmacia")
+        runCurrent()
+        advanceTimeBy(600)
+        runCurrent()
+
+        val request = requireNotNull(repository.lastDestinationSuggestRequest)
+        assertEquals(
+            org.compass.cng.domain.model.DestinationSearchOperation.TEXT_SEARCH,
+            request.operation,
+        )
+        assertEquals(sanGiovanniLupatoto, request.context.location)
+        assertEquals(25_000.0, requireNotNull(request.context.biasRadiusMeters), 0.0)
+    }
+
+    @Test
     fun mapStagesReplaceGoogleAddressWithNeutralDestinationLabel() = runTest {
         val suggestion = destinationSuggestion()
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
@@ -943,10 +1281,10 @@ class RoutePlannerViewModelTest {
         viewModel.openDestinationSearch()
         val session = requireNotNull(viewModel.uiState.value.destinationSearchSessionId)
         repository.destinationSuggestionsResult = Result.success(
-            DestinationSuggestions(session, 1, listOf(suggestion)),
+            DestinationSuggestions(session, 2, listOf(suggestion)),
         )
         repository.resolvedDestinationResult = Result.success(
-            resolvedDestination(suggestion).copy(sessionId = session),
+            resolvedDestination(suggestion).copy(sessionId = session, revision = 2),
         )
         viewModel.updateEffectiveRange("240")
         viewModel.updateReserveRange("35")
@@ -1595,6 +1933,7 @@ class RoutePlannerViewModelTest {
         override suspend fun previewRoute(
             origin: Coordinate,
             destination: Coordinate,
+            originDirection: RouteOriginDirection?,
         ): RoutePreview {
             previewCalls += 1
             lastPreviewOrigin = origin
@@ -1615,6 +1954,7 @@ class RoutePlannerViewModelTest {
             origin: Coordinate,
             intermediateStop: Coordinate,
             destination: Coordinate,
+            originDirection: RouteOriginDirection?,
         ): RouteWithIntermediateStop {
             intermediateRouteCalls += 1
             lastIntermediateStop = intermediateStop
@@ -1625,6 +1965,7 @@ class RoutePlannerViewModelTest {
             origin: Coordinate,
             intermediateStops: List<Coordinate>,
             destination: Coordinate,
+            originDirection: RouteOriginDirection?,
         ): RouteWithIntermediateStops {
             lastIntermediateStops = intermediateStops
             lastIntermediateStop = intermediateStops.singleOrNull()
@@ -1665,6 +2006,7 @@ class RoutePlannerViewModelTest {
             origin: Coordinate,
             destination: Coordinate,
             mimitStationId: String,
+            originDirection: RouteOriginDirection?,
         ): RouteWithCngStop {
             lastSelectedOrigin = origin
             lastSelectedDestination = destination
@@ -1683,6 +2025,7 @@ class RoutePlannerViewModelTest {
             excludedMimitStationIds: Set<String>,
             estimatedRemainingGasolineRangeKm: Double?,
             reserveGasolineRangeKm: Double?,
+            originDirection: RouteOriginDirection?,
         ): PredictiveCngSuggestion {
             predictiveCalls += 1
             lastPredictiveOrigin = origin
@@ -1716,6 +2059,7 @@ class RoutePlannerViewModelTest {
             effectiveCngRangeKm: Double,
             estimatedRemainingCngRangeKm: Double,
             reserveCngRangeKm: Double,
+            originDirection: RouteOriginDirection?,
         ): RouteWithCngItinerary {
             lastItineraryOrigin = origin
             lastItineraryDestination = destination

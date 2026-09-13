@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from compass.routing.domain import (
     BaseRoute,
     Coordinate,
     NoRouteError,
+    RouteOriginDirection,
     RouteRequest,
     RoutingProvider,
     RoutingProviderError,
@@ -62,6 +63,21 @@ class BaseRouteRequest(StrictModel):
         pattern=r"^[A-Za-z]{2}(-[A-Za-z]{2})?$",
         description="BCP 47 language tag used for maneuver instructions.",
     )
+    origin_heading_degrees: float | None = Field(
+        default=None,
+        ge=0,
+        lt=360,
+        description=(
+            "Optional observed travel heading at the origin. Used for a moving "
+            "off-route recalculation so the new route departs in the current direction."
+        ),
+    )
+    origin_heading_tolerance_degrees: int | None = Field(
+        default=None,
+        ge=0,
+        le=180,
+        description="Maximum angular difference accepted at the routed origin.",
+    )
 
     @field_validator("departure_at")
     @classmethod
@@ -69,6 +85,28 @@ class BaseRouteRequest(StrictModel):
         if value is not None and (value.tzinfo is None or value.utcoffset() is None):
             raise ValueError("departure_at must include a UTC offset")
         return value
+
+    @model_validator(mode="after")
+    def validate_origin_direction(self) -> "BaseRouteRequest":
+        if (
+            self.origin_heading_tolerance_degrees is not None
+            and self.origin_heading_degrees is None
+        ):
+            raise ValueError("origin heading tolerance requires an origin heading")
+        return self
+
+
+def route_origin_direction(request: BaseRouteRequest) -> RouteOriginDirection | None:
+    if request.origin_heading_degrees is None:
+        return None
+    return RouteOriginDirection(
+        heading_degrees=request.origin_heading_degrees,
+        heading_tolerance_degrees=(
+            request.origin_heading_tolerance_degrees
+            if request.origin_heading_tolerance_degrees is not None
+            else 45
+        ),
+    )
 
 
 class CorridorCandidatesRequest(BaseRouteRequest):
@@ -367,6 +405,7 @@ async def base_route(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     try:
         route = await provider.route(domain_request)
@@ -424,6 +463,7 @@ async def route_with_intermediate_stop(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     try:
         route = await provider.route_with_waypoints(domain_request)
@@ -527,6 +567,7 @@ async def route_with_intermediate_stops(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     try:
         route = await provider.route_with_waypoints(domain_request)
@@ -636,6 +677,7 @@ async def corridor_candidates(
             costing=request.costing,
             language=request.language or settings.valhalla_route_language,
             departure_at=request.departure_at,
+            origin_direction=route_origin_direction(request),
         ),
         effective_cng_range_km=request.effective_cng_range_km,
     )
@@ -704,6 +746,7 @@ async def detour_candidates(
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
+        origin_direction=route_origin_direction(request),
     )
     domain_request = NetworkDetourRequest(
         corridor_request=CorridorCandidateRequest(
