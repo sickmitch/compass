@@ -601,7 +601,7 @@ private fun CngGuidanceCard(
                 }
             ),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = NAVIGATION_GLASS_PANEL_ALPHA),
         tonalElevation = 8.dp,
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
@@ -793,16 +793,8 @@ private fun VoiceGuidanceToggle(
                 }
             },
         shape = CircleShape,
-        color = if (enabled) {
-            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.97f)
-        } else {
-            MaterialTheme.colorScheme.primary
-        },
-        contentColor = if (enabled) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onPrimary
-        },
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        contentColor = MaterialTheme.colorScheme.primary,
         tonalElevation = 9.dp,
     ) {
         Box(
@@ -824,38 +816,63 @@ private fun VoiceGuidanceToggle(
 
 @Composable
 private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.testTag("navigation_maneuver_card"),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.80f),
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PrimaryManeuverIcon(
-                    visual = ui.maneuverVisual,
-                    roundaboutExitCount = ui.roundaboutExitCount,
-                )
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = ui.distanceToManeuver,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
+    Column(modifier = modifier) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("navigation_maneuver_card"),
+            shape = MaterialTheme.shapes.medium,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(
+                    alpha = NAVIGATION_GLASS_PANEL_ALPHA,
+                ),
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PrimaryManeuverIcon(
+                        visual = ui.maneuverVisual,
+                        roundaboutExitCount = ui.roundaboutExitCount,
                     )
-                    Text(
-                        text = ui.primaryInstruction,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    ui.targetRoad?.let { road ->
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = road,
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = ui.distanceToManeuver,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = ui.primaryInstruction,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        ui.targetRoad?.let { road ->
+                            Text(
+                                text = road,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                ui.followingInstruction?.let { following ->
+                    HorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ui.followingManeuverVisual?.let { visual ->
+                            ManeuverIcon(
+                                visual = visual,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(modifier = Modifier.width(7.dp))
+                        }
+                        Text(
+                            text = "Poi · $following",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -863,34 +880,19 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
                     }
                 }
             }
-            ui.junctionSign?.let { sign ->
-                JunctionSignPanel(
-                    sign = sign,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-            }
-            ui.followingInstruction?.let { following ->
-                HorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ui.followingManeuverVisual?.let { visual ->
-                        ManeuverIcon(
-                            visual = visual,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Spacer(modifier = Modifier.width(7.dp))
-                    }
-                    Text(
-                        text = "Poi · $following",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+        }
+        ui.junctionSign?.let { sign ->
+            JunctionSignPanel(
+                sign = sign,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .padding(top = 8.dp, end = 12.dp),
+            )
         }
     }
 }
+
+internal const val NAVIGATION_GLASS_PANEL_ALPHA = 0.70f
 
 internal fun navigationLeftControlBottomPadding(tripSummaryVisible: Boolean) =
     if (tripSummaryVisible) 0.dp else 44.dp
@@ -956,39 +958,34 @@ private fun JunctionSignPanel(
         sign.exitName,
         sign.toward?.let { "verso $it" },
     ).joinToString(" · ")
-    Box(
-        modifier = modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
+    Surface(
+        modifier = modifier.testTag("navigation_junction_sign"),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     ) {
-        Surface(
-            modifier = Modifier.testTag("navigation_junction_sign"),
-            shape = MaterialTheme.shapes.small,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                if (heading.isNotBlank()) {
-                    Text(
-                        text = heading,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (destination.isNotBlank()) {
-                    Text(
-                        text = destination,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+            if (heading.isNotBlank()) {
+                Text(
+                    text = heading,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (destination.isNotBlank()) {
+                Text(
+                    text = destination,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

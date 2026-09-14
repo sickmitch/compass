@@ -1632,20 +1632,15 @@ private fun NavigationPreviewContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (route.fuelStops.isNotEmpty()) {
+                    if (
+                        route.fuelStops.isNotEmpty() &&
+                        state.routeSource == NavigationRouteSource.CACHE
+                    ) {
                         Text(
-                            "${route.fuelStops.size} soste CNG · " +
-                                "${formatDuration(route.timing.totalRefuelingDwellSeconds)} " +
-                                "di rifornimento",
-                            style = MaterialTheme.typography.bodyMedium,
+                            "Prezzi e orari CNG potrebbero non essere aggiornati.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.compassSemanticColors.onWarningContainer,
                         )
-                        if (state.routeSource == NavigationRouteSource.CACHE) {
-                            Text(
-                                "Prezzi e orari CNG potrebbero non essere aggiornati.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.compassSemanticColors.onWarningContainer,
-                            )
-                        }
                     }
                     if (route.intermediateStops.isNotEmpty()) {
                         Text(

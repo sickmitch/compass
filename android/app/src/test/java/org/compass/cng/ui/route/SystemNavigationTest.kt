@@ -33,4 +33,9 @@ class SystemNavigationTest {
         assertEquals(0.dp, navigationLeftControlBottomPadding(tripSummaryVisible = true))
         assertEquals(44.dp, navigationLeftControlBottomPadding(tripSummaryVisible = false))
     }
+
+    @Test
+    fun navigationCardsShareTheMoreTransparentGlassOpacity() {
+        assertEquals(0.70f, NAVIGATION_GLASS_PANEL_ALPHA)
+    }
 }
