@@ -3,6 +3,7 @@ package org.compass.cng.ui.map
 import org.compass.cng.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CompassMapAppearanceTest {
@@ -59,5 +60,13 @@ class CompassMapAppearanceTest {
         assertEquals(R.drawable.ic_navigation_vehicle, day.navigationPuckDrawableRes())
         assertEquals(R.drawable.ic_navigation_vehicle_night, night.navigationPuckDrawableRes())
         assertNotEquals(day.navigationPuckDrawableRes(), night.navigationPuckDrawableRes())
+    }
+
+    @Test
+    fun activeNavigationRouteUsesHighVisibilityLineAndDirectionalChevrons() {
+        assertEquals(0xFF79FFA8.toInt(), NAVIGATION_REMAINING_ROUTE_COLOR)
+        assertTrue(NAVIGATION_REMAINING_ROUTE_WIDTH > 7f)
+        assertTrue(NAVIGATION_ROUTE_CHEVRON_SPACING > 0f)
+        assertTrue(NAVIGATION_ROUTE_CHEVRON_SCALE > 0f)
     }
 }

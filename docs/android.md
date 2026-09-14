@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.11` (`versionCode=57`).
+Android version is `0.28.12` (`versionCode=58`).
 
 The global Options screen persists a system/light/dark theme choice and the default voice-guidance
 state. It reuses the existing private favourites and encrypted server-connection stores, and loads
@@ -108,6 +108,12 @@ A generic stop selected manually on the map is always evaluated by Valhalla and 
 atomic insertion preview even when its added driving time exceeds the configured limit; the preview
 shows a warning instead of rejecting the stop. Search/POI eligibility continues to use its existing
 time-budget policy, so this exception is limited to deliberate map selection.
+
+Active navigation now owns an immersive status-bar policy and restores the system bar on exit. Its
+maneuver card uses an 80% surface opacity, the left voice/options controls align with the map
+controls while the trip panel is expanded, and the remaining route is rendered as a wider,
+high-visibility light-green line with repeated dark-blue directional chevrons. Route previews and
+planning-map line styles remain unchanged.
 
 Destination search uses Compass `POST /api/v1/destinations/suggest` after one configurable 600 ms
 trailing-edge debounce and `POST /api/v1/destinations/resolve` only after selection. Both a settled

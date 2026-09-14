@@ -1,5 +1,8 @@
 package org.compass.cng.ui.route
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
@@ -76,6 +79,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import org.compass.cng.BuildConfig
 import org.compass.cng.navigation.GpsStatus
@@ -199,8 +205,24 @@ internal fun ActiveNavigationScreen(
     val navigationView = LocalView.current
     DisposableEffect(navigationView) {
         val wasKeepingScreenOn = navigationView.keepScreenOn
+        val window = navigationView.context.findActivity()?.window
+        val insetsController = window?.let {
+            WindowCompat.getInsetsController(it, navigationView)
+        }
+        val previousSystemBarsBehavior = insetsController?.systemBarsBehavior
         navigationView.keepScreenOn = true
-        onDispose { navigationView.keepScreenOn = wasKeepingScreenOn }
+        insetsController?.apply {
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.statusBars())
+        }
+        onDispose {
+            navigationView.keepScreenOn = wasKeepingScreenOn
+            insetsController?.apply {
+                show(WindowInsetsCompat.Type.statusBars())
+                previousSystemBarsBehavior?.let { systemBarsBehavior = it }
+            }
+        }
     }
     LaunchedEffect(Unit) {
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
@@ -445,21 +467,29 @@ internal fun ActiveNavigationScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
+                verticalAlignment = if (showTripSummary) {
+                    Alignment.CenterVertically
+                } else {
+                    Alignment.Bottom
+                },
             ) {
                 VoiceGuidanceToggle(
                     enabled = state.voiceGuidanceEnabled,
                     onToggle = {
                         onVoiceGuidanceEnabledChange(!state.voiceGuidanceEnabled)
                     },
-                    modifier = Modifier.padding(bottom = 44.dp),
+                    modifier = Modifier.padding(
+                        bottom = navigationLeftControlBottomPadding(showTripSummary),
+                    ),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 MapIconControlButton(
                     testTag = "navigation_options",
                     contentDescription = "Opzioni",
                     onClick = onOpenOptions,
-                    modifier = Modifier.padding(bottom = 44.dp),
+                    modifier = Modifier.padding(
+                        bottom = navigationLeftControlBottomPadding(showTripSummary),
+                    ),
                 ) {
                     Icon(Icons.Rounded.Settings, contentDescription = null)
                 }
@@ -798,7 +828,7 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
         modifier = modifier.testTag("navigation_maneuver_card"),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.80f),
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
@@ -860,6 +890,15 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
             }
         }
     }
+}
+
+internal fun navigationLeftControlBottomPadding(tripSummaryVisible: Boolean) =
+    if (tripSummaryVisible) 0.dp else 44.dp
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable

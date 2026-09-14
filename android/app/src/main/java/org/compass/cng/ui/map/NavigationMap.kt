@@ -12,6 +12,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import org.compass.cng.R
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraController
@@ -39,9 +40,11 @@ import org.maplibre.android.style.expressions.Expression.zoom
 import org.maplibre.android.style.layers.Property.LINE_CAP_ROUND
 import org.maplibre.android.style.layers.Property.LINE_JOIN_ROUND
 import org.maplibre.android.style.layers.Property.ICON_ANCHOR_CENTER
+import org.maplibre.android.style.layers.Property.ICON_PITCH_ALIGNMENT_MAP
 import org.maplibre.android.style.layers.Property.ICON_PITCH_ALIGNMENT_VIEWPORT
 import org.maplibre.android.style.layers.Property.ICON_ROTATION_ALIGNMENT_MAP
 import org.maplibre.android.style.layers.Property.ICON_ROTATION_ALIGNMENT_VIEWPORT
+import org.maplibre.android.style.layers.Property.SYMBOL_PLACEMENT_LINE
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
@@ -54,10 +57,13 @@ import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.iconAnchor
 import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
 import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.iconKeepUpright
 import org.maplibre.android.style.layers.PropertyFactory.iconPitchAlignment
 import org.maplibre.android.style.layers.PropertyFactory.iconRotate
 import org.maplibre.android.style.layers.PropertyFactory.iconRotationAlignment
 import org.maplibre.android.style.layers.PropertyFactory.iconSize
+import org.maplibre.android.style.layers.PropertyFactory.symbolPlacement
+import org.maplibre.android.style.layers.PropertyFactory.symbolSpacing
 import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.textColor
 import org.maplibre.android.style.layers.PropertyFactory.textField
@@ -184,8 +190,8 @@ fun NavigationMap(
                 val firstMapLabelLayerId = style.layers.firstOrNull { it is SymbolLayer }?.id
                 style.addSource(GeoJsonSource(REMAINING_SOURCE, lineFeature(remainingPoints)))
                 val remainingLayer = LineLayer(REMAINING_LAYER, REMAINING_SOURCE).withProperties(
-                        lineColor(appearance.palette.route),
-                        lineWidth(7f),
+                        lineColor(NAVIGATION_REMAINING_ROUTE_COLOR),
+                        lineWidth(NAVIGATION_REMAINING_ROUTE_WIDTH),
                         lineCap(LINE_CAP_ROUND),
                         lineJoin(LINE_JOIN_ROUND),
                     )
@@ -193,6 +199,31 @@ fun NavigationMap(
                     style.addLayer(remainingLayer)
                 } else {
                     style.addLayerBelow(remainingLayer, firstMapLabelLayerId)
+                }
+                style.addImage(
+                    NAVIGATION_ROUTE_CHEVRON_IMAGE,
+                    requireNotNull(
+                        mapView.context.getDrawable(R.drawable.ic_route_direction_chevron),
+                    ),
+                )
+                val remainingDirectionLayer = SymbolLayer(
+                    REMAINING_DIRECTION_LAYER,
+                    REMAINING_SOURCE,
+                ).withProperties(
+                    symbolPlacement(SYMBOL_PLACEMENT_LINE),
+                    symbolSpacing(NAVIGATION_ROUTE_CHEVRON_SPACING),
+                    iconImage(NAVIGATION_ROUTE_CHEVRON_IMAGE),
+                    iconSize(NAVIGATION_ROUTE_CHEVRON_SCALE),
+                    iconPitchAlignment(ICON_PITCH_ALIGNMENT_MAP),
+                    iconRotationAlignment(ICON_ROTATION_ALIGNMENT_MAP),
+                    iconKeepUpright(false),
+                    iconAllowOverlap(true),
+                    iconIgnorePlacement(true),
+                )
+                if (firstMapLabelLayerId == null) {
+                    style.addLayer(remainingDirectionLayer)
+                } else {
+                    style.addLayerBelow(remainingDirectionLayer, firstMapLabelLayerId)
                 }
                 style.addSource(
                     GeoJsonSource(
@@ -625,12 +656,14 @@ private fun lineFeature(points: List<Point>): Feature {
 
 private const val REMAINING_SOURCE = "navigation-remaining-source"
 private const val REMAINING_LAYER = "navigation-remaining-layer"
+private const val REMAINING_DIRECTION_LAYER = "navigation-remaining-direction-layer"
 private const val TRAVELLED_SOURCE = "navigation-travelled-source"
 private const val TRAVELLED_LAYER = "navigation-travelled-layer"
 private const val PUCK_SOURCE = "navigation-puck-source"
 private const val PUCK_LAYER = "navigation-puck-layer"
 private const val PUCK_BEARING_PROPERTY = "bearing"
 private const val NAVIGATION_VEHICLE_IMAGE = "compass-navigation-vehicle"
+private const val NAVIGATION_ROUTE_CHEVRON_IMAGE = "compass-navigation-route-chevron"
 private const val FUEL_STOPS_SOURCE = "navigation-fuel-stops-source"
 private const val FUEL_STOPS_LAYER = "navigation-fuel-stops-layer"
 private const val FUEL_STOPS_TEXT_LAYER = "navigation-fuel-stops-text-layer"
@@ -642,6 +675,10 @@ internal const val NAVIGATION_PUCK_ICON_SCALE = 1.10f
 internal const val NAVIGATION_PUCK_MIN_ICON_SCALE = NAVIGATION_PUCK_ICON_SCALE * 0.5f
 internal const val NAVIGATION_PUCK_MIN_SCALE_ZOOM = 10f
 internal const val NAVIGATION_PUCK_FULL_SCALE_ZOOM = 16f
+internal val NAVIGATION_REMAINING_ROUTE_COLOR = 0xFF79FFA8.toInt()
+internal const val NAVIGATION_REMAINING_ROUTE_WIDTH = 9f
+internal const val NAVIGATION_ROUTE_CHEVRON_SPACING = 72f
+internal const val NAVIGATION_ROUTE_CHEVRON_SCALE = 0.72f
 
 internal fun navigationPuckScaleExpression() = interpolate(
     linear(),

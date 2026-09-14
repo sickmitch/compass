@@ -1,5 +1,7 @@
 package org.compass.cng.ui.route
 
+import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,5 +26,11 @@ class SystemNavigationTest {
                 NavigationPhase.NAVIGATING,
             ),
         )
+    }
+
+    @Test
+    fun expandedTripPanelAlignsLeftAndRightNavigationControls() {
+        assertEquals(0.dp, navigationLeftControlBottomPadding(tripSummaryVisible = true))
+        assertEquals(44.dp, navigationLeftControlBottomPadding(tripSummaryVisible = false))
     }
 }
