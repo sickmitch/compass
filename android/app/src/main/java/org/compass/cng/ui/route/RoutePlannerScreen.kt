@@ -26,6 +26,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +40,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -47,12 +50,14 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -164,6 +169,46 @@ fun RoutePlannerScreen(
             }
         },
     )
+    if (state.gasolineFallbackPromptVisible) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissGasolineFallbackPrompt,
+            title = { Text("Piano CNG non disponibile") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Puoi correggere i parametri CNG oppure verificare un percorso " +
+                            "di emergenza usando la benzina residua.",
+                    )
+                    OutlinedTextField(
+                        value = state.estimatedRemainingGasolineRangeKmInput,
+                        onValueChange = viewModel::updateEstimatedRemainingGasolineRange,
+                        label = { Text("Benzina residua stimata (km)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                    )
+                    if (state.vehicleProfiles.selectedProfile == null) {
+                        Text(
+                            "Per il fallback serve un profilo veicolo con autonomia e riserva benzina.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                CompassButton(
+                    onClick = viewModel::evaluatePredictiveRangeWithGasolineFallback,
+                    enabled = state.vehicleProfiles.selectedProfile != null &&
+                        state.estimatedRemainingGasolineRangeKmInput.isNotBlank(),
+                ) { Text("Usa fallback benzina") }
+            },
+            dismissButton = {
+                CompassTextButton(onClick = viewModel::dismissGasolineFallbackPrompt) {
+                    Text("Modifica parametri")
+                }
+            },
+        )
+    }
     val showDrivingSurface = state.stage == PlannerStage.NAVIGATION_PREVIEW &&
         navigationState.route != null &&
         navigationState.phase != NavigationPhase.ROUTE_PREVIEW
@@ -360,11 +405,10 @@ fun RoutePlannerScreen(
                     PlannerStage.INTERMEDIATE_STOPS -> IntermediateStopsContent(
                         route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         stops = state.plannedIntermediateStops,
-                        maximumAddedMinutesInput = state.intermediateStopMaximumAddedMinutesInput,
+                        mode = state.intermediateStopsMode,
+                        editingStopId = state.editingIntermediateStopId,
                         isCalculating = state.operation == PlannerOperation.INTERMEDIATE_STOP_ROUTE,
                         message = state.message,
-                        onMaximumAddedMinutesChanged =
-                            viewModel::updateIntermediateStopMaximumAddedMinutes,
                         onUseCurrentLocation = {
                             onUseCurrentLocation(RouteEndpoint.INTERMEDIATE_STOP)
                         },
@@ -377,8 +421,11 @@ fun RoutePlannerScreen(
                         onMapSelection = {
                             viewModel.openMapPointPicker(RouteEndpoint.INTERMEDIATE_STOP)
                         },
+                        onCngStop = viewModel::addCngIntermediateStop,
                         onMove = viewModel::moveIntermediateStop,
                         onEdit = viewModel::editIntermediateStop,
+                        onCancelEdit = viewModel::cancelIntermediateStopEdit,
+                        onStartAdding = viewModel::beginAddingIntermediateStop,
                         onDelete = viewModel::deleteIntermediateStop,
                         onCalculate = viewModel::calculateIntermediateStopsRoute,
                     )
@@ -386,13 +433,11 @@ fun RoutePlannerScreen(
                         route = baseRoute,
                         onStartNavigation = viewModel::openNavigationPreview,
                         onEditRoute = viewModel::openRouteConfiguration,
-                        onAddStop = viewModel::openAddStop,
                         onExtendedPlanning = viewModel::openPredictiveRange,
                         onAddIntermediateStops = viewModel::addIntermediateStop,
-                        allowCngPlanning = !state.intermediateStopEnabled,
                     )
                     PlannerStage.CONFIGURE_CNG -> ConfigureCngContent(
-                        route = baseRoute,
+                        route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         rangeInput = state.effectiveRangeKmInput,
                         detourInput = state.maximumDetourMinutesInput,
                         message = state.message,
@@ -401,7 +446,7 @@ fun RoutePlannerScreen(
                         onSearch = viewModel::searchCngStations,
                     )
                     PlannerStage.CONFIGURE_PREDICTIVE -> ConfigurePredictiveContent(
-                        route = baseRoute,
+                        route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         effectiveRangeInput = state.effectiveRangeKmInput,
                         remainingRangeInput = state.estimatedRemainingRangeKmInput,
                         reserveRangeInput = state.reserveRangeKmInput,
@@ -440,6 +485,7 @@ fun RoutePlannerScreen(
                             viewModel::updateVehicleProfileGasolineReserve,
                         onSaveVehicleProfile = viewModel::saveVehicleProfile,
                         onDetourChanged = viewModel::updateMaximumDetour,
+                        onAddIntermediateStop = viewModel::addIntermediateStopForCngPlan,
                         onEvaluate = viewModel::evaluatePredictiveRange,
                     )
                     PlannerStage.VEHICLE_PROFILES -> VehicleProfilesContent(
@@ -1060,25 +1106,20 @@ private fun PreviewContent(
     route: RoutePreview,
     onStartNavigation: () -> Unit,
     onEditRoute: () -> Unit,
-    onAddStop: () -> Unit,
     onExtendedPlanning: () -> Unit,
     onAddIntermediateStops: () -> Unit,
-    allowCngPlanning: Boolean,
 ) {
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item {
-            RouteMap(
-                route = route,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(260.dp),
-            )
-        }
-        item {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        RouteMap(
+            route = route,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
                 Text(
                     "Personalizza il viaggio",
                     style = MaterialTheme.typography.titleLarge,
@@ -1096,7 +1137,7 @@ private fun PreviewContent(
                 ) {
                     CompassOutlinedButton(
                         onClick = onEditRoute,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(62.dp),
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.AltRoute, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1104,7 +1145,7 @@ private fun PreviewContent(
                     }
                     CompassOutlinedButton(
                         onClick = onAddIntermediateStops,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(62.dp),
                     ) {
                         Icon(Icons.Rounded.AddLocationAlt, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1116,43 +1157,22 @@ private fun PreviewContent(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     CompassOutlinedButton(
-                        onClick = onAddStop,
-                        enabled = allowCngPlanning,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Rounded.LocalGasStation, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Sosta CNG")
-                    }
-                    CompassOutlinedButton(
                         onClick = onExtendedPlanning,
-                        enabled = allowCngPlanning,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(62.dp),
                     ) {
                         Icon(Icons.Rounded.Tune, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Piano CNG")
                     }
-                }
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
                     CompassButton(
                         onClick = onStartNavigation,
-                        modifier = Modifier.wrapContentWidth(),
+                        modifier = Modifier.weight(1f).height(62.dp),
                     ) {
-                        Text("Percorso diretto")
+                        Icon(Icons.AutoMirrored.Rounded.AltRoute, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Percorso diretto", maxLines = 2)
                     }
                 }
-                if (!allowCngPlanning) {
-                    Text(
-                        "Il percorso contiene già una tappa ordinaria; rimuovila per pianificare i rifornimenti CNG.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
         }
     }
 }
@@ -1204,7 +1224,7 @@ private fun IntermediateStopPreviewContent(
                 ) {
                     SummaryValue("Percorso", formatDistance(candidateRoute.distanceMeters))
                     SummaryValue("Deviazione", "+${formatDistance(addedDistanceMeters)}")
-                    SummaryValue("Tempo", "+${formatDuration(addedDurationSeconds)}")
+                    SummaryValue("Tempo", formatAddedDuration(addedDurationSeconds))
                 }
                 CompassButton(onClick = onChoose, modifier = Modifier.fillMaxWidth()) {
                     Text("Scegli")
@@ -1286,64 +1306,95 @@ private fun MapPointPickerContent(
 private fun IntermediateStopsContent(
     route: RoutePreview,
     stops: List<PlannedIntermediateStop>,
-    maximumAddedMinutesInput: String,
+    mode: IntermediateStopsMode,
+    editingStopId: String?,
     isCalculating: Boolean,
     message: String?,
-    onMaximumAddedMinutesChanged: (String) -> Unit,
     onUseCurrentLocation: () -> Unit,
     onFavorites: () -> Unit,
     onSearch: () -> Unit,
     onMapSelection: () -> Unit,
+    onCngStop: () -> Unit,
     onMove: (Int, Int) -> Unit,
     onEdit: (String) -> Unit,
+    onCancelEdit: () -> Unit,
+    onStartAdding: () -> Unit,
     onDelete: (String) -> Unit,
     onCalculate: () -> Unit,
 ) {
     var addControlsExpanded by rememberSaveable(stops.isEmpty()) {
         mutableStateOf(stops.isEmpty())
     }
-    var maximumTimeEditorVisible by rememberSaveable { mutableStateOf(false) }
-    val focusManager = LocalFocusManager.current
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item {
-            RouteMap(
-                route = route,
-                intermediateStops = stops.map { it.location },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(260.dp),
-            )
+    val listState = rememberLazyListState()
+    val editingStop = stops.firstOrNull { it.id == editingStopId }
+    LaunchedEffect(editingStopId) {
+        if (editingStopId != null) {
+            addControlsExpanded = true
+            listState.animateScrollToItem(stops.size + 1)
         }
-        item {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    "Tappe del viaggio",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    if (stops.isEmpty()) {
-                        "Aggiungi una o più tappe intermedie. Non viene applicato alcun tempo di sosta."
-                    } else {
-                        "Tieni premuta una tappa e trascinala per cambiarne l’ordine."
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        RouteMap(
+            route = route,
+            intermediateStops = stops.map { it.location },
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 500.dp),
+        ) {
+            if (stops.isNotEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            "Tappe del viaggio",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "Tieni premuta una tappa e trascinala per cambiarne l’ordine.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
-        }
-        itemsIndexed(stops, key = { _, stop -> stop.id }) { index, stop ->
+            itemsIndexed(stops, key = { _, stop -> stop.id }) { index, stop ->
             var accumulatedDrag by remember(stop.id) { mutableStateOf(0f) }
+            var isDragging by remember(stop.id) { mutableStateOf(false) }
+            val cardColor by animateColorAsState(
+                targetValue = if (isDragging || stop.id == editingStopId) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                label = "stop-card-color",
+            )
+            val elevation by animateDpAsState(
+                targetValue = if (isDragging) 10.dp else 0.dp,
+                label = "stop-card-elevation",
+            )
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 5.dp)
                     .pointerInput(stop.id, index, stops.size) {
                         detectDragGesturesAfterLongPress(
-                            onDragEnd = { accumulatedDrag = 0f },
-                            onDragCancel = { accumulatedDrag = 0f },
+                            onDragStart = { isDragging = true },
+                            onDragEnd = {
+                                accumulatedDrag = 0f
+                                isDragging = false
+                            },
+                            onDragCancel = {
+                                accumulatedDrag = 0f
+                                isDragging = false
+                            },
                             onDrag = { change, dragAmount ->
                                 change.consume()
                                 accumulatedDrag += dragAmount.y
@@ -1361,6 +1412,8 @@ private fun IntermediateStopsContent(
                             },
                         )
                     },
+                colors = CardDefaults.cardColors(containerColor = cardColor),
+                elevation = CardDefaults.cardElevation(defaultElevation = elevation),
             ) {
                 Row(
                     modifier = Modifier
@@ -1380,17 +1433,22 @@ private fun IntermediateStopsContent(
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Tappa ${index + 1}", fontWeight = FontWeight.SemiBold)
                         Text(
-                            when (stop.locationMethod) {
-                                RouteLocationMethod.CURRENT_LOCATION -> "Posizione acquisita"
-                                RouteLocationMethod.FAVORITES -> "Posizione preferita"
-                                RouteLocationMethod.SEARCH -> "Posizione selezionata"
-                                RouteLocationMethod.COORDINATES -> "Punto scelto sulla mappa"
-                            },
+                            if (stop.isCng) "Sosta CNG ${index + 1}" else "Tappa ${index + 1}",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stop.privateDisplayName,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        stop.cngStop?.let { cng ->
+                            Text(
+                                "Sosta prevista ${cng.dwellTimeSeconds / 60} min",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                     CompassTextButton(onClick = { onEdit(stop.id) }) { Text("Modifica") }
                     CompassTextButton(onClick = { onDelete(stop.id) }) { Text("Elimina") }
@@ -1402,9 +1460,38 @@ private fun IntermediateStopsContent(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                AnimatedVisibility(visible = editingStop != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "Modifica ${editingStop?.privateDisplayName.orEmpty()}: " +
+                                    "scegli il nuovo punto.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            CompassTextButton(onClick = onCancelEdit) { Text("Annulla") }
+                        }
+                    }
+                }
                 if (stops.isNotEmpty()) {
                     CompassOutlinedButton(
-                        onClick = { addControlsExpanded = !addControlsExpanded },
+                        onClick = {
+                            if (addControlsExpanded) {
+                                addControlsExpanded = false
+                                if (editingStopId != null) onCancelEdit()
+                            } else {
+                                onStartAdding()
+                                addControlsExpanded = true
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Aggiungi tappa")
@@ -1427,95 +1514,43 @@ private fun IntermediateStopsContent(
                 }
                 AnimatedVisibility(visible = stops.isEmpty() || addControlsExpanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        FlowRow(
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            CompassOutlinedButton(onClick = onUseCurrentLocation) {
+                            CompassOutlinedButton(
+                                onClick = onUseCurrentLocation,
+                                modifier = Modifier.weight(1f),
+                            ) {
                                 Text("Posizione attuale")
                             }
-                            CompassOutlinedButton(onClick = onFavorites) {
+                            CompassOutlinedButton(
+                                onClick = onFavorites,
+                                modifier = Modifier.weight(1f),
+                            ) {
                                 Text("Posizioni preferite")
                             }
-                            CompassOutlinedButton(onClick = onSearch) { Text("Ricerca") }
-                            CompassOutlinedButton(onClick = onMapSelection) {
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CompassOutlinedButton(
+                                onClick = onSearch,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Ricerca") }
+                            CompassOutlinedButton(
+                                onClick = onMapSelection,
+                                modifier = Modifier.weight(1.6f),
+                            ) {
                                 Text("Selezione dalla mappa")
                             }
-                        }
-                        if (maximumTimeEditorVisible) {
-                            OutlinedTextField(
-                                value = maximumAddedMinutesInput,
-                                onValueChange = onMaximumAddedMinutesChanged,
-                                label = { Text("Tempo aggiuntivo massimo") },
-                                suffix = { Text("min") },
-                                supportingText = {
-                                    Text(
-                                        "Predefinito a un terzo della durata di guida " +
-                                            "del percorso diretto.",
-                                    )
-                                },
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = {
-                                            focusManager.clearFocus(force = true)
-                                            maximumTimeEditorVisible = false
-                                        },
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.Check,
-                                            contentDescription = "Conferma tempo massimo",
-                                        )
-                                    }
-                                },
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Decimal,
-                                    imeAction = ImeAction.Done,
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        focusManager.clearFocus(force = true)
-                                        maximumTimeEditorVisible = false
-                                    },
-                                ),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            Surface(
-                                onClick = { maximumTimeEditorVisible = true },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(
-                                        horizontal = 18.dp,
-                                        vertical = 14.dp,
-                                    ),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                            if (mode == IntermediateStopsMode.ROUTE) {
+                                CompassOutlinedButton(
+                                    onClick = onCngStop,
+                                    modifier = Modifier.weight(1f),
                                 ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                                    ) {
-                                        Text(
-                                            "Tempo aggiuntivo massimo",
-                                            style = MaterialTheme.typography.labelMedium,
-                                        )
-                                        Text(
-                                            "${maximumAddedMinutesInput.ifBlank { "—" }} min",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                    }
-                                    Text(
-                                        "Modifica",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
+                                    Text("Sosta CNG")
                                 }
                             }
                         }
@@ -1524,7 +1559,8 @@ private fun IntermediateStopsContent(
                 message?.let { InlineError(it) }
                 CompassButton(
                     onClick = onCalculate,
-                    enabled = stops.isNotEmpty() && !isCalculating,
+                    enabled = (stops.isNotEmpty() || mode == IntermediateStopsMode.CNG_PLAN) &&
+                        !isCalculating,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (isCalculating) {
@@ -1535,12 +1571,27 @@ private fun IntermediateStopsContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                     }
-                    Text(if (isCalculating) "Calcolo percorso…" else "Calcola percorso")
+                    Text(
+                        if (isCalculating) {
+                            if (mode == IntermediateStopsMode.CNG_PLAN) {
+                                "Calcolo piano…"
+                            } else {
+                                "Calcolo percorso…"
+                            }
+                        } else if (mode == IntermediateStopsMode.CNG_PLAN) {
+                            "Calcola piano"
+                        } else {
+                            "Calcola percorso"
+                        },
+                    )
                 }
             }
         }
     }
 }
+
+}
+
 
 @Composable
 private fun NavigationPreviewContent(
@@ -1583,6 +1634,8 @@ private fun NavigationPreviewContent(
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var editSummary by rememberSaveable { mutableStateOf(false) }
     var selectedEditItem by rememberSaveable { mutableStateOf<String?>(null) }
+    val ordinaryPlannedStops = ordinaryStopsForSummary(plannedIntermediateStops)
+    val totalStopCount = route.fuelStops.size + route.intermediateStops.size
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             RouteMap(
@@ -1642,14 +1695,13 @@ private fun NavigationPreviewContent(
                             color = MaterialTheme.compassSemanticColors.onWarningContainer,
                         )
                     }
-                    if (route.intermediateStops.isNotEmpty()) {
+                    if (totalStopCount > 0) {
                         Text(
-                            "${route.intermediateStops.size} " +
-                                if (route.intermediateStops.size == 1) {
-                                    "tappa intermedia · nessun tempo di sosta"
-                                } else {
-                                    "tappe intermedie · nessun tempo di sosta"
-                                },
+                            formatTripStopSummary(
+                                totalStopCount = totalStopCount,
+                                cngStopCount = route.fuelStops.size,
+                                ordinaryStopCount = route.intermediateStops.size,
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -1705,6 +1757,35 @@ private fun NavigationPreviewContent(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
             }
         }
+        if (route.intermediateStops.isNotEmpty()) {
+            item {
+                Text(
+                    "Tappe del viaggio",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+            itemsIndexed(route.intermediateStops) { index, stop ->
+                val label = stop.mapLabel.takeIf(String::isNotBlank)
+                    ?: ordinaryPlannedStops.getOrNull(index)
+                        ?.privateDisplayName
+                        ?.takeIf(String::isNotBlank)
+                    ?: "Tappa intermedia ${index + 1}"
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text("${index + 1}. $label", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Nessun tempo di sosta",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
+            }
+        }
         if (editSummary) {
             item {
                 Column(
@@ -1722,7 +1803,7 @@ private fun NavigationPreviewContent(
                     ) {
                         Text("Partenza o destinazione")
                     }
-                    plannedIntermediateStops.forEachIndexed { index, stop ->
+                    ordinaryPlannedStops.forEachIndexed { index, stop ->
                         val itemKey = "ordinary:${stop.id}"
                         CompassOutlinedButton(
                             onClick = {
@@ -1730,7 +1811,10 @@ private fun NavigationPreviewContent(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Tappa ${index + 1}")
+                            Text(
+                                "Tappa ${index + 1} · " +
+                                    stop.privateDisplayName.ifBlank { "Tappa intermedia" },
+                            )
                         }
                         AnimatedVisibility(visible = selectedEditItem == itemKey) {
                             Row(
@@ -1775,34 +1859,6 @@ private fun NavigationPreviewContent(
                         }
                     }
                 }
-            }
-        }
-        if (route.intermediateStops.isNotEmpty()) {
-            item {
-                Text(
-                    "Tappe del viaggio",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-            }
-            itemsIndexed(route.intermediateStops) { index, _ ->
-                val label = plannedIntermediateStops.getOrNull(index)
-                    ?.privateDisplayName
-                    ?.takeIf(String::isNotBlank)
-                    ?: "Tappa intermedia ${index + 1}"
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text("${index + 1}. $label", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Nessun tempo di sosta",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
             }
         }
         if (message != null) {
@@ -2656,8 +2712,8 @@ private fun DestinationSearchContent(
                     result.marginalAddedDurationSeconds?.let { seconds ->
                         Text(
                             buildString {
-                                append("Tempo aggiunto +")
-                                append(formatDuration(seconds))
+                                append("Tempo aggiunto ")
+                                append(formatAddedDuration(seconds))
                                 if (result.withinTimeBudget == false) append(" · oltre il limite")
                             },
                             style = MaterialTheme.typography.labelSmall,
@@ -2992,6 +3048,7 @@ private fun ConfigurePredictiveContent(
     onVehicleProfileGasolineReserveChanged: (String) -> Unit,
     onSaveVehicleProfile: () -> Unit,
     onDetourChanged: (String) -> Unit,
+    onAddIntermediateStop: () -> Unit,
     onEvaluate: () -> Unit,
 ) {
     val selectedVehicleName = vehicleProfiles.selectedProfile?.name
@@ -2999,7 +3056,6 @@ private fun ConfigurePredictiveContent(
     val reserveFocus = remember { FocusRequester() }
     val effectiveRangeFocus = remember { FocusRequester() }
     val detourFocus = remember { FocusRequester() }
-    val gasolineFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(message, vehicleProfileNameInput) {
         if (
@@ -3180,120 +3236,73 @@ private fun ConfigurePredictiveContent(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                OutlinedTextField(
-                    value = remainingRangeInput,
-                    onValueChange = onRemainingRangeChanged,
-                    label = { Text("Autonomia CNG residua stimata (km)") },
-                    supportingText = { Text("Dato fornito dal conducente, non da telemetria.") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal,
-                        imeAction = ImeAction.Next,
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { reserveFocus.requestFocus() },
-                    ),
-                    singleLine = true,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = reserveRangeInput,
-                    onValueChange = onReserveRangeChanged,
-                    label = { Text("Riserva di sicurezza (km)") },
-                    supportingText = { Text("Non vengono suggerite stazioni oltre questa soglia.") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal,
-                        imeAction = ImeAction.Next,
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { effectiveRangeFocus.requestFocus() },
-                    ),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(reserveFocus),
-                )
-                OutlinedTextField(
-                    value = effectiveRangeInput,
-                    onValueChange = onEffectiveRangeChanged,
-                    label = { Text("Autonomia CNG effettiva a pieno (km)") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal,
-                        imeAction = ImeAction.Next,
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { detourFocus.requestFocus() },
-                    ),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(effectiveRangeFocus),
-                )
-                OutlinedTextField(
-                    value = detourInput,
-                    onValueChange = onDetourChanged,
-                    label = { Text("Deviazione massima (minuti)") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal,
-                        imeAction = if (selectedVehicleName == null) {
-                            ImeAction.Done
-                        } else {
-                            ImeAction.Next
-                        },
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { gasolineFocus.requestFocus() },
-                        onDone = { focusManager.clearFocus() },
-                    ),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(detourFocus),
-                )
-                Text(
-                    "Fallback benzina",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (selectedVehicleName == null) {
-                    Text(
-                        "Seleziona prima un profilo mezzo per abilitare il fallback benzina.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CompactPlanField(
+                        value = remainingRangeInput,
+                        onValueChange = onRemainingRangeChanged,
+                        label = "CNG residuo (km)",
+                        modifier = Modifier.weight(1f),
                     )
-                } else {
-                    Text(
-                        "$selectedVehicleName · massimo $effectiveGasolineRangeInput km · " +
-                            "riserva $gasolineReserveRangeInput km",
-                        style = MaterialTheme.typography.bodySmall,
+                    CompactPlanField(
+                        value = reserveRangeInput,
+                        onValueChange = onReserveRangeChanged,
+                        label = "Riserva (km)",
+                        modifier = Modifier.weight(1f).focusRequester(reserveFocus),
                     )
-                    OutlinedTextField(
-                        value = remainingGasolineRangeInput,
-                        onValueChange = onRemainingGasolineRangeChanged,
-                        label = { Text("Autonomia benzina residua stimata (km, opzionale)") },
-                        supportingText = {
-                            Text("Dato del conducente; lasciando vuoto il fallback è disattivato.")
-                        },
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Decimal,
-                            imeAction = ImeAction.Done,
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = { focusManager.clearFocus() },
-                        ),
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(gasolineFocus),
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CompactPlanField(
+                        value = effectiveRangeInput,
+                        onValueChange = onEffectiveRangeChanged,
+                        label = "Autonomia piena (km)",
+                        modifier = Modifier.weight(1f).focusRequester(effectiveRangeFocus),
+                    )
+                    CompactPlanField(
+                        value = detourInput,
+                        onValueChange = onDetourChanged,
+                        label = "Deviazione max (min)",
+                        modifier = Modifier.weight(1f).focusRequester(detourFocus),
                     )
                 }
                 message?.let { InlineError(it) }
+                CompassOutlinedButton(
+                    onClick = onAddIntermediateStop,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Rounded.AddLocationAlt, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Inserisci tappa intermedia")
+                }
                 CompassButton(onClick = onEvaluate, modifier = Modifier.fillMaxWidth()) {
-                    Text("Valuta e suggerisci una stazione")
+                    Text("Conferma e calcola piano")
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }
+}
+
+@Composable
+private fun CompactPlanField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        singleLine = true,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -4065,6 +4074,36 @@ internal fun formatDuration(durationSeconds: Double): String {
     val minutes = totalMinutes % 60
     return if (hours > 0) "${hours} h ${minutes} min" else "$minutes min"
 }
+
+internal fun formatAddedDuration(durationSeconds: Double): String =
+    if (durationSeconds > 0.0 && durationSeconds < 60.0) {
+        "<1 min"
+    } else if (durationSeconds <= 0.0) {
+        "0 min"
+    } else {
+        "+${formatDuration(durationSeconds)}"
+    }
+
+internal fun formatTripStopSummary(
+    totalStopCount: Int,
+    cngStopCount: Int,
+    ordinaryStopCount: Int,
+): String = buildList {
+    add("$totalStopCount ${if (totalStopCount == 1) "tappa totale" else "tappe totali"}")
+    if (cngStopCount > 0) {
+        add("$cngStopCount ${if (cngStopCount == 1) "rifornimento CNG" else "rifornimenti CNG"}")
+    }
+    if (ordinaryStopCount > 0) {
+        add(
+            "$ordinaryStopCount " +
+                if (ordinaryStopCount == 1) "tappa del viaggio" else "tappe del viaggio",
+        )
+    }
+}.joinToString(" · ")
+
+internal fun ordinaryStopsForSummary(
+    stops: List<PlannedIntermediateStop>,
+): List<PlannedIntermediateStop> = stops.filterNot { it.isCng }
 
 private fun formatDetour(minutes: Double): String = String.format(Locale.ITALY, "+%.1f min", minutes)
 

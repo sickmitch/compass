@@ -49,6 +49,7 @@ from compass.routing.domain import (
     MatrixResult,
     RoutingProvider,
     RoutingProviderError,
+    WaypointRoute,
 )
 
 
@@ -85,6 +86,9 @@ async def evaluate_predictive_cng_candidates(
     max_route_geometry_points: int,
     cost_basis: NetworkCostBasis | None = None,
     dwell_seconds_per_refueling_stop: int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
+    base_route: BaseRoute | None = None,
+    waypoint_route: WaypointRoute | None = None,
+    mandatory_waypoints: tuple[Coordinate, ...] = (),
 ) -> PredictiveCandidatesResult:
     if dwell_seconds_per_refueling_stop < 0:
         raise ValueError("refuelling dwell must not be negative")
@@ -97,7 +101,8 @@ async def evaluate_predictive_cng_candidates(
     full_usable_range_km = effective_range_km - reserve_range_km
     network_request = request.ranked_request.network_request
     configured_cost_basis = cost_basis or NetworkCostBasis()
-    base_route = await provider.route(network_request.corridor_request.route)
+    if base_route is None:
+        base_route = await provider.route(network_request.corridor_request.route)
     remaining_route_km = base_route.distance_meters / 1_000
     destination_reachable = remaining_route_km <= first_usable_range_km
 
@@ -120,14 +125,15 @@ async def evaluate_predictive_cng_candidates(
             max_route_geometry_points=max_route_geometry_points,
             base_route=base_route,
             cost_basis=configured_cost_basis,
+            waypoint_route=waypoint_route,
+            mandatory_waypoints=mandatory_waypoints,
         )
         enrichments = {}
 
     first_reachable = tuple(
         candidate
         for candidate in network.candidates
-        if candidate.distance_from_previous_waypoint_meters
-        <= first_usable_range_km * 1_000
+        if candidate.distance_from_previous_waypoint_meters <= first_usable_range_km * 1_000
     )
     if first_reachable:
         enrichments = load_candidate_enrichments(
@@ -157,6 +163,7 @@ async def evaluate_predictive_cng_candidates(
                 costing=network_request.corridor_request.route.costing,
                 batch_size=detour_policy.matrix_batch_size,
                 departure_at=network_request.departure_at,
+                waypoint_route=waypoint_route,
             )
             path = _search_complete_itinerary(
                 candidates=network.candidates,
@@ -168,11 +175,10 @@ async def evaluate_predictive_cng_candidates(
                 ranking_policy=ranking_policy,
                 include_closed=request.ranked_request.include_closed,
                 dwell_seconds_per_refueling_stop=dwell_seconds_per_refueling_stop,
+                waypoint_route=waypoint_route,
             )
 
-    selected_first = (
-        network.candidates[path.candidate_indexes[0]] if path is not None else None
-    )
+    selected_first = network.candidates[path.candidate_indexes[0]] if path is not None else None
     ranking_candidates = (
         (selected_first,)
         if selected_first is not None
@@ -194,8 +200,7 @@ async def evaluate_predictive_cng_candidates(
         PredictiveRankedCandidate(
             ranked=candidate,
             estimated_remaining_range_at_arrival_km=(
-                remaining_range_km
-                - candidate.detour.distance_from_previous_waypoint_meters / 1_000
+                remaining_range_km - candidate.detour.distance_from_previous_waypoint_meters / 1_000
             ),
             reserve_margin_at_arrival_km=(
                 first_usable_range_km
@@ -248,9 +253,7 @@ async def evaluate_predictive_cng_candidates(
             reserve_cng_range_km=reserve_range_km,
             usable_range_before_reserve_km=first_usable_range_km,
             remaining_route_distance_km=remaining_route_km,
-            range_shortfall_to_destination_km=max(
-                0.0, remaining_route_km - first_usable_range_km
-            ),
+            range_shortfall_to_destination_km=max(0.0, remaining_route_km - first_usable_range_km),
             destination_reachable_with_reserve=destination_reachable,
             traffic_state=configured_cost_basis.traffic_state,
             traffic_adjusted=configured_cost_basis.traffic_aware,
@@ -338,8 +341,7 @@ def _one_stop_path(
     viable = [
         candidate
         for candidate in first_eligible
-        if candidate.station_to_destination_distance_meters
-        <= full_usable_range_km * 1_000
+        if candidate.station_to_destination_distance_meters <= full_usable_range_km * 1_000
     ]
     if not viable:
         return None
@@ -378,6 +380,7 @@ def _search_complete_itinerary(
     ranking_policy: RankingPolicy,
     include_closed: bool,
     dwell_seconds_per_refueling_stop: int,
+    waypoint_route: WaypointRoute | None = None,
 ) -> _Path | None:
     index_by_station = {
         candidate.station.station_id: index for index, candidate in enumerate(candidates)
@@ -418,6 +421,17 @@ def _search_complete_itinerary(
             # A refuelling chain must make real road-network progress toward the
             # destination.  Route projection fractions are retained only as a
             # spatial diagnostic; they are not a reachability decision input.
+            if waypoint_route is not None and (
+                next_candidate.itinerary_leg_index
+                < current.itinerary_leg_index
+                or (
+                    next_candidate.itinerary_leg_index
+                    == current.itinerary_leg_index
+                    and next_candidate.station.route_fraction
+                    <= current.station.route_fraction
+                )
+            ):
+                continue
             if (
                 next_candidate.station_to_destination_distance_meters
                 >= current_remaining_distance - 1.0
@@ -503,14 +517,13 @@ def _build_itinerary(
                     eta=arrival_at,
                     freshness_seconds=ranking_policy.price_freshness_seconds,
                 ),
+                insertion_leg_index=candidate.itinerary_leg_index,
                 dwell_time_seconds=dwell_seconds_per_refueling_stop,
             )
         )
         elapsed_seconds += dwell_seconds_per_refueling_stop
 
-    destination_remaining = (
-        effective_range_km - path.destination_cost.distance_meters / 1_000
-    )
+    destination_remaining = effective_range_km - path.destination_cost.distance_meters / 1_000
     total_duration = (
         sum(cost.duration_seconds for cost in path.leg_costs)
         + path.destination_cost.duration_seconds
@@ -544,14 +557,13 @@ async def _pairwise_candidate_costs(
     costing: str,
     batch_size: int,
     departure_at: datetime,
+    waypoint_route: WaypointRoute | None = None,
 ) -> tuple[tuple[tuple[MatrixCost | None, ...], ...], _MatrixStats]:
     coordinates = tuple(
         Coordinate(candidate.station.latitude, candidate.station.longitude)
         for candidate in candidates
     )
-    rows: list[list[MatrixCost | None]] = [
-        [None for _ in candidates] for _ in candidates
-    ]
+    rows: list[list[MatrixCost | None]] = [[None for _ in candidates] for _ in candidates]
     stats = _MatrixStats()
     for source_start in range(0, len(candidates), batch_size):
         source_end = min(source_start + batch_size, len(candidates))
@@ -567,6 +579,65 @@ async def _pairwise_candidate_costs(
             stats += block_stats
             for relative_source, block_row in enumerate(block):
                 rows[source_start + relative_source][target_start:target_end] = block_row
+    if waypoint_route is not None:
+        for source_index, source in enumerate(candidates):
+            source_leg = source.itinerary_leg_index
+            source_to_leg_end_distance = (
+                source.station_to_destination_distance_meters
+                - sum(
+                    leg.distance_meters
+                    for leg in waypoint_route.legs[source_leg + 1 :]
+                )
+            )
+            source_to_leg_end_duration = (
+                source.station_to_destination_duration_seconds
+                - sum(
+                    leg.duration_seconds
+                    for leg in waypoint_route.legs[source_leg + 1 :]
+                )
+            )
+            for target_index, target in enumerate(candidates):
+                target_leg = target.itinerary_leg_index
+                if target_leg < source_leg or (
+                    target_leg == source_leg
+                    and target.station.route_fraction <= source.station.route_fraction
+                ):
+                    rows[source_index][target_index] = None
+                    continue
+                if target_leg == source_leg:
+                    continue
+                target_prefix_distance = sum(
+                    leg.distance_meters for leg in waypoint_route.legs[:target_leg]
+                )
+                target_prefix_duration = sum(
+                    leg.duration_seconds for leg in waypoint_route.legs[:target_leg]
+                )
+                target_from_leg_start_distance = (
+                    target.distance_from_previous_waypoint_meters - target_prefix_distance
+                )
+                target_from_leg_start_duration = (
+                    target.duration_from_previous_waypoint_seconds - target_prefix_duration
+                )
+                between_distance = sum(
+                    leg.distance_meters
+                    for leg in waypoint_route.legs[source_leg + 1 : target_leg]
+                )
+                between_duration = sum(
+                    leg.duration_seconds
+                    for leg in waypoint_route.legs[source_leg + 1 : target_leg]
+                )
+                rows[source_index][target_index] = MatrixCost(
+                    distance_meters=(
+                        source_to_leg_end_distance
+                        + between_distance
+                        + target_from_leg_start_distance
+                    ),
+                    duration_seconds=(
+                        source_to_leg_end_duration
+                        + between_duration
+                        + target_from_leg_start_duration
+                    ),
+                )
     return tuple(tuple(row) for row in rows), stats
 
 
@@ -631,9 +702,7 @@ async def _matrix_block(
         )
     if not isinstance(result, MatrixResult):
         raise RoutingProviderError("Routing provider returned an invalid matrix result")
-    if len(result.costs) != len(sources) or any(
-        len(row) != len(targets) for row in result.costs
-    ):
+    if len(result.costs) != len(sources) or any(len(row) != len(targets) for row in result.costs):
         raise RoutingProviderError("Routing provider returned an invalid matrix shape")
     return result.costs, _MatrixStats(calls=1)
 

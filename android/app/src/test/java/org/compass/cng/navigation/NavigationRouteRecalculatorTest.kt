@@ -19,6 +19,7 @@ import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithIntermediateStop
+import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.model.SelectedCngStop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -107,6 +108,52 @@ class NavigationRouteRecalculatorTest {
             recalculated.totalTripDurationSeconds,
             0.0,
         )
+    }
+
+    @Test
+    fun reroutePreservesTheOrderOfOrdinaryAndCngStops() = runTest {
+        val repository = RecordingRepository()
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val ordinary = Coordinate(44.8, 9.5)
+        val cng = SelectedCngStop(
+            mimitStationId = "1001",
+            name = "Metano test",
+            municipality = null,
+            province = null,
+            location = Coordinate(44.5, 10.0),
+        )
+        val destination = Coordinate(44.0, 11.0)
+        val original = repository.routeWithIntermediateStops(
+            origin = origin,
+            intermediateStops = listOf(ordinary, cng.location),
+            destination = destination,
+        ).toNavigationRoute(
+            listOf(
+                NavigationOrderedStop(label = "Tappa ordinaria"),
+                NavigationOrderedStop(label = "Metano test", cngStop = cng),
+            ),
+        )
+        val ordinaryStop = original.intermediateStops.single()
+        val fuelStop = original.fuelStops.single()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = original,
+            rawLocation = NavigationLocation(origin, 5.0, 10.0, 90.0, 1_000),
+            navigationPosition = position(origin),
+            nextIntermediateStop = NavigationIntermediateStopProgress(ordinaryStop, 1_000.0),
+            intermediateStopProgress = listOf(
+                NavigationIntermediateStopProgress(ordinaryStop, 1_000.0),
+            ),
+            nextFuelStop = NavigationFuelStopProgress(fuelStop, 2_000.0),
+        )
+
+        val recalculated = recalculator.recalculate(state, RouteUpdateReason.OFF_ROUTE)
+
+        assertEquals(listOf(ordinary, cng.location), repository.lastIntermediateStops)
+        assertEquals(1, recalculated.intermediateStops.single().sequence)
+        assertEquals(2, recalculated.fuelStops.single().sequence)
+        assertEquals(1_200, recalculated.fuelStops.single().dwellTimeSeconds)
     }
 
     @Test
@@ -319,6 +366,7 @@ class NavigationRouteRecalculatorTest {
         var lastMaximumDetourMinutes: Double? = null
         var lastExcludedIds: Set<String>? = null
         var lastIntermediateStop: Coordinate? = null
+        var lastIntermediateStops: List<Coordinate>? = null
         var lastOriginDirection: RouteOriginDirection? = null
         var failNextItinerary: Boolean = false
 
@@ -371,6 +419,41 @@ class NavigationRouteRecalculatorTest {
                     dwellSecondsPerRefuelingStop = 1_200,
                     totalRefuelingDwellSeconds = 0.0,
                     totalTripDurationSeconds = 200.0,
+                    departureAt = null,
+                    drivingArrivalAt = null,
+                    tripArrivalAt = null,
+                ),
+            )
+        }
+
+        override suspend fun routeWithIntermediateStops(
+            origin: Coordinate,
+            intermediateStops: List<Coordinate>,
+            destination: Coordinate,
+            originDirection: RouteOriginDirection?,
+        ): RouteWithIntermediateStops {
+            lastOrigin = origin
+            lastIntermediateStops = intermediateStops
+            lastDestination = destination
+            lastOriginDirection = originDirection
+            val points = listOf(origin) + intermediateStops + destination
+            val legs = points.zipWithNext().map { (legOrigin, legDestination) ->
+                route(legOrigin, legDestination)
+            }
+            return RouteWithIntermediateStops(
+                stops = intermediateStops,
+                distanceMeters = legs.sumOf(RoutePreview::distanceMeters),
+                durationSeconds = legs.sumOf(RoutePreview::durationSeconds),
+                legs = legs,
+                provider = "valhalla",
+                navigation = NavigationTiming(
+                    routeId = "intermediate-stops",
+                    drivingDurationSeconds = legs.sumOf(RoutePreview::durationSeconds),
+                    remainingDrivingDurationSeconds = legs.sumOf(RoutePreview::durationSeconds),
+                    refuelingStopCount = 0,
+                    dwellSecondsPerRefuelingStop = 1_200,
+                    totalRefuelingDwellSeconds = 0.0,
+                    totalTripDurationSeconds = legs.sumOf(RoutePreview::durationSeconds),
                     departureAt = null,
                     drivingArrivalAt = null,
                     tripArrivalAt = null,

@@ -1,10 +1,12 @@
 import asyncio
+from bisect import bisect_right
 from collections.abc import Iterator
 from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from compass.candidates.domain import CorridorPolicy, SpatialCandidate
+from compass.candidates.geometry import waypoint_route_leg_fraction_boundaries
 from compass.candidates.service import find_corridor_candidates
 from compass.detours.domain import (
     EligibleDetourCandidate,
@@ -24,6 +26,7 @@ from compass.routing.domain import (
     MatrixResult,
     RoutingProvider,
     RoutingProviderError,
+    WaypointRoute,
 )
 
 
@@ -37,6 +40,8 @@ async def evaluate_cng_detours(
     max_route_geometry_points: int,
     base_route: BaseRoute | None = None,
     cost_basis: NetworkCostBasis | None = None,
+    waypoint_route: WaypointRoute | None = None,
+    mandatory_waypoints: tuple[Coordinate, ...] = (),
 ) -> NetworkDetourResult:
     spatial = await find_corridor_candidates(
         session,
@@ -47,18 +52,49 @@ async def evaluate_cng_detours(
         base_route=base_route,
     )
     route_request = request.corridor_request.route
+    if waypoint_route is not None:
+        if len(waypoint_route.legs) != len(mandatory_waypoints) + 1:
+            raise RoutingProviderError("Waypoint route legs do not match mandatory waypoints")
+        boundaries = waypoint_route_leg_fraction_boundaries(
+            waypoint_route,
+            max_points=max_route_geometry_points,
+        )
+        leg_indexes = {
+            candidate.station_id: bisect_right(boundaries, candidate.route_fraction)
+            for candidate in spatial.candidates
+        }
+    else:
+        leg_indexes = {candidate.station_id: 0 for candidate in spatial.candidates}
     evaluated: list[EligibleDetourCandidate] = []
     unreachable = 0
     matrix_calls = 0
     fallback_splits = 0
     location_failures = 0
 
-    for batch in _batches(spatial.candidates, detour_policy.matrix_batch_size):
+    batches = (
+        batch
+        for leg_index in range(len(waypoint_route.legs) if waypoint_route else 1)
+        for batch in _batches(
+            tuple(
+                candidate
+                for candidate in spatial.candidates
+                if leg_indexes[candidate.station_id] == leg_index
+            ),
+            detour_policy.matrix_batch_size,
+        )
+    )
+    fixed_points = (route_request.origin, *mandatory_waypoints, route_request.destination)
+    for batch in batches:
+        leg_index = leg_indexes[batch[0].station_id]
+        leg_origin = fixed_points[leg_index] if waypoint_route else route_request.origin
+        leg_destination = (
+            fixed_points[leg_index + 1] if waypoint_route else route_request.destination
+        )
         pairs, calls, splits, failures = await _matrix_cost_pairs(
             provider,
             batch,
-            origin=route_request.origin,
-            destination=route_request.destination,
+            origin=leg_origin,
+            destination=leg_destination,
             costing=route_request.costing,
             departure_at=request.departure_at,
         )
@@ -72,6 +108,33 @@ async def evaluate_cng_detours(
             if previous_to_station is None or station_to_destination is None:
                 unreachable += 1
                 continue
+            if waypoint_route is not None:
+                previous_to_station = MatrixCost(
+                    distance_meters=(
+                        sum(leg.distance_meters for leg in waypoint_route.legs[:leg_index])
+                        + previous_to_station.distance_meters
+                    ),
+                    duration_seconds=(
+                        sum(leg.duration_seconds for leg in waypoint_route.legs[:leg_index])
+                        + previous_to_station.duration_seconds
+                    ),
+                )
+                station_to_destination = MatrixCost(
+                    distance_meters=(
+                        station_to_destination.distance_meters
+                        + sum(
+                            leg.distance_meters
+                            for leg in waypoint_route.legs[leg_index + 1 :]
+                        )
+                    ),
+                    duration_seconds=(
+                        station_to_destination.duration_seconds
+                        + sum(
+                            leg.duration_seconds
+                            for leg in waypoint_route.legs[leg_index + 1 :]
+                        )
+                    ),
+                )
             evaluated.append(
                 calculate_detour_candidate(
                     station=station,
@@ -79,6 +142,7 @@ async def evaluate_cng_detours(
                     previous_to_station=previous_to_station,
                     station_to_destination=station_to_destination,
                     departure_at=request.departure_at,
+                    itinerary_leg_index=leg_index,
                 )
             )
 

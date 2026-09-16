@@ -49,6 +49,7 @@ ROUTE_BIAS_LIMITATION = (
     "I risultati sono orientati alla rotta dal provider; non rappresentano "
     "un corridoio geometrico rigido."
 )
+EXISTING_WAYPOINT_DUPLICATE_RADIUS_METERS = 25.0
 
 
 class RouteRequiredError(Exception):
@@ -397,6 +398,7 @@ class AlongRouteSearchService:
         except Exception:
             session.completion.set()
             raise
+        next_page_token = provider_response.next_page_token
         try:
             evaluated_results = await self._evaluate_candidates(
                 provider_response.results,
@@ -417,13 +419,52 @@ class AlongRouteSearchService:
         ):
             known_refs = {item.suggestion.provider_ref for item in provider_response.results}
             expanded = list(evaluated_results)
+            recovery_calls = 0
+            while (
+                len(expanded) < self._minimum_eligible_results
+                and next_page_token is not None
+                and recovery_calls < self._recovery_call_limit
+            ):
+                try:
+                    page = await self._provider_search(
+                        query=query,
+                        language=request.language,
+                        encoded_polyline5=provider_polyline,
+                        page_token=next_page_token,
+                    )
+                    recovery_calls += 1
+                    next_page_token = page.next_page_token
+                    novel = tuple(
+                        item
+                        for item in page.results
+                        if item.suggestion.provider_ref not in known_refs
+                    )
+                    known_refs.update(item.suggestion.provider_ref for item in novel)
+                    expanded.extend(
+                        await self._evaluate_candidates(
+                            novel,
+                            route=route,
+                            query_intent=query_intent,
+                            routing_provider=routing_provider,
+                            preserve_over_budget=False,
+                        )
+                    )
+                except (
+                    DestinationRateLimitedError,
+                    DestinationProviderError,
+                    DestinationSearchUnavailableError,
+                ):
+                    break
             for recovery_polyline in build_google_route_recovery_polylines(
                 route,
                 max_points=self._max_geometry_points,
                 max_encoded_chars=self._max_encoded_polyline_chars,
                 segment_count=self._recovery_call_limit,
             ):
-                if len(expanded) >= self._minimum_eligible_results:
+                if (
+                    len(expanded) >= self._minimum_eligible_results
+                    or recovery_calls >= self._recovery_call_limit
+                ):
                     break
                 try:
                     recovery = await self._provider_search(
@@ -432,6 +473,7 @@ class AlongRouteSearchService:
                         encoded_polyline5=recovery_polyline,
                         page_token=None,
                     )
+                    recovery_calls += 1
                     novel = tuple(
                         item
                         for item in recovery.results
@@ -475,11 +517,11 @@ class AlongRouteSearchService:
             if request.page_cursor is not None:
                 current.page_tokens.pop(request.page_cursor, None)
             next_cursor = None
-            if provider_response.next_page_token is not None:
+            if next_page_token is not None:
                 next_cursor = hashlib.sha256(
                     f"{fingerprint}:{query}:{request.revision}:{time.monotonic_ns()}".encode()
                 ).hexdigest()[:32]
-                current.page_tokens = {next_cursor: provider_response.next_page_token}
+                current.page_tokens = {next_cursor: next_page_token}
             current.updated_at = time.monotonic()
         self.metrics.results_returned += len(evaluated_results)
         mode = (
@@ -550,9 +592,29 @@ class AlongRouteSearchService:
         routing_provider: RoutingProvider | None,
         preserve_over_budget: bool,
     ) -> tuple[AlongRouteProviderResult, ...]:
+        results = tuple(
+            item
+            for item in results
+            if not _matches_existing_route_point(item.selection.coordinate, route)
+        )
         if not _has_time_policy(route):
             return tuple(
-                replace(item, suggestion=replace(item.suggestion, search_intent=query_intent))
+                replace(
+                    item,
+                    suggestion=replace(
+                        item.suggestion,
+                        search_intent=query_intent,
+                        insertion_leg_index=(
+                            route.insertion_leg_index
+                            if route.insertion_leg_index is not None
+                            else _nearest_insertion_leg_index(
+                                route,
+                                item.selection.coordinate,
+                                max_points=self._max_geometry_points,
+                            )
+                        ),
+                    ),
+                )
                 for item in results
             )
         if routing_provider is None:
@@ -571,7 +633,11 @@ class AlongRouteSearchService:
             insertion_index = (
                 route.insertion_leg_index
                 if route.insertion_leg_index is not None
-                else len(waypoints)
+                else _nearest_insertion_leg_index(
+                    route,
+                    item.selection.coordinate,
+                    max_points=self._max_geometry_points,
+                )
             )
             waypoints.insert(insertion_index, item.selection.coordinate)
             try:
@@ -589,7 +655,11 @@ class AlongRouteSearchService:
                 if preserve_over_budget:
                     return replace(
                         item,
-                        suggestion=replace(item.suggestion, search_intent=query_intent),
+                        suggestion=replace(
+                            item.suggestion,
+                            search_intent=query_intent,
+                            insertion_leg_index=insertion_index,
+                        ),
                     )
                 return None
             self.metrics.candidates_evaluated += 1
@@ -608,6 +678,7 @@ class AlongRouteSearchService:
                 marginal_added_duration_seconds=max(0.0, marginal_added),
                 total_added_duration_seconds=max(0.0, total_added),
                 within_time_budget=within,
+                insertion_leg_index=insertion_index,
             )
             return replace(item, suggestion=suggestion)
 
@@ -1014,6 +1085,69 @@ def _distance_meters(first: Coordinate, second: Coordinate) -> float:
     delta_lon = radians(second.longitude - first.longitude)
     value = sin(delta_lat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(delta_lon / 2) ** 2
     return 2 * 6_371_000 * asin(sqrt(value))
+
+
+def _matches_existing_route_point(
+    candidate: Coordinate,
+    context: AlongRouteContext,
+) -> bool:
+    return any(
+        _distance_meters(candidate, point) <= EXISTING_WAYPOINT_DUPLICATE_RADIUS_METERS
+        for point in (
+            context.origin,
+            *context.remaining_waypoints,
+            context.final_destination,
+        )
+    )
+
+
+def _nearest_insertion_leg_index(
+    context: AlongRouteContext,
+    candidate: Coordinate,
+    *,
+    max_points: int,
+) -> int:
+    """Return the route leg containing the closest geometry to the candidate."""
+    best_index = 0
+    best_distance = float("inf")
+    remaining_points = max_points
+    for index, leg in enumerate(context.legs):
+        points = decode_polyline6(leg.encoded_polyline6, max_points=remaining_points)
+        remaining_points -= len(points)
+        distance = min(
+            _point_to_segment_distance_meters(candidate, start, end)
+            for start, end in zip(points, points[1:], strict=False)
+        )
+        if distance < best_distance:
+            best_index = index
+            best_distance = distance
+    return best_index
+
+
+def _point_to_segment_distance_meters(
+    point: Coordinate,
+    start: Coordinate,
+    end: Coordinate,
+) -> float:
+    reference_latitude = radians(point.latitude)
+    meters_per_degree_latitude = 111_320.0
+    meters_per_degree_longitude = meters_per_degree_latitude * cos(reference_latitude)
+    start_x = (start.longitude - point.longitude) * meters_per_degree_longitude
+    start_y = (start.latitude - point.latitude) * meters_per_degree_latitude
+    end_x = (end.longitude - point.longitude) * meters_per_degree_longitude
+    end_y = (end.latitude - point.latitude) * meters_per_degree_latitude
+    segment_x = end_x - start_x
+    segment_y = end_y - start_y
+    squared_length = segment_x * segment_x + segment_y * segment_y
+    if squared_length == 0:
+        return sqrt(start_x * start_x + start_y * start_y)
+    projection = max(
+        0.0,
+        min(1.0, -(start_x * segment_x + start_y * segment_y) / squared_length),
+    )
+    closest_x = start_x + projection * segment_x
+    closest_y = start_y + projection * segment_y
+    return sqrt(closest_x * closest_x + closest_y * closest_y)
 
 
 def _path_length(coordinates: list[Coordinate]) -> float:

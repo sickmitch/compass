@@ -11,14 +11,21 @@ from compass.candidates.domain import (
     CorridorPolicy,
     SpatialCandidate,
 )
-from compass.candidates.geometry import decode_polyline6, route_linestring_wkt
+from compass.candidates.geometry import (
+    decode_polyline6,
+    encode_polyline6,
+    route_linestring_wkt,
+    waypoint_route_as_base_route,
+)
 from compass.candidates.service import find_corridor_candidates
 from compass.routing.domain import (
     BaseRoute,
     Coordinate,
     Maneuver,
+    RouteLeg,
     RouteRequest,
     RoutingProviderError,
+    WaypointRoute,
 )
 
 
@@ -118,6 +125,53 @@ def test_polyline6_decodes_to_wgs84_linestring() -> None:
         Coordinate(latitude=44.4949, longitude=11.3426),
     )
     assert route_linestring_wkt(decoded) == ("LINESTRING(9.190000 45.464200,11.342600 44.494900)")
+
+
+def test_polyline6_encoder_preserves_coordinate_order_and_precision() -> None:
+    coordinates = (
+        Coordinate(latitude=45.438401, longitude=10.991611),
+        Coordinate(latitude=45.420002, longitude=11.010003),
+    )
+
+    assert decode_polyline6(encode_polyline6(coordinates), max_points=10) == coordinates
+
+
+def test_waypoint_route_joins_legs_through_selected_stop() -> None:
+    origin = Coordinate(latitude=45.438401, longitude=10.991611)
+    stop = Coordinate(latitude=45.420002, longitude=11.010003)
+    destination = Coordinate(latitude=45.400004, longitude=11.030005)
+    route = WaypointRoute(
+        distance_meters=8_500,
+        duration_seconds=720,
+        legs=(
+            RouteLeg(
+                distance_meters=4_000,
+                duration_seconds=330,
+                encoded_polyline=encode_polyline6((origin, stop)),
+                maneuvers=(),
+            ),
+            RouteLeg(
+                distance_meters=4_500,
+                duration_seconds=390,
+                encoded_polyline=encode_polyline6((stop, destination)),
+                maneuvers=(),
+            ),
+        ),
+        provider="valhalla",
+        traffic_aware=True,
+        traffic_delay_seconds=45,
+    )
+
+    base_route = waypoint_route_as_base_route(route, max_points=10)
+
+    assert decode_polyline6(base_route.encoded_polyline, max_points=10) == (
+        origin,
+        stop,
+        destination,
+    )
+    assert base_route.distance_meters == 8_500
+    assert base_route.duration_seconds == 720
+    assert base_route.traffic_aware is True
 
 
 def test_polyline6_decodes_checked_in_valhalla_shape() -> None:

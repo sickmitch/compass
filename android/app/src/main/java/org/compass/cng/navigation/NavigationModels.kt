@@ -50,6 +50,11 @@ data class NavigationIntermediateStop(
     val mapLabel: String = "Tappa intermedia",
 )
 
+data class NavigationOrderedStop(
+    val label: String,
+    val cngStop: SelectedCngStop? = null,
+)
+
 enum class NavigationIntermediateStopLifecycle {
     PLANNED,
     APPROACHING,
@@ -402,6 +407,49 @@ fun RouteWithIntermediateStops.toNavigationRoute(): NavigationRoute = buildNavig
     },
     rangeLegs = emptyList(),
 )
+
+fun RouteWithIntermediateStops.toNavigationRoute(
+    orderedStops: List<NavigationOrderedStop>,
+): NavigationRoute {
+    require(orderedStops.size == stops.size) {
+        "ordered stop metadata must match the routed waypoints"
+    }
+    val fuelStops = orderedStops.mapNotNull(NavigationOrderedStop::cngStop)
+    val totalDwellSeconds = fuelStops.sumOf(SelectedCngStop::dwellTimeSeconds)
+    val adjustedTiming = navigation.copy(
+        refuelingStopCount = fuelStops.size,
+        dwellSecondsPerRefuelingStop = fuelStops.firstOrNull()?.dwellTimeSeconds ?: 0,
+        totalRefuelingDwellSeconds = totalDwellSeconds.toDouble(),
+        totalTripDurationSeconds = navigation.drivingDurationSeconds + totalDwellSeconds,
+        tripArrivalAt = navigation.drivingArrivalAt?.plusSeconds(totalDwellSeconds.toLong()),
+    )
+    val route = asRoutePreview().copy(navigation = adjustedTiming)
+    val fuelStopSequences = orderedStops.mapIndexedNotNull { index, stop ->
+        if (stop.cngStop == null) null else index + 1
+    }
+    val navigationRoute = buildNavigationRoute(
+        route = route,
+        sourceLegs = legs,
+        stops = fuelStops,
+        intermediateStops = orderedStops.mapIndexedNotNull { index, stop ->
+            if (stop.cngStop == null) {
+                NavigationIntermediateStop(
+                    sequence = index + 1,
+                    location = stops[index],
+                    mapLabel = stop.label,
+                )
+            } else {
+                null
+            }
+        },
+        rangeLegs = emptyList(),
+    )
+    return navigationRoute.copy(
+        fuelStops = navigationRoute.fuelStops.mapIndexed { index, stop ->
+            stop.copy(sequence = fuelStopSequences[index])
+        },
+    )
+}
 
 private fun buildNavigationRoute(
     route: RoutePreview,

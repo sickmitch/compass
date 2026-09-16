@@ -637,6 +637,7 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
     assert body["candidates"][0]["reserve_margin_at_arrival_km"] == 40
     assert body["ranking_evaluation"]["enrichment_queries"] == 1
     assert [stop["mimit_station_id"] for stop in body["itinerary"]["stops"]] == ["1001"]
+    assert body["itinerary"]["stops"][0]["insertion_leg_index"] == 0
     assert body["itinerary"]["destination_leg"]["reserve_margin_at_arrival_km"] == 110
     assert body["gasoline_fallback"] is None
 

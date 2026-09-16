@@ -31,6 +31,7 @@ from compass.api.routes import (
     route_origin_direction,
 )
 from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
+from compass.candidates.geometry import waypoint_route_as_base_route
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
 from compass.detours.domain import NetworkDetourPolicy, NetworkDetourRequest
@@ -51,6 +52,7 @@ from compass.routing.domain import (
     RoutingProvider,
     RoutingProviderError,
     RoutingUnavailableError,
+    WaypointRouteRequest,
 )
 from compass.traffic.domain import TrafficHealthState
 from compass.traffic.service import network_cost_basis_from_settings
@@ -106,8 +108,7 @@ class PredictiveCandidatesApiRequest(RankedCandidatesApiRequest):
         if (
             self.estimated_remaining_gasoline_range_km is not None
             and self.reserve_gasoline_range_km is not None
-            and self.reserve_gasoline_range_km
-            >= self.estimated_remaining_gasoline_range_km
+            and self.reserve_gasoline_range_km >= self.estimated_remaining_gasoline_range_km
         ):
             raise ValueError("gasoline reserve must be lower than estimated remaining range")
         if len(set(self.excluded_mimit_station_ids)) != len(self.excluded_mimit_station_ids):
@@ -174,6 +175,14 @@ class PredictiveItineraryStopResponse(StrictModel):
     osm_match_confidence: float | None = Field(default=None, ge=0, le=1)
     price: CurrentCngPriceResponse | None
     dwell_time_seconds: int = Field(ge=0)
+    insertion_leg_index: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Zero-based leg of the mandatory user-waypoint itinerary where this CNG stop "
+            "must be inserted."
+        ),
+    )
 
 
 class PredictiveDestinationLegResponse(StrictModel):
@@ -271,9 +280,7 @@ async def predictive_candidates(
         ),
         estimated_remaining_cng_range_km=request.estimated_remaining_cng_range_km,
         reserve_cng_range_km=request.reserve_cng_range_km,
-        estimated_remaining_gasoline_range_km=(
-            request.estimated_remaining_gasoline_range_km
-        ),
+        estimated_remaining_gasoline_range_km=(request.estimated_remaining_gasoline_range_km),
         reserve_gasoline_range_km=request.reserve_gasoline_range_km,
     )
     corridor_policy = CorridorPolicy(
@@ -284,6 +291,29 @@ async def predictive_candidates(
     )
     ranking_policy = _ranking_policy(settings)
     try:
+        base_route = None
+        waypoint_route = None
+        mandatory_waypoints: tuple[Coordinate, ...] = ()
+        if request.intermediate_stops:
+            mandatory_waypoints = tuple(
+                Coordinate(stop.latitude, stop.longitude)
+                for stop in request.intermediate_stops
+            )
+            waypoint_route = await provider.route_with_waypoints(
+                WaypointRouteRequest(
+                    origin=route_request.origin,
+                    destination=route_request.destination,
+                    waypoints=mandatory_waypoints,
+                    costing=route_request.costing,
+                    language=route_request.language,
+                    departure_at=route_request.departure_at,
+                    origin_direction=route_request.origin_direction,
+                )
+            )
+            base_route = waypoint_route_as_base_route(
+                waypoint_route,
+                max_points=settings.route_geometry_max_points,
+            )
         result = await evaluate_predictive_cng_candidates(
             session,
             provider,
@@ -296,6 +326,9 @@ async def predictive_candidates(
             max_route_geometry_points=settings.route_geometry_max_points,
             cost_basis=network_cost_basis_from_settings(settings),
             dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
+            base_route=base_route,
+            waypoint_route=waypoint_route,
+            mandatory_waypoints=mandatory_waypoints,
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -421,5 +454,6 @@ def _predictive_itinerary_stop_response(
                 else None
             ),
             "dwell_time_seconds": stop.dwell_time_seconds,
+            "insertion_leg_index": stop.insertion_leg_index,
         }
     )

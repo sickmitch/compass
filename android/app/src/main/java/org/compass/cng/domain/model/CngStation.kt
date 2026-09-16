@@ -193,6 +193,8 @@ data class PredictiveItineraryStop(
     val operator: String?,
     val osmMatchConfidence: Double?,
     val price: CngPrice?,
+    /** Zero-based mandatory user-route leg where this automatic fuel stop belongs. */
+    val insertionLegIndex: Int = 0,
     val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 ) {
     init {
@@ -207,6 +209,7 @@ data class PredictiveItineraryStop(
             "itinerary stop must be reachable while preserving reserve"
         }
         require(dwellTimeSeconds >= 0) { "itinerary stop dwell must not be negative" }
+        require(insertionLegIndex >= 0) { "itinerary insertion leg must not be negative" }
     }
 }
 
@@ -252,6 +255,9 @@ data class PredictiveCngItinerary(
         require(stops.map { it.station.mimitStationId }.distinct().size == stops.size) {
             "predictive itinerary must not repeat a station"
         }
+        require(stops.zipWithNext().all { (current, next) ->
+            current.insertionLegIndex <= next.insertionLegIndex
+        }) { "predictive itinerary stops must follow mandatory route legs" }
         require(totalDistanceMeters >= 0 && totalDurationSeconds >= 0) {
             "predictive itinerary total cost must not be negative"
         }

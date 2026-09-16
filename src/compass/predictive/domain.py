@@ -207,6 +207,7 @@ class PredictiveItineraryStop:
     operator: str | None
     osm_match_confidence: float | None
     price: EvaluatedCngPrice | None
+    insertion_leg_index: int = 0
     dwell_time_seconds: int = DEFAULT_CNG_REFUEL_DWELL_SECONDS
 
     def __post_init__(self) -> None:
@@ -225,6 +226,8 @@ class PredictiveItineraryStop:
             raise ValueError("itinerary stop arrival must include a UTC offset")
         if self.dwell_time_seconds < 0:
             raise ValueError("itinerary stop dwell must not be negative")
+        if self.insertion_leg_index < 0:
+            raise ValueError("itinerary insertion leg index must not be negative")
 
 
 @dataclass(frozen=True, slots=True)

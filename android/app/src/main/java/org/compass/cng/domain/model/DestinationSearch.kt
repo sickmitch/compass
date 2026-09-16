@@ -53,6 +53,7 @@ data class DestinationSuggestion(
     val marginalAddedDurationSeconds: Double? = null,
     val totalAddedDurationSeconds: Double? = null,
     val withinTimeBudget: Boolean? = null,
+    val insertionLegIndex: Int? = null,
 )
 
 data class DestinationSuggestions(

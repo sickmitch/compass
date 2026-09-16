@@ -146,6 +146,7 @@ internal fun predictiveResponseFixture(
                                         candidate.getValue("osm_match_confidence"),
                                     )
                                     put("price", candidate.getValue("price"))
+                                    put("insertion_leg_index", 1)
                                 },
                             )
                         },

@@ -97,6 +97,21 @@ interface RoutingRepository {
         departureAt: OffsetDateTime,
     ): RankedCngStations
 
+    suspend fun rankedCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+    ): RankedCngStations = rankedCngStations(
+        origin = origin,
+        destination = destination,
+        effectiveCngRangeKm = effectiveCngRangeKm,
+        maximumDetourMinutes = maximumDetourMinutes,
+        departureAt = departureAt,
+    )
+
     suspend fun routeWithCngStop(
         origin: Coordinate,
         destination: Coordinate,
@@ -117,6 +132,33 @@ interface RoutingRepository {
         reserveGasolineRangeKm: Double? = null,
         originDirection: RouteOriginDirection? = null,
     ): PredictiveCngSuggestion
+
+    suspend fun predictiveCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String> = emptySet(),
+        estimatedRemainingGasolineRangeKm: Double? = null,
+        reserveGasolineRangeKm: Double? = null,
+        originDirection: RouteOriginDirection? = null,
+    ): PredictiveCngSuggestion = predictiveCngStations(
+        origin = origin,
+        destination = destination,
+        effectiveCngRangeKm = effectiveCngRangeKm,
+        estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
+        reserveCngRangeKm = reserveCngRangeKm,
+        maximumDetourMinutes = maximumDetourMinutes,
+        departureAt = departureAt,
+        excludedMimitStationIds = excludedMimitStationIds,
+        estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
+        reserveGasolineRangeKm = reserveGasolineRangeKm,
+        originDirection = originDirection,
+    )
 
     suspend fun routeWithCngItinerary(
         origin: Coordinate,

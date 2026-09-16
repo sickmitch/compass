@@ -55,6 +55,7 @@ data class ApiDestinationSuggestion(
     val marginalAddedDurationSeconds: Double? = null,
     val totalAddedDurationSeconds: Double? = null,
     val withinTimeBudget: Boolean? = null,
+    val insertionLegIndex: Int? = null,
 )
 
 data class ApiResolvedDestination(
@@ -263,6 +264,7 @@ data class ApiPredictiveItineraryStop(
     val operator: String?,
     val osmMatchConfidence: Double?,
     val price: ApiCngPrice?,
+    val insertionLegIndex: Int = 0,
     val dwellTimeSeconds: Int,
 )
 

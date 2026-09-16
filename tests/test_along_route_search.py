@@ -357,8 +357,156 @@ def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_
         "within-slower",
     ]
     assert [item.marginal_added_duration_seconds for item in response.results] == [5.0, 15.0]
+    assert all(item.insertion_leg_index == 1 for item in response.results)
     assert all(item.within_time_budget for item in response.results)
     assert all(request.waypoints[0] == route.remaining_waypoints[0] for request in routing.requests)
+
+
+def test_candidate_uses_nearest_leg_and_existing_stop_is_not_suggested_again() -> None:
+    route = replace(
+        _route(),
+        baseline_duration_seconds=100.0,
+        current_duration_seconds=130.0,
+        maximum_total_added_duration_seconds=50.0,
+    )
+
+    def result(
+        ref: str,
+        coordinate: Coordinate,
+        rank: int,
+    ) -> AlongRouteProviderResult:
+        return AlongRouteProviderResult(
+            DestinationSuggestion(
+                id=f"google_places_new:{ref}",
+                provider="google_places_new",
+                provider_ref=ref,
+                kind="business",
+                title=ref,
+                subtitle=None,
+                address_preview=None,
+                distance_meters=None,
+                provider_rank=rank,
+                requires_resolution=False,
+            ),
+            ResolvedDestinationSelection(
+                provider="google_places_new",
+                provider_ref=ref,
+                formatted_address=None,
+                address_components=(),
+                normalized_address=NormalizedAddress(),
+                coordinate=coordinate,
+                kind="business",
+                attribution=("Google Maps",),
+                field_sources=(("location", "google_places_new"),),
+            ),
+        )
+
+    candidate = Coordinate(45.04, 10.08)
+
+    class Provider(_Provider):
+        async def search(self, **_kwargs):
+            self.calls += 1
+            return AlongRouteProviderResponse(
+                (
+                    result("already-selected", route.remaining_waypoints[0], 0),
+                    result("first-leg", candidate, 1),
+                ),
+                None,
+            )
+
+    class Routing:
+        def __init__(self):
+            self.requests = []
+
+        async def route_with_waypoints(self, request):
+            self.requests.append(request)
+            return WaypointRoute(0.0, 135.0, (), "fixture")
+
+    provider = Provider()
+    routing = Routing()
+    response = asyncio.run(
+        _service(provider, minimum_eligible_results=1).search(
+            "user",
+            _request(route, query="farmacia"),
+            routing_provider=routing,
+        )
+    )
+
+    assert [item.provider_ref for item in response.results] == ["first-leg"]
+    assert response.results[0].insertion_leg_index == 0
+    assert len(routing.requests) == 1
+    assert routing.requests[0].waypoints == (candidate, route.remaining_waypoints[0])
+
+
+def test_initial_search_consumes_next_provider_page_after_duplicate_filtering() -> None:
+    route = replace(
+        _route(),
+        baseline_duration_seconds=100.0,
+        current_duration_seconds=100.0,
+        maximum_total_added_duration_seconds=50.0,
+    )
+
+    def result(ref: str, coordinate: Coordinate) -> AlongRouteProviderResult:
+        return AlongRouteProviderResult(
+            DestinationSuggestion(
+                id=f"google_places_new:{ref}",
+                provider="google_places_new",
+                provider_ref=ref,
+                kind="business",
+                title=ref,
+                subtitle=None,
+                address_preview=None,
+                distance_meters=None,
+                provider_rank=0,
+                requires_resolution=False,
+            ),
+            ResolvedDestinationSelection(
+                provider="google_places_new",
+                provider_ref=ref,
+                formatted_address=None,
+                address_components=(),
+                normalized_address=NormalizedAddress(),
+                coordinate=coordinate,
+                kind="business",
+                attribution=("Google Maps",),
+                field_sources=(("location", "google_places_new"),),
+            ),
+        )
+
+    class Provider(_Provider):
+        def __init__(self):
+            self.calls = 0
+            self.page_tokens = []
+
+        async def search(self, **kwargs):
+            self.calls += 1
+            self.page_tokens.append(kwargs["page_token"])
+            if kwargs["page_token"] is None:
+                return AlongRouteProviderResponse(
+                    (result("already-selected", route.remaining_waypoints[0]),),
+                    "page-2",
+                )
+            return AlongRouteProviderResponse(
+                (result("next-result", Coordinate(45.2, 10.3)),),
+                None,
+            )
+
+    class Routing:
+        async def route_with_waypoints(self, _request):
+            return WaypointRoute(0.0, 110.0, (), "fixture")
+
+    provider = Provider()
+    response = asyncio.run(
+        _service(provider, minimum_eligible_results=1).search(
+            "user",
+            _request(route, query="farmacia"),
+            routing_provider=Routing(),
+        )
+    )
+
+    assert [item.provider_ref for item in response.results] == ["next-result"]
+    assert provider.page_tokens == [None, "page-2"]
+    assert response.next_page_cursor is None
 
 
 @pytest.mark.parametrize(
@@ -402,7 +550,11 @@ class _Provider:
         return AlongRouteProviderResponse((), None)
 
 
-def _service(provider: _Provider) -> AlongRouteSearchService:
+def _service(
+    provider: _Provider,
+    *,
+    minimum_eligible_results: int = 3,
+) -> AlongRouteSearchService:
     return AlongRouteSearchService(
         provider=provider,
         max_geometry_points=100,
@@ -411,6 +563,7 @@ def _service(provider: _Provider) -> AlongRouteSearchService:
         max_concurrency=2,
         requests_per_user_minute=20,
         minimum_query_characters=3,
+        minimum_eligible_results=minimum_eligible_results,
     )
 
 

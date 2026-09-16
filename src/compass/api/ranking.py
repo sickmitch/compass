@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from compass.api.contracts import ErrorResponse, StrictModel, error_response
 from compass.api.routes import (
     BaseRouteResponse,
+    CoordinateRequest,
     CorridorPolicyResponse,
     DetourCandidatesRequest,
     EligibleDetourCandidateResponse,
@@ -22,6 +23,7 @@ from compass.api.routes import (
     route_origin_direction,
 )
 from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
+from compass.candidates.geometry import waypoint_route_as_base_route
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
 from compass.detours.domain import NetworkDetourPolicy, NetworkDetourRequest
@@ -35,6 +37,7 @@ from compass.routing.domain import (
     RoutingProvider,
     RoutingProviderError,
     RoutingUnavailableError,
+    WaypointRouteRequest,
 )
 from compass.traffic.service import network_cost_basis_from_settings
 
@@ -42,6 +45,7 @@ router = APIRouter(prefix="/api/v1", tags=["ranking"])
 
 
 class RankedCandidatesApiRequest(DetourCandidatesRequest):
+    intermediate_stops: list[CoordinateRequest] = Field(default_factory=list, max_length=8)
     include_closed: bool = Field(
         default=False,
         description=(
@@ -160,9 +164,7 @@ async def ranked_candidates(
 ) -> RankedCandidatesResponse | JSONResponse:
     route_request = RouteRequest(
         origin=Coordinate(request.origin.latitude, request.origin.longitude),
-        destination=Coordinate(
-            request.destination.latitude, request.destination.longitude
-        ),
+        destination=Coordinate(request.destination.latitude, request.destination.longitude),
         costing=request.costing,
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
@@ -187,6 +189,26 @@ async def ranked_candidates(
     )
     ranking_policy = _ranking_policy(settings)
     try:
+        base_route = None
+        if request.intermediate_stops:
+            waypoint_route = await provider.route_with_waypoints(
+                WaypointRouteRequest(
+                    origin=route_request.origin,
+                    destination=route_request.destination,
+                    waypoints=tuple(
+                        Coordinate(stop.latitude, stop.longitude)
+                        for stop in request.intermediate_stops
+                    ),
+                    costing=route_request.costing,
+                    language=route_request.language,
+                    departure_at=route_request.departure_at,
+                    origin_direction=route_request.origin_direction,
+                )
+            )
+            base_route = waypoint_route_as_base_route(
+                waypoint_route,
+                max_points=settings.route_geometry_max_points,
+            )
         result = await rank_cng_candidates(
             session,
             provider,
@@ -198,6 +220,7 @@ async def ranked_candidates(
             ranking_policy=ranking_policy,
             max_route_geometry_points=settings.route_geometry_max_points,
             cost_basis=network_cost_basis_from_settings(settings),
+            base_route=base_route,
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -223,13 +246,9 @@ async def ranked_candidates(
             departure_at=network.departure_at,
         ),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),
-        spatial_pruning=SpatialPruningMetricsResponse.model_validate(
-            asdict(spatial.metrics)
-        ),
+        spatial_pruning=SpatialPruningMetricsResponse.model_validate(asdict(spatial.metrics)),
         cost_basis=NetworkCostBasisResponse.model_validate(asdict(network.cost_basis)),
-        network_evaluation=NetworkEvaluationMetricsResponse.model_validate(
-            asdict(network.metrics)
-        ),
+        network_evaluation=NetworkEvaluationMetricsResponse.model_validate(asdict(network.metrics)),
         ranking_policy=_ranking_policy_response(result.policy, result.include_closed),
         ranking_evaluation=RankingMetricsResponse.model_validate(asdict(result.metrics)),
         candidates=[_ranked_candidate_response(candidate) for candidate in result.candidates],

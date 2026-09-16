@@ -73,6 +73,7 @@ class DestinationSuggestionResponse(StrictModel):
     marginal_added_duration_seconds: None = None
     total_added_duration_seconds: None = None
     within_time_budget: None = None
+    insertion_leg_index: None = None
 
 
 class DestinationSuggestResponse(StrictModel):

@@ -413,11 +413,11 @@ internal fun ActiveNavigationScreen(
             state.nextIntermediateStop?.let { stop ->
                 Surface(
                     shape = MaterialTheme.shapes.extraLarge,
-                    color = if (state.activeIntermediateStopVisit != null) {
+                    color = (if (state.activeIntermediateStopVisit != null) {
                         MaterialTheme.colorScheme.primaryContainer
                     } else {
                         MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
+                    }).copy(alpha = NAVIGATION_GLASS_PANEL_ALPHA),
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
                         .padding(horizontal = 12.dp, vertical = 6.dp)

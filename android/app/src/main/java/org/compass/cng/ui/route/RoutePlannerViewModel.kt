@@ -44,6 +44,7 @@ import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithIntermediateStop
 import org.compass.cng.domain.model.RouteWithIntermediateStops
+import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.domain.model.withNavigationDetailsFrom
 import org.compass.cng.domain.server.InMemoryServerConnectionRepository
 import org.compass.cng.domain.server.ServerConnection
@@ -56,6 +57,7 @@ import org.compass.cng.domain.system.BackendSystemInfoRepository
 import org.compass.cng.domain.system.InMemoryBackendSystemInfoRepository
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.navigation.NavigationOrderedStop
 import org.compass.cng.navigation.FollowLocationPolicy
 import org.compass.cng.navigation.toNavigationRoute
 import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
@@ -118,13 +120,20 @@ enum class CngWorkflowMode {
     PREDICTIVE,
 }
 
+enum class IntermediateStopsMode {
+    ROUTE,
+    CNG_PLAN,
+}
+
 data class PlannedIntermediateStop(
     val id: String,
     val location: Coordinate,
     val locationMethod: RouteLocationMethod,
     val privateDisplayName: String,
+    val cngStop: SelectedCngStop? = null,
 ) {
-    val mapLabel: String get() = "Tappa intermedia"
+    val mapLabel: String get() = cngStop?.name ?: privateDisplayName
+    val isCng: Boolean get() = cngStop != null
 }
 
 data class RoutePlannerUiState(
@@ -176,12 +185,16 @@ data class RoutePlannerUiState(
     val pendingIntermediateStopRoute: RouteWithIntermediateStop? = null,
     val pendingIntermediateStopsRoute: RouteWithIntermediateStops? = null,
     val pendingIntermediateStopCoordinate: Coordinate? = null,
+    val pendingIntermediateInsertionIndex: Int? = null,
     val placeSearchSource: PlaceSearchSource = PlaceSearchSource.LIVE,
     val placeSearchCachedAtEpochMillis: Long? = null,
     val baseRoute: RoutePreview? = null,
     val intermediateStopRoute: RouteWithIntermediateStop? = null,
     val plannedIntermediateStops: List<PlannedIntermediateStop> = emptyList(),
     val intermediateStopsRoute: RouteWithIntermediateStops? = null,
+    val predictiveInputStops: List<PlannedIntermediateStop>? = null,
+    val predictiveInputRoute: RouteWithIntermediateStops? = null,
+    val intermediateStopsMode: IntermediateStopsMode = IntermediateStopsMode.ROUTE,
     val editingIntermediateStopId: String? = null,
     val mapPickerTarget: RouteEndpoint? = null,
     val mapPickerCoordinate: Coordinate? = null,
@@ -199,6 +212,7 @@ data class RoutePlannerUiState(
     val pendingStation: RankedCngStation? = null,
     val selectedRoute: RouteWithCngStop? = null,
     val selectedItineraryRoute: RouteWithCngItinerary? = null,
+    val gasolineFallbackPromptVisible: Boolean = false,
     val message: String? = null,
     val vehicleProfiles: VehicleProfiles = VehicleProfiles(),
     val editingVehicleProfileId: String? = null,
@@ -226,6 +240,7 @@ data class RoutePlannerUiState(
         const val DEFAULT_EFFECTIVE_RANGE_KM = "300"
         const val DEFAULT_RESERVE_RANGE_KM = "30"
         const val DEFAULT_MAXIMUM_DETOUR_MINUTES = "10"
+        const val MAX_PLANNED_INTERMEDIATE_STOPS = 8
     }
 }
 
@@ -339,6 +354,7 @@ class RoutePlannerViewModel(
     private var systemInfoJob: Job? = null
     private var pendingIntermediateResolution: ResolvedDestination? = null
     private var pendingIntermediateDraft: PlannedIntermediateStop? = null
+    private var cngSelectionReturnsToStops: Boolean = false
     private var serverReturnStage: PlannerStage = PlannerStage.FOLLOW
     private var optionsReturnStage: PlannerStage = PlannerStage.FOLLOW
 
@@ -747,7 +763,7 @@ class RoutePlannerViewModel(
                 previewIntermediateCoordinate(
                     coordinate = coordinate,
                     method = RouteLocationMethod.COORDINATES,
-                    privateDisplayName = "Punto selezionato sulla mappa",
+                    privateDisplayName = coordinate.toStopCoordinateLabel(),
                     allowTimeLimitOverride = true,
                 )
             }
@@ -1107,11 +1123,16 @@ class RoutePlannerViewModel(
     private fun previewIntermediateStop(resolved: ResolvedDestination) {
         val coordinate = resolved.navigationTarget.location
         val selectedSuggestion = mutableUiState.value.pendingDestinationSuggestion
+        val displayName = selectedSuggestion?.title
+            ?.takeIf(String::isNotBlank)
+            ?: resolved.selection.formattedAddress
+            ?: coordinate.toStopCoordinateLabel()
         previewIntermediateCoordinate(
             coordinate = coordinate,
             method = RouteLocationMethod.SEARCH,
-            privateDisplayName = "Tappa selezionata",
+            privateDisplayName = displayName,
             resolved = resolved,
+            insertionIndex = selectedSuggestion?.insertionLegIndex,
             allowTimeLimitOverride = selectedSuggestion?.searchIntent in
                 setOf("specific", "ambiguous") &&
                 selectedSuggestion?.withinTimeBudget != true,
@@ -1123,10 +1144,22 @@ class RoutePlannerViewModel(
         method: RouteLocationMethod,
         privateDisplayName: String,
         resolved: ResolvedDestination? = null,
+        insertionIndex: Int? = null,
         allowTimeLimitOverride: Boolean = false,
     ) {
         val state = mutableUiState.value
         val directRoute = state.baseRoute ?: return
+        if (
+            state.editingIntermediateStopId == null &&
+            state.plannedIntermediateStops.size >= RoutePlannerUiState.MAX_PLANNED_INTERMEDIATE_STOPS
+        ) {
+            mutableUiState.value = state.copy(
+                operation = null,
+                message = "Puoi inserire al massimo " +
+                    "${RoutePlannerUiState.MAX_PLANNED_INTERMEDIATE_STOPS} tappe.",
+            )
+            return
+        }
         val maximumAddedMinutes = state.intermediateStopMaximumAddedMinutesInput.parseDecimal()
         if (maximumAddedMinutes == null || maximumAddedMinutes < 0.0) {
             mutableUiState.value = state.copy(
@@ -1143,7 +1176,11 @@ class RoutePlannerViewModel(
         )
         val proposedStops = state.plannedIntermediateStops.toMutableList().also { stops ->
             val editingIndex = stops.indexOfFirst { it.id == state.editingIntermediateStopId }
-            if (editingIndex >= 0) stops[editingIndex] = draft else stops += draft
+            if (editingIndex >= 0) {
+                stops[editingIndex] = draft
+            } else {
+                stops.add(insertionIndex?.coerceIn(0, stops.size) ?: stops.size, draft)
+            }
         }
         destinationSearchJob = viewModelScope.launch {
             mutableUiState.value = state.copy(
@@ -1151,6 +1188,7 @@ class RoutePlannerViewModel(
                 pendingResolvedDestination = null,
                 pendingDestinationSuggestion = null,
                 pendingIntermediateStopCoordinate = coordinate,
+                pendingIntermediateInsertionIndex = insertionIndex,
                 message = null,
             )
             try {
@@ -1179,7 +1217,10 @@ class RoutePlannerViewModel(
                     pendingIntermediateStopsRoute = candidateRoute,
                     pendingIntermediateStopCoordinate = coordinate,
                     destinationSuggestions = emptyList(),
-                    message = if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
+                    message = if (
+                        extraDurationSeconds > maximumAddedMinutes * 60.0 &&
+                        !allowTimeLimitOverride
+                    ) {
                         "La tappa supera il limite temporale impostato. " +
                             "Conferma l'anteprima per accettarla comunque."
                     } else null,
@@ -1207,7 +1248,15 @@ class RoutePlannerViewModel(
         if (state.stage != PlannerStage.INTERMEDIATE_STOP_PREVIEW || state.isBusy) return
         val stops = state.plannedIntermediateStops.toMutableList().also { current ->
             val editingIndex = current.indexOfFirst { it.id == state.editingIntermediateStopId }
-            if (editingIndex >= 0) current[editingIndex] = draft else current += draft
+            if (editingIndex >= 0) {
+                current[editingIndex] = draft
+            } else {
+                current.add(
+                    state.pendingIntermediateInsertionIndex?.coerceIn(0, current.size)
+                        ?: current.size,
+                    draft,
+                )
+            }
         }
         pendingIntermediateResolution = null
         pendingIntermediateDraft = null
@@ -1219,6 +1268,7 @@ class RoutePlannerViewModel(
             editingIntermediateStopId = null,
             pendingIntermediateStopsRoute = null,
             pendingIntermediateStopCoordinate = null,
+            pendingIntermediateInsertionIndex = null,
             mapPickerTarget = null,
             routeInputsDirty = false,
             destinationSearchSessionId = null,
@@ -1541,6 +1591,7 @@ class RoutePlannerViewModel(
         )
         mutableUiState.value = state.copy(
             stage = PlannerStage.INTERMEDIATE_STOPS,
+            intermediateStopsMode = IntermediateStopsMode.ROUTE,
             // Opening the editor does not create a stop. This flag represents only
             // committed itinerary content and must remain false for an empty draft.
             intermediateStopEnabled = state.plannedIntermediateStops.isNotEmpty(),
@@ -1550,6 +1601,69 @@ class RoutePlannerViewModel(
                         .toOneDecimalInput()
                 },
             editingIntermediateStopId = null,
+            pendingIntermediateInsertionIndex = null,
+            message = null,
+        )
+    }
+
+    fun addIntermediateStopForCngPlan() {
+        val state = mutableUiState.value
+        val route = state.baseRoute ?: return
+        if (state.isBusy) return
+        pendingIntermediateResolution = null
+        pendingIntermediateDraft = null
+        mutableUiState.value = state.copy(
+            stage = PlannerStage.INTERMEDIATE_STOPS,
+            intermediateStopsMode = IntermediateStopsMode.CNG_PLAN,
+            intermediateStopEnabled = state.plannedIntermediateStops.isNotEmpty(),
+            intermediateStopMaximumAddedMinutesInput = state
+                .intermediateStopMaximumAddedMinutesInput.ifBlank {
+                    (route.durationSeconds / 60.0 / DEFAULT_INTERMEDIATE_STOP_TIME_DIVISOR)
+                        .toOneDecimalInput()
+                },
+            editingIntermediateStopId = null,
+            pendingIntermediateInsertionIndex = null,
+            message = null,
+        )
+    }
+
+    fun beginAddingIntermediateStop() {
+        val state = mutableUiState.value
+        if (state.stage != PlannerStage.INTERMEDIATE_STOPS || state.isBusy) return
+        pendingIntermediateResolution = null
+        pendingIntermediateDraft = null
+        mutableUiState.value = state.copy(
+            editingIntermediateStopId = null,
+            pendingIntermediateStopsRoute = null,
+            pendingIntermediateStopCoordinate = null,
+            pendingIntermediateInsertionIndex = null,
+            message = null,
+        )
+    }
+
+    fun cancelIntermediateStopEdit() = beginAddingIntermediateStop()
+
+    fun addCngIntermediateStop() {
+        val state = mutableUiState.value
+        if (
+            state.stage != PlannerStage.INTERMEDIATE_STOPS ||
+            state.intermediateStopsMode != IntermediateStopsMode.ROUTE ||
+            state.baseRoute == null || state.isBusy
+        ) return
+        if (
+            state.editingIntermediateStopId == null &&
+            state.plannedIntermediateStops.size >= RoutePlannerUiState.MAX_PLANNED_INTERMEDIATE_STOPS
+        ) {
+            mutableUiState.value = state.copy(
+                message = "Puoi inserire al massimo " +
+                    "${RoutePlannerUiState.MAX_PLANNED_INTERMEDIATE_STOPS} tappe.",
+            )
+            return
+        }
+        cngSelectionReturnsToStops = true
+        mutableUiState.value = state.copy(
+            stage = PlannerStage.CONFIGURE_CNG,
+            workflowMode = CngWorkflowMode.MANUAL,
             message = null,
         )
     }
@@ -1567,7 +1681,7 @@ class RoutePlannerViewModel(
     fun moveIntermediateStop(fromIndex: Int, toIndex: Int) {
         val state = mutableUiState.value
         if (
-            state.isBusy || fromIndex !in state.plannedIntermediateStops.indices ||
+            fromIndex !in state.plannedIntermediateStops.indices ||
             toIndex !in state.plannedIntermediateStops.indices || fromIndex == toIndex
         ) return
         val reordered = state.plannedIntermediateStops.toMutableList()
@@ -1575,9 +1689,47 @@ class RoutePlannerViewModel(
         reordered.add(toIndex, moved)
         mutableUiState.value = state.copy(
             plannedIntermediateStops = reordered,
-            intermediateStopsRoute = null,
             message = null,
         )
+        recalculateReorderedStops(reordered)
+    }
+
+    private fun recalculateReorderedStops(stops: List<PlannedIntermediateStop>) {
+        val directRoute = mutableUiState.value.baseRoute ?: return
+        requestJob?.cancel()
+        requestJob = viewModelScope.launch {
+            mutableUiState.value = mutableUiState.value.copy(
+                operation = PlannerOperation.INTERMEDIATE_STOP_ROUTE,
+                message = null,
+            )
+            try {
+                val route = routingRepository.routeWithIntermediateStops(
+                    origin = directRoute.origin,
+                    intermediateStops = stops.map(PlannedIntermediateStop::location),
+                    destination = directRoute.destination,
+                )
+                if (mutableUiState.value.plannedIntermediateStops.map { it.id } != stops.map { it.id }) {
+                    return@launch
+                }
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    intermediateStopsRoute = route,
+                    message = null,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: RoutePreviewException) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = error.failure.baseRouteMessage(),
+                )
+            } catch (_: Exception) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = RoutePreviewFailure.INVALID_RESPONSE.baseRouteMessage(),
+                )
+            }
+        }
     }
 
     fun deleteIntermediateStop(id: String) {
@@ -1590,11 +1742,12 @@ class RoutePlannerViewModel(
         }
         mutableUiState.value = state.copy(
             plannedIntermediateStops = remaining,
-            intermediateStopsRoute = null,
+            intermediateStopsRoute = if (remaining.isEmpty()) null else state.intermediateStopsRoute,
             editingIntermediateStopId = null,
             intermediateStopEnabled = remaining.isNotEmpty(),
             message = null,
         )
+        if (remaining.isNotEmpty()) recalculateReorderedStops(remaining)
     }
 
     private fun recalculateIntermediateStopsAfterEdit(
@@ -1630,7 +1783,7 @@ class RoutePlannerViewModel(
                         intermediateStops = remaining.map(PlannedIntermediateStop::location),
                         destination = directRoute.destination,
                     )
-                    navigationSession.preview(route.toNavigationRoute())
+                    navigationSession.preview(route.toNavigationRoute(remaining.toNavigationStops()))
                     mutableUiState.value = mutableUiState.value.copy(
                         stage = PlannerStage.NAVIGATION_PREVIEW,
                         operation = null,
@@ -1660,20 +1813,29 @@ class RoutePlannerViewModel(
         val state = mutableUiState.value
         val directRoute = state.baseRoute ?: return
         if (state.isBusy) return
-        if (state.plannedIntermediateStops.isEmpty()) {
+        val routeStops = if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN) {
+            state.plannedIntermediateStops.filterNot(PlannedIntermediateStop::isCng)
+        } else {
+            state.plannedIntermediateStops
+        }
+        if (routeStops.isEmpty()) {
+            if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN) {
+                mutableUiState.value = state.copy(
+                    stage = PlannerStage.CONFIGURE_PREDICTIVE,
+                    plannedIntermediateStops = emptyList(),
+                    intermediateStopsRoute = null,
+                    intermediateStopEnabled = false,
+                    message = null,
+                )
+                evaluatePredictiveRange()
+                return
+            }
             navigationSession.preview(directRoute.toNavigationRoute())
             mutableUiState.value = state.withMapSafeSearchLabels().copy(
                 stage = PlannerStage.NAVIGATION_PREVIEW,
                 intermediateStopsRoute = null,
                 intermediateStopEnabled = false,
                 message = null,
-            )
-            return
-        }
-        val maximumAddedMinutes = state.intermediateStopMaximumAddedMinutesInput.parseDecimal()
-        if (maximumAddedMinutes == null || maximumAddedMinutes < 0.0) {
-            mutableUiState.value = state.copy(
-                message = "Inserisci un tempo aggiuntivo massimo valido per le tappe.",
             )
             return
         }
@@ -1686,30 +1848,27 @@ class RoutePlannerViewModel(
             try {
                 val route = routingRepository.routeWithIntermediateStops(
                     origin = directRoute.origin,
-                    intermediateStops = state.plannedIntermediateStops.map {
+                    intermediateStops = routeStops.map {
                         it.location
                     },
                     destination = directRoute.destination,
                 )
-                val extraDurationSeconds =
-                    (route.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
-                val containsDeliberateMapSelection = state.plannedIntermediateStops.any {
-                    it.locationMethod == RouteLocationMethod.COORDINATES
-                }
-                if (
-                    extraDurationSeconds > maximumAddedMinutes * 60.0 &&
-                    !containsDeliberateMapSelection
-                ) {
+                if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN) {
                     mutableUiState.value = mutableUiState.value.copy(
+                        stage = PlannerStage.CONFIGURE_PREDICTIVE,
                         operation = null,
-                        message = intermediateStopAddedTimeMessage(
-                            extraDurationSeconds,
-                            maximumAddedMinutes,
-                        ),
+                        plannedIntermediateStops = routeStops,
+                        intermediateStopsRoute = route,
+                        intermediateStopEnabled = true,
+                        message = null,
                     )
+                    requestJob = null
+                    evaluatePredictiveRange()
                     return@launch
                 }
-                navigationSession.preview(route.toNavigationRoute())
+                navigationSession.preview(
+                    route.toNavigationRoute(state.plannedIntermediateStops.toNavigationStops()),
+                )
                 mutableUiState.value = mutableUiState.value.withMapSafeSearchLabels().copy(
                     stage = PlannerStage.NAVIGATION_PREVIEW,
                     operation = null,
@@ -1803,7 +1962,6 @@ class RoutePlannerViewModel(
     fun openAddStop() {
         if (
             mutableUiState.value.baseRoute != null &&
-            mutableUiState.value.plannedIntermediateStops.isEmpty() &&
             !mutableUiState.value.routeInputsDirty &&
             !mutableUiState.value.isBusy
         ) {
@@ -1827,7 +1985,6 @@ class RoutePlannerViewModel(
     fun openPredictiveRange() {
         if (
             mutableUiState.value.baseRoute != null &&
-            mutableUiState.value.plannedIntermediateStops.isEmpty() &&
             !mutableUiState.value.routeInputsDirty &&
             !mutableUiState.value.isBusy
         ) {
@@ -2140,17 +2297,22 @@ class RoutePlannerViewModel(
                 workflowMode = CngWorkflowMode.MANUAL,
             )
             try {
-                val ranked = routingRepository.rankedCngStations(
+                val ranked = routingRepository.rankedCngStationsAlongItinerary(
                     origin = route.origin,
                     destination = route.destination,
                     effectiveCngRangeKm = requireNotNull(rangeKm),
                     maximumDetourMinutes = requireNotNull(detourMinutes),
                     departureAt = OffsetDateTime.now(clock),
+                    intermediateStops = state.plannedIntermediateStops.map { it.location },
                 )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.CNG_CANDIDATES,
                     operation = null,
-                    baseRoute = ranked.baseRoute,
+                    baseRoute = if (state.plannedIntermediateStops.isEmpty()) {
+                        ranked.baseRoute
+                    } else {
+                        state.baseRoute
+                    },
                     rankedStations = ranked,
                     message = null,
                 )
@@ -2177,13 +2339,26 @@ class RoutePlannerViewModel(
         }
     }
 
-    fun evaluatePredictiveRange() {
+    fun evaluatePredictiveRange() = evaluatePredictiveRange(includeGasolineFallback = false)
+
+    fun evaluatePredictiveRangeWithGasolineFallback() {
+        evaluatePredictiveRange(includeGasolineFallback = true)
+    }
+
+    fun dismissGasolineFallbackPrompt() {
+        mutableUiState.value = mutableUiState.value.copy(
+            gasolineFallbackPromptVisible = false,
+            stage = PlannerStage.CONFIGURE_PREDICTIVE,
+        )
+    }
+
+    private fun evaluatePredictiveRange(includeGasolineFallback: Boolean) {
         val state = mutableUiState.value
         val effectiveRangeKm = state.effectiveRangeKmInput.parseDecimal()
         val remainingRangeKm = state.estimatedRemainingRangeKmInput.parseDecimal()
         val reserveRangeKm = state.reserveRangeKmInput.parseDecimal()
         val detourMinutes = state.maximumDetourMinutesInput.parseDecimal()
-        val gasolineInputPresent = state.estimatedRemainingGasolineRangeKmInput.isNotBlank()
+        val gasolineInputPresent = includeGasolineFallback
         val remainingGasolineRangeKm = state.estimatedRemainingGasolineRangeKmInput.parseDecimal()
         val effectiveGasolineRangeKm = state.effectiveGasolineRangeKmInput.parseDecimal()
         val gasolineReserveRangeKm = state.gasolineReserveRangeKmInput.parseDecimal()
@@ -2230,18 +2405,26 @@ class RoutePlannerViewModel(
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
             val route = requireNotNull(state.baseRoute)
+            val planningStops = state.plannedIntermediateStops.filterNot(
+                PlannedIntermediateStop::isCng,
+            )
             mutableUiState.value = state.copy(
                 operation = PlannerOperation.PREDICTIVE_CANDIDATES,
                 workflowMode = CngWorkflowMode.PREDICTIVE,
                 message = null,
                 rankedStations = null,
                 predictiveSuggestion = null,
+                gasolineFallbackPromptVisible = false,
                 pendingStation = null,
                 selectedRoute = null,
                 selectedItineraryRoute = null,
+                predictiveInputStops = planningStops,
+                predictiveInputRoute = state.intermediateStopsRoute.takeIf {
+                    planningStops.size == state.plannedIntermediateStops.size
+                },
             )
             try {
-                val suggestion = routingRepository.predictiveCngStations(
+                val suggestion = routingRepository.predictiveCngStationsAlongItinerary(
                     origin = route.origin,
                     destination = route.destination,
                     effectiveCngRangeKm = requireNotNull(effectiveRangeKm),
@@ -2249,6 +2432,7 @@ class RoutePlannerViewModel(
                     reserveCngRangeKm = requireNotNull(reserveRangeKm),
                     maximumDetourMinutes = requireNotNull(detourMinutes),
                     departureAt = OffsetDateTime.now(clock),
+                    excludedMimitStationIds = emptySet(),
                     estimatedRemainingGasolineRangeKm = if (gasolineInputPresent) {
                         remainingGasolineRangeKm
                     } else {
@@ -2259,6 +2443,7 @@ class RoutePlannerViewModel(
                     } else {
                         null
                     },
+                    intermediateStops = planningStops.map { it.location },
                 )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = if (suggestion.state == PredictiveSuggestionState.SUGGESTED) {
@@ -2267,9 +2452,19 @@ class RoutePlannerViewModel(
                         PlannerStage.PREDICTIVE_STATUS
                     },
                     operation = null,
-                    baseRoute = suggestion.baseRoute,
+                    baseRoute = if (planningStops.isEmpty()) {
+                        suggestion.baseRoute
+                    } else {
+                        state.baseRoute
+                    },
                     rankedStations = null,
                     predictiveSuggestion = suggestion,
+                    gasolineFallbackPromptVisible = !includeGasolineFallback &&
+                        suggestion.state in setOf(
+                            PredictiveSuggestionState.NO_REACHABLE_STATION,
+                            PredictiveSuggestionState.NO_ELIGIBLE_STATION,
+                            PredictiveSuggestionState.NO_COMPLETE_ITINERARY,
+                        ),
                     message = null,
                 )
             } catch (error: CancellationException) {
@@ -2322,6 +2517,43 @@ class RoutePlannerViewModel(
                 val navigationReadyRoute = route.copy(
                     selectedStop = route.selectedStop.withNavigationDetailsFrom(station),
                 )
+                if (cngSelectionReturnsToStops) {
+                    val cngStop = navigationReadyRoute.selectedStop
+                    val plannedStop = PlannedIntermediateStop(
+                        id = state.editingIntermediateStopId ?: UUID.randomUUID().toString(),
+                        location = cngStop.location,
+                        locationMethod = RouteLocationMethod.SEARCH,
+                        privateDisplayName = cngStop.name
+                            ?: listOfNotNull(cngStop.municipality, cngStop.province)
+                                .joinToString(", ")
+                                .ifBlank { "Stazione CNG ${cngStop.mimitStationId}" },
+                        cngStop = cngStop,
+                    )
+                    val stops = state.plannedIntermediateStops.toMutableList().also { current ->
+                        val editingIndex = current.indexOfFirst {
+                            it.id == state.editingIntermediateStopId
+                        }
+                        if (editingIndex >= 0) current[editingIndex] = plannedStop
+                        else current += plannedStop
+                    }
+                    val mixedRoute = routingRepository.routeWithIntermediateStops(
+                        origin = routeBase.origin,
+                        intermediateStops = stops.map(PlannedIntermediateStop::location),
+                        destination = routeBase.destination,
+                    )
+                    cngSelectionReturnsToStops = false
+                    mutableUiState.value = mutableUiState.value.copy(
+                        stage = PlannerStage.INTERMEDIATE_STOPS,
+                        operation = null,
+                        pendingStation = null,
+                        plannedIntermediateStops = stops,
+                        intermediateStopsRoute = mixedRoute,
+                        intermediateStopEnabled = true,
+                        editingIntermediateStopId = null,
+                        message = null,
+                    ).withMapSafeSearchLabels()
+                    return@launch
+                }
                 navigationSession.preview(navigationReadyRoute.toNavigationRoute())
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.NAVIGATION_PREVIEW,
@@ -2377,36 +2609,108 @@ class RoutePlannerViewModel(
                 message = null,
             )
             try {
-                val route = routingRepository.routeWithCngItinerary(
-                    origin = routeBase.origin,
-                    destination = routeBase.destination,
-                    mimitStationIds = itinerary.stops.map { it.station.mimitStationId },
-                    effectiveCngRangeKm = suggestion.rangeBasis.effectiveCngRangeKm,
-                    estimatedRemainingCngRangeKm = (
-                        suggestion.rangeBasis.estimatedRemainingCngRangeKm
-                    ),
-                    reserveCngRangeKm = suggestion.rangeBasis.reserveCngRangeKm,
-                )
-                val detailsByStationId = itinerary.stops.associateBy {
-                    it.station.mimitStationId
+                val existingStops = state.predictiveInputStops
+                    ?: state.plannedIntermediateStops.filterNot(PlannedIntermediateStop::isCng)
+                if (existingStops.isNotEmpty()) {
+                    if (itinerary.stops.any { it.insertionLegIndex > existingStops.size }) {
+                        throw IllegalArgumentException("invalid predictive insertion leg")
+                    }
+                    val automaticByLeg = itinerary.stops.groupBy {
+                        it.insertionLegIndex
+                    }
+                    val automaticStopsById = itinerary.stops.associate { planned ->
+                        val selected = planned.station.copy(
+                            expectedArrivalAt = planned.arrivalAt,
+                            dwellTimeSeconds = planned.dwellTimeSeconds,
+                        ).withNavigationDetailsFrom(planned)
+                        planned.station.mimitStationId to PlannedIntermediateStop(
+                            id = "cng-plan-${selected.mimitStationId}",
+                            location = selected.location,
+                            locationMethod = RouteLocationMethod.SEARCH,
+                            privateDisplayName = selected.name
+                                ?: "Stazione CNG ${selected.mimitStationId}",
+                            cngStop = selected,
+                        )
+                    }
+                    val mergedStops = buildList {
+                        for (legIndex in 0..existingStops.size) {
+                            automaticByLeg[legIndex].orEmpty().forEach { planned ->
+                                add(requireNotNull(automaticStopsById[planned.station.mimitStationId]))
+                            }
+                            if (legIndex < existingStops.size) add(existingStops[legIndex])
+                        }
+                    }.distinctBy { it.cngStop?.mimitStationId ?: it.id }
+                    if (mergedStops.size > RoutePlannerUiState.MAX_PLANNED_INTERMEDIATE_STOPS) {
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            message = "Il piano richiede più di " +
+                                "${RoutePlannerUiState.MAX_PLANNED_INTERMEDIATE_STOPS} tappe. " +
+                                "Riduci le tappe manuali e ricalcola.",
+                        )
+                        return@launch
+                    }
+                    val mixedRoute = routingRepository.routeWithIntermediateStops(
+                        origin = routeBase.origin,
+                        intermediateStops = mergedStops.map(PlannedIntermediateStop::location),
+                        destination = routeBase.destination,
+                    )
+                    if (
+                        !mixedRoute.preservesCngReserve(
+                            stops = mergedStops,
+                            initialRangeKm = suggestion.rangeBasis.estimatedRemainingCngRangeKm,
+                            fullRangeKm = suggestion.rangeBasis.effectiveCngRangeKm,
+                            reserveKm = suggestion.rangeBasis.reserveCngRangeKm,
+                        )
+                    ) {
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            message = "Il percorso con le tappe non conserva la riserva CNG. " +
+                                "Modifica le tappe o ricalcola il piano.",
+                        )
+                        return@launch
+                    }
+                    navigationSession.preview(
+                        mixedRoute.toNavigationRoute(mergedStops.toNavigationStops()),
+                    )
+                    mutableUiState.value = mutableUiState.value.copy(
+                        plannedIntermediateStops = mergedStops,
+                        intermediateStopsRoute = mixedRoute,
+                        intermediateStopEnabled = true,
+                    )
+                } else {
+                    val route = routingRepository.routeWithCngItinerary(
+                        origin = routeBase.origin,
+                        destination = routeBase.destination,
+                        mimitStationIds = itinerary.stops.map { it.station.mimitStationId },
+                        effectiveCngRangeKm = suggestion.rangeBasis.effectiveCngRangeKm,
+                        estimatedRemainingCngRangeKm = (
+                            suggestion.rangeBasis.estimatedRemainingCngRangeKm
+                        ),
+                        reserveCngRangeKm = suggestion.rangeBasis.reserveCngRangeKm,
+                    )
+                    val detailsByStationId = itinerary.stops.associateBy {
+                        it.station.mimitStationId
+                    }
+                    val navigationReadyRoute = route.copy(
+                        selectedStops = route.selectedStops.map { selectedStop ->
+                            detailsByStationId[selectedStop.mimitStationId]?.let { plannedStop ->
+                                selectedStop.withNavigationDetailsFrom(plannedStop)
+                            } ?: selectedStop
+                        },
+                    )
+                    navigationSession.preview(
+                        navigationReadyRoute.toNavigationRoute(
+                            maximumDetourMinutes = suggestion.maximumDetourMinutes,
+                        ),
+                    )
+                    mutableUiState.value = mutableUiState.value.copy(
+                        selectedItineraryRoute = navigationReadyRoute,
+                    )
                 }
-                val navigationReadyRoute = route.copy(
-                    selectedStops = route.selectedStops.map { selectedStop ->
-                        detailsByStationId[selectedStop.mimitStationId]?.let { plannedStop ->
-                            selectedStop.withNavigationDetailsFrom(plannedStop)
-                        } ?: selectedStop
-                    },
-                )
-                navigationSession.preview(
-                    navigationReadyRoute.toNavigationRoute(
-                        maximumDetourMinutes = suggestion.maximumDetourMinutes,
-                    ),
-                )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.NAVIGATION_PREVIEW,
                     operation = null,
                     selectedRoute = null,
-                    selectedItineraryRoute = navigationReadyRoute,
                     message = null,
                 ).withMapSafeSearchLabels()
             } catch (error: CancellationException) {
@@ -2447,6 +2751,7 @@ class RoutePlannerViewModel(
                 operation = null,
                 pendingIntermediateStopsRoute = null,
                 pendingIntermediateStopCoordinate = null,
+                pendingIntermediateInsertionIndex = null,
                 pendingResolvedDestination = null,
                 pendingDestinationSuggestion = null,
                 message = null,
@@ -2525,6 +2830,7 @@ class RoutePlannerViewModel(
                 pendingIntermediateStopRoute = null,
                 pendingIntermediateStopsRoute = null,
                 pendingIntermediateStopCoordinate = null,
+                pendingIntermediateInsertionIndex = null,
                 message = null,
             )
             PlannerStage.INTERMEDIATE_STOPS -> {
@@ -2532,7 +2838,13 @@ class RoutePlannerViewModel(
                 pendingIntermediateDraft = null
                 val hasCommittedStops = mutableUiState.value.plannedIntermediateStops.isNotEmpty()
                 mutableUiState.value.copy(
-                    stage = PlannerStage.PREVIEW,
+                    stage = if (
+                        mutableUiState.value.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN
+                    ) {
+                        PlannerStage.CONFIGURE_PREDICTIVE
+                    } else {
+                        PlannerStage.PREVIEW
+                    },
                     intermediateStopEnabled = hasCommittedStops,
                     intermediateStopLatitudeInput = if (hasCommittedStops) {
                         mutableUiState.value.intermediateStopLatitudeInput
@@ -2584,7 +2896,12 @@ class RoutePlannerViewModel(
                 )
             }
             PlannerStage.CONFIGURE_CNG -> mutableUiState.value.copy(
-                stage = PlannerStage.PREVIEW,
+                stage = if (cngSelectionReturnsToStops) {
+                    cngSelectionReturnsToStops = false
+                    PlannerStage.INTERMEDIATE_STOPS
+                } else {
+                    PlannerStage.PREVIEW
+                },
                 message = null,
             )
             PlannerStage.CONFIGURE_PREDICTIVE -> mutableUiState.value.copy(
@@ -2632,6 +2949,18 @@ class RoutePlannerViewModel(
                             message = null,
                         )
                     }
+                    mutableUiState.value.predictiveSuggestion?.state ==
+                        PredictiveSuggestionState.SUGGESTED -> {
+                        val inputStops = mutableUiState.value.predictiveInputStops
+                            ?: mutableUiState.value.plannedIntermediateStops
+                        mutableUiState.value.copy(
+                            stage = PlannerStage.PREDICTIVE_ITINERARY,
+                            plannedIntermediateStops = inputStops,
+                            intermediateStopsRoute = mutableUiState.value.predictiveInputRoute,
+                            intermediateStopEnabled = inputStops.isNotEmpty(),
+                            message = null,
+                        )
+                    }
                     else -> mutableUiState.value.copy(
                         stage = PlannerStage.PREVIEW,
                         message = null,
@@ -2652,7 +2981,9 @@ class RoutePlannerViewModel(
             maximumDetourMinutes = predictive?.maximumDetourMinutes,
         )
             ?: mutableUiState.value.selectedRoute?.toNavigationRoute()
-            ?: mutableUiState.value.intermediateStopsRoute?.toNavigationRoute()
+            ?: mutableUiState.value.intermediateStopsRoute?.toNavigationRoute(
+                mutableUiState.value.plannedIntermediateStops.toNavigationStops(),
+            )
             ?: mutableUiState.value.intermediateStopRoute?.toNavigationRoute()
             ?: mutableUiState.value.baseRoute?.toNavigationRoute()
             ?: return
@@ -3259,4 +3590,30 @@ private fun RoutePreviewFailure.selectedItineraryRouteMessage(): String = when (
     RoutePreviewFailure.STALE_SEARCH_CONTEXT,
     RoutePreviewFailure.RATE_LIMITED,
     -> "La richiesta dell'itinerario non è più valida."
+}
+
+private fun Coordinate.toStopCoordinateLabel(): String =
+    "%.6f, %.6f".format(java.util.Locale.ROOT, latitude, longitude)
+
+private fun List<PlannedIntermediateStop>.toNavigationStops(): List<NavigationOrderedStop> =
+    map { stop ->
+        NavigationOrderedStop(
+            label = stop.privateDisplayName,
+            cngStop = stop.cngStop,
+        )
+    }
+
+private fun RouteWithIntermediateStops.preservesCngReserve(
+    stops: List<PlannedIntermediateStop>,
+    initialRangeKm: Double,
+    fullRangeKm: Double,
+    reserveKm: Double,
+): Boolean {
+    var availableRangeKm = initialRangeKm
+    legs.forEachIndexed { index, leg ->
+        availableRangeKm -= leg.distanceMeters / 1_000.0
+        if (availableRangeKm < reserveKm) return false
+        if (stops.getOrNull(index)?.isCng == true) availableRangeKm = fullRangeKm
+    }
+    return true
 }

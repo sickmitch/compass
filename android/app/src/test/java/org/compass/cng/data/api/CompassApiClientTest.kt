@@ -340,12 +340,20 @@ class CompassApiClientTest {
                   "session_id":"9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
                   "revision":2,"route_id":"selected-route","route_revision":4,
                   "route_fingerprint":"${"a".repeat(64)}","mode":"route_biased",
-                  "limitation":"provider bias","next_page_cursor":null,"results":[]
+                  "limitation":"provider bias","next_page_cursor":null,"results":[{
+                    "id":"google_places_new:pharmacy","provider":"google_places_new",
+                    "provider_ref":"pharmacy","kind":"business","title":"Farmacia",
+                    "subtitle":"Via Roma","address_preview":"Via Roma","distance_meters":null,
+                    "provider_rank":0,"requires_resolution":false,"attribution":"Google Maps",
+                    "search_intent":"generic","marginal_added_duration_seconds":42.0,
+                    "total_added_duration_seconds":42.0,"within_time_budget":true,
+                    "insertion_leg_index":0
+                  }]
                 }
                 """.trimIndent(),
             ),
         )
-        client().searchAlongRoute(
+        val response = client().searchAlongRoute(
             ApiAlongRouteSearchRequest(
                 query = "farmacia",
                 sessionId = "9b6c53a0-3e77-4c73-92cb-1cbb2fbd67da",
@@ -375,6 +383,7 @@ class CompassApiClientTest {
                 .getValue("precision").jsonPrimitive.content,
         )
         assertFalse(body.containsKey("context"))
+        assertEquals(0, response.results.single().insertionLegIndex)
     }
 
     @Test
@@ -743,6 +752,7 @@ class CompassApiClientTest {
         val result = client.getRankedCngCandidates(
             origin = Coordinate(45.4642, 9.19),
             destination = Coordinate(44.4949, 11.3426),
+            intermediateStops = listOf(Coordinate(45.4384, 10.9916)),
             effectiveCngRangeKm = 300.0,
             maximumDetourMinutes = 10.0,
             departureAt = "2026-08-30T10:00:00+02:00",
@@ -772,6 +782,11 @@ class CompassApiClientTest {
             requestJson.getValue("departure_at").jsonPrimitive.content,
         )
         assertFalse(requestJson.getValue("include_closed").jsonPrimitive.content.toBoolean())
+        assertEquals(
+            "45.4384",
+            requestJson.getValue("intermediate_stops").jsonArray.single().jsonObject
+                .getValue("latitude").jsonPrimitive.content,
+        )
     }
 
     @Test
@@ -814,6 +829,7 @@ class CompassApiClientTest {
         val result = client.getPredictiveCngCandidates(
             origin = Coordinate(45.4642, 9.19),
             destination = Coordinate(44.4949, 11.3426),
+            intermediateStops = listOf(Coordinate(45.4384, 10.9916)),
             effectiveCngRangeKm = 300.0,
             estimatedRemainingCngRangeKm = 120.0,
             reserveCngRangeKm = 30.0,
@@ -830,6 +846,7 @@ class CompassApiClientTest {
         assertEquals(96.894, result.candidates.single().estimatedRemainingRangeAtArrivalKm, 0.0)
         assertEquals(66.894, result.candidates.single().reserveMarginAtArrivalKm, 0.0)
         assertEquals("43690", result.itinerary?.stops?.single()?.mimitStationId)
+        assertEquals(1, result.itinerary?.stops?.single()?.insertionLegIndex)
         assertEquals("road_network", result.itinerary?.distanceModel)
 
         val recorded = server.takeRequest()
@@ -843,6 +860,7 @@ class CompassApiClientTest {
             "30.0",
             requestJson.getValue("reserve_cng_range_km").jsonPrimitive.content,
         )
+        assertEquals(1, requestJson.getValue("intermediate_stops").jsonArray.size)
         assertFalse(requestJson.getValue("include_closed").jsonPrimitive.content.toBoolean())
         assertEquals(
             "1001",

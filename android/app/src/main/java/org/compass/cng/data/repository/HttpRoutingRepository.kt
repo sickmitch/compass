@@ -110,6 +110,7 @@ class HttpRoutingRepository(
                     marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
                     totalAddedDurationSeconds = result.totalAddedDurationSeconds,
                     withinTimeBudget = result.withinTimeBudget,
+                    insertionLegIndex = result.insertionLegIndex,
                 )
             },
         )
@@ -350,6 +351,38 @@ class HttpRoutingRepository(
         )
     }
 
+    override suspend fun rankedCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+    ): RankedCngStations = mapFailures {
+        require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
+        require(maximumDetourMinutes >= 0) { "maximum detour must not be negative" }
+        require(intermediateStops.size <= 8) { "at most 8 intermediate stops are supported" }
+        val response = apiClient.getRankedCngCandidates(
+            origin = origin,
+            destination = destination,
+            effectiveCngRangeKm = effectiveCngRangeKm,
+            maximumDetourMinutes = maximumDetourMinutes,
+            departureAt = departureAt.toString(),
+            intermediateStops = intermediateStops,
+        )
+        val candidates = response.candidates.map(ApiRankedCandidate::toRankedCngStation)
+        require(candidates.map { it.ranking.rank } == (1..candidates.size).toList()) {
+            "candidate ranking is not contiguous"
+        }
+        RankedCngStations(
+            departureAt = OffsetDateTime.parse(response.departureAt),
+            maximumDetourMinutes = response.maximumDetourMinutes,
+            baseRoute = response.baseRoute.toRoutePreview(origin, destination),
+            trafficState = response.trafficState,
+            candidates = candidates,
+        )
+    }
+
     override suspend fun predictiveCngStations(
         origin: Coordinate,
         destination: Coordinate,
@@ -362,7 +395,36 @@ class HttpRoutingRepository(
         estimatedRemainingGasolineRangeKm: Double?,
         reserveGasolineRangeKm: Double?,
         originDirection: RouteOriginDirection?,
+    ): PredictiveCngSuggestion = predictiveCngStationsInternal(
+        origin = origin,
+        destination = destination,
+        intermediateStops = emptyList(),
+        effectiveCngRangeKm = effectiveCngRangeKm,
+        estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
+        reserveCngRangeKm = reserveCngRangeKm,
+        maximumDetourMinutes = maximumDetourMinutes,
+        departureAt = departureAt,
+        excludedMimitStationIds = excludedMimitStationIds,
+        estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
+        reserveGasolineRangeKm = reserveGasolineRangeKm,
+        originDirection = originDirection,
+    )
+
+    private suspend fun predictiveCngStationsInternal(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String>,
+        estimatedRemainingGasolineRangeKm: Double?,
+        reserveGasolineRangeKm: Double?,
+        originDirection: RouteOriginDirection?,
     ): PredictiveCngSuggestion = mapFailures {
+        require(intermediateStops.size <= 8) { "at most 8 intermediate stops are supported" }
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
         require(
             estimatedRemainingCngRangeKm > 0 &&
@@ -404,6 +466,7 @@ class HttpRoutingRepository(
             estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
             reserveGasolineRangeKm = reserveGasolineRangeKm,
             originDirection = originDirection,
+            intermediateStops = intermediateStops,
         )
         require(response.excludedMimitStationIds.toSet() == excludedMimitStationIds) {
             "server did not acknowledge the excluded MIMIT station IDs"
@@ -468,6 +531,7 @@ class HttpRoutingRepository(
                             operator = stop.operator,
                             osmMatchConfidence = stop.osmMatchConfidence,
                             price = stop.price?.toCngPrice(),
+                            insertionLegIndex = stop.insertionLegIndex,
                             dwellTimeSeconds = stop.dwellTimeSeconds,
                         )
                     },
@@ -510,6 +574,36 @@ class HttpRoutingRepository(
                     strategy = fallback.strategy,
                 )
             },
+        )
+    }
+
+    override suspend fun predictiveCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String>,
+        estimatedRemainingGasolineRangeKm: Double?,
+        reserveGasolineRangeKm: Double?,
+        originDirection: RouteOriginDirection?,
+    ): PredictiveCngSuggestion {
+        return predictiveCngStationsInternal(
+            origin = origin,
+            destination = destination,
+            intermediateStops = intermediateStops,
+            effectiveCngRangeKm = effectiveCngRangeKm,
+            estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
+            reserveCngRangeKm = reserveCngRangeKm,
+            maximumDetourMinutes = maximumDetourMinutes,
+            departureAt = departureAt,
+            excludedMimitStationIds = excludedMimitStationIds,
+            estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
+            reserveGasolineRangeKm = reserveGasolineRangeKm,
+            originDirection = originDirection,
         )
     }
 

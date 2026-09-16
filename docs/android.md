@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.13` (`versionCode=59`).
+Android version is `0.28.20` (`versionCode=66`).
 
 The global Options screen persists a system/light/dark theme choice and the default voice-guidance
 state. It reuses the existing private favourites and encrypted server-connection stores, and loads
@@ -239,6 +239,59 @@ destination searches use only a recent device fix as Google location bias; they 
 route endpoint or hard-coded city. Dark Material surfaces use OLED black without elevation tint.
 The personalization actions form two balanced rows: **Cambia percorso / Aggiungi tappe** and
 **Sosta CNG / Piano CNG**.
+
+Android `0.28.14` (`versionCode=60`) removes the separate manual-CNG action from trip
+personalization. The two compact action rows are now **Cambia percorso / Aggiungi tappe** and
+**Piano CNG / Percorso diretto**, leaving the remaining viewport to the route map. Manual CNG
+stations are inserted from **Aggiungi tappe → Sosta CNG** into the same ordered waypoint list as
+ordinary stops, while retaining their refuelling dwell time. Drag reorder immediately updates the
+list and triggers a cancellable Valhalla waypoint recalculation. Stop cards expose their saved
+place/station name or coordinates and animate their active drag state.
+
+The CNG-plan form uses a 2×2 parameter grid and no longer asks for gasoline data before the CNG
+attempt. If no safe CNG itinerary exists, Compass explicitly offers a gasoline-fallback prompt or
+returns to parameter editing. **Inserisci tappa intermedia** opens the same stop editor in CNG-plan
+mode: ordinary stop methods remain available, **Sosta CNG** is absent, and **Calcola piano** sends
+the ordered intermediate coordinates with the predictive request. A final mixed itinerary is
+rerouted through all manual and CNG waypoints and locally rechecks the requested reserve before it
+can enter navigation preview. Navigation rerouting retains the remaining mixed waypoint order, so
+an ordinary stop is not dropped merely because the same itinerary also contains a CNG stop.
+
+Android `0.28.15` (`versionCode=61`) makes stop editing an explicit state: the selected card and
+replacement controls are highlighted, cancellation is visible, and opening a fresh add flow clears
+the replacement target so a later map selection cannot overwrite a CNG stop. Along-route results
+exclude itinerary points already selected, consume a bounded next provider page when duplicate
+filtering leaves too few results, and
+carry the nearest route-leg insertion index through confirmation. Added times below one minute are
+shown as `<1 min` instead of `0 min`.
+
+Android `0.28.16` (`versionCode=62`) removes query-specific place-category filtering from Search
+Along Route. All generic searches now follow the same provider and Valhalla pipeline; example terms
+such as `farmacia` do not receive hard-coded result handling.
+
+Android `0.28.17` (`versionCode=63`) makes manual stops authoritative before predictive CNG
+planning. The backend assigns every candidate to a zero-based mandatory-route leg and computes its
+road distance and duration through all preceding and following user waypoints. Predictive itinerary
+stops expose that `insertion_leg_index`; Android inserts fuel stops into the corresponding leg,
+reroutes the complete mixed waypoint list once, and validates the reserve on those actual legs.
+The client no longer guesses the order by projecting stops onto the displayed polyline and does not
+send the CNG-only route request when a manual waypoint itinerary already exists.
+
+Android `0.28.18` (`versionCode=64`) initializes the additional-time budget when the stop editor
+is entered from **Piano CNG**, using the same one-third-of-driving-time default as the ordinary stop
+flow. Consequently both Search Along Route and map selection receive a valid routed context before
+their first request instead of reporting that the route or time limit is missing.
+
+Android `0.28.19` (`versionCode=65`) reconciles the trip summary with the mixed ordered itinerary.
+The headline count includes ordinary and CNG stops, **Tappe del viaggio** uses the navigation
+waypoint labels and excludes refuelling entries, and edit controls no longer duplicate automatic
+CNG stops as numbered ordinary stops. The edit section follows both stop recap sections and every
+control includes the actual stop or station name.
+
+Android `0.28.20` (`versionCode=66`) makes predictive CNG recalculation replace the previously
+generated refuelling plan. Only user-created intermediate stops are sent as fixed planning input;
+old automatic CNG stops are neither retained in the merge nor excluded from fresh station ranking.
+The active-navigation intermediate-stop card now uses the shared 70% glass-panel opacity.
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

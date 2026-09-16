@@ -59,6 +59,7 @@ class EligibleDetourCandidate:
     detour_minutes: float
     station_eta: datetime
     destination_eta: datetime
+    itinerary_leg_index: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +95,7 @@ def calculate_detour_candidate(
     previous_to_station: MatrixCost,
     station_to_destination: MatrixCost,
     departure_at: datetime,
+    itinerary_leg_index: int = 0,
 ) -> EligibleDetourCandidate:
     via_distance = (
         previous_to_station.distance_meters + station_to_destination.distance_meters
@@ -118,4 +120,5 @@ def calculate_detour_candidate(
         station_eta=departure_at
         + timedelta(seconds=previous_to_station.duration_seconds),
         destination_eta=departure_at + timedelta(seconds=via_duration),
+        itinerary_leg_index=itinerary_leg_index,
     )

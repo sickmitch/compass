@@ -12,13 +12,18 @@ polyline per selected Valhalla leg, baseline/current durations and the cumulativ
 A missing route returns `route_required`; obsolete contexts are never reused. The response reports
 `route_biased`, `route_time_filtered` or `global_specific`, the route fingerprint, normalized Google
 results and an optional opaque pagination cursor. Result fields distinguish marginal added time,
-total added time and the nullable time-budget outcome.
+total added time, the nullable time-budget outcome and the evaluated `insertion_leg_index`.
 
 Generic queries are Search Along Route candidates verified through full Valhalla waypoint routes;
-only eligible candidates are returned, ordered by marginal added seconds. Specific queries (and an
+the candidate is inserted into the route leg nearest its geometry instead of always after the last
+existing stop. Existing itinerary coordinates are not proposed again. No query-specific category
+filter is applied: all generic terms follow the same provider and Valhalla pipeline. Only eligible
+candidates are returned,
+ordered by marginal added seconds. Specific queries (and an
 ambiguous query explicitly submitted with `full_search=true`) may return over-budget or unverified
 results so that the route-preview confirmation is an informed override. Default bounded evaluation:
-10 candidates, 20 seconds total, up to two recovery segment calls, target of three eligible results.
+10 candidates, 20 seconds total, up to two recovery calls shared between provider pagination and
+route-segment retries, target of three eligible results.
 
 `POST /api/v1/places/search-along-route/resolve` resolves only a result retained in the same
 transient owner/session/query/route context. It returns text for the mapless selection flow and a
@@ -198,10 +203,20 @@ waypoint-route path as other Compass routes. The singular endpoint remains for o
 
 The endpoint returns route costs; it does not decide the Android search corridor. Android first
 calculates the direct route and compares its duration with the waypoint route. The accepted maximum
-added driving time defaults to one third of the direct route duration and can be overridden in
-minutes for the current stop list. Search Along Route only biases Google results to the selected
-route; the final eligibility decision is the like-for-like Valhalla duration comparison after the
-user selects a result.
+added driving time defaults to one third of the direct route duration. Search Along Route only
+biases Google results to the selected route; the final eligibility decision is the like-for-like
+Valhalla duration comparison after the user selects a result. A point explicitly selected on the
+map is not rejected by that search budget.
+
+`POST /api/v1/cng/ranked-candidates` and `POST /api/v1/cng/predictive-candidates` also accept an
+optional ordered `intermediate_stops` array (zero to eight WGS84 coordinates). When present,
+Compass asks Valhalla for the waypoint itinerary first and uses its joined E6 geometry, distance
+and duration as the authoritative corridor and range context. Each candidate is assigned to the
+mandatory route leg containing its projection. Origin-to-station, station-to-destination and
+station-to-station costs include the intervening user waypoints, so reachability and reserve checks
+cannot shortcut a manual stop. Every predictive itinerary stop exposes `insertion_leg_index`, the
+zero-based user-route leg where the client must insert it before the final mixed-waypoint reroute.
+The field is omitted by older clients and therefore remains backwards compatible.
 
 When a current provider snapshot and native Valhalla overlay are both usable, `navigation` also
 contains `traffic_state=fresh`, `traffic_aware=true`, `traffic_observed_at` and

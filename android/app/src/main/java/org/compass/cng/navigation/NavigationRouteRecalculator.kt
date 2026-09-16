@@ -8,6 +8,7 @@ import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.PredictiveSuggestionState
+import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.domain.model.withNavigationDetailsFrom
 
 sealed interface FuelStopReplacementResult {
@@ -79,7 +80,35 @@ class CompassNavigationRouteRecalculator(
         origin: Coordinate,
         remainingStops: List<NavigationFuelStop>,
         originDirection: RouteOriginDirection?,
-    ): NavigationRoute = when (remainingStops.size) {
+    ): NavigationRoute {
+        val remainingIntermediateStops = remainingIntermediateStops(state)
+        if (remainingIntermediateStops.isNotEmpty()) {
+            val orderedStops = (
+                remainingIntermediateStops.map { progress ->
+                    RerouteStop(
+                        sequence = progress.stop.sequence,
+                        location = progress.stop.location,
+                        metadata = NavigationOrderedStop(label = progress.stop.mapLabel),
+                    )
+                } + remainingStops.map { stop ->
+                    RerouteStop(
+                        sequence = stop.sequence,
+                        location = stop.location,
+                        metadata = NavigationOrderedStop(
+                            label = stop.name ?: "Sosta CNG",
+                            cngStop = stop.toSelectedCngStop(),
+                        ),
+                    )
+                }
+            ).sortedBy(RerouteStop::sequence)
+            return routingRepository.routeWithIntermediateStops(
+                origin = origin,
+                intermediateStops = orderedStops.map(RerouteStop::location),
+                destination = route.destination,
+                originDirection = originDirection,
+            ).toNavigationRoute(orderedStops.map(RerouteStop::metadata))
+        }
+        return when (remainingStops.size) {
             0 -> state.nextIntermediateStop?.stop?.let { stop ->
                 routingRepository.routeWithIntermediateStop(
                     origin = origin,
@@ -133,6 +162,32 @@ class CompassNavigationRouteRecalculator(
                 )
             }
         }
+    }
+
+    private fun remainingIntermediateStops(
+        state: NavigationState,
+    ): List<NavigationIntermediateStopProgress> = if (state.intermediateStopProgress.isNotEmpty()) {
+        state.intermediateStopProgress
+            .filter { it.lifecycle != NavigationIntermediateStopLifecycle.COMPLETED }
+            .sortedBy { it.stop.sequence }
+    } else {
+        listOfNotNull(state.nextIntermediateStop)
+    }
+
+    private fun NavigationFuelStop.toSelectedCngStop(): SelectedCngStop = SelectedCngStop(
+        mimitStationId = mimitStationId,
+        name = name,
+        municipality = municipality,
+        province = province,
+        location = location,
+        expectedArrivalAt = expectedArrivalAt,
+        dwellTimeSeconds = dwellTimeSeconds,
+        opening = opening,
+        phone = phone,
+        brand = brand,
+        operator = operator,
+        price = price,
+    )
 
     private suspend fun replanInvalidFuelStops(
         route: NavigationRoute,
@@ -312,6 +367,12 @@ class CompassNavigationRouteRecalculator(
             plan.effectiveCngRangeKm,
         )
     }
+
+    private data class RerouteStop(
+        val sequence: Int,
+        val location: Coordinate,
+        val metadata: NavigationOrderedStop,
+    )
 
     private companion object {
         const val MINIMUM_RANGE_MARGIN_KM = 0.1

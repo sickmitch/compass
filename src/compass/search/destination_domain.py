@@ -62,6 +62,7 @@ class DestinationSuggestion:
     marginal_added_duration_seconds: float | None = None
     total_added_duration_seconds: float | None = None
     within_time_budget: bool | None = None
+    insertion_leg_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -84,6 +84,7 @@ class SuggestionResponse(StrictModel):
     marginal_added_duration_seconds: float | None = Field(default=None, ge=0)
     total_added_duration_seconds: float | None = Field(default=None, ge=0)
     within_time_budget: bool | None = None
+    insertion_leg_index: int | None = Field(default=None, ge=0, le=8)
 
 
 class AlongRouteSearchResponse(StrictModel):

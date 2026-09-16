@@ -275,6 +275,7 @@ class CompassApiClient(
         effectiveCngRangeKm: Double,
         maximumDetourMinutes: Double,
         departureAt: String,
+        intermediateStops: List<Coordinate> = emptyList(),
     ): ApiRankedCandidates {
         val payload = RankedCandidatesRequestDto(
             origin = origin.toDto(),
@@ -285,6 +286,7 @@ class CompassApiClient(
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt,
             includeClosed = false,
+            intermediateStops = intermediateStops.map(Coordinate::toDto),
         )
         return post<RankedCandidatesResponseDto>(
             rankedCandidatesUrl,
@@ -325,6 +327,7 @@ class CompassApiClient(
         estimatedRemainingGasolineRangeKm: Double? = null,
         reserveGasolineRangeKm: Double? = null,
         originDirection: RouteOriginDirection? = null,
+        intermediateStops: List<Coordinate> = emptyList(),
     ): ApiPredictiveCandidates {
         val payload = PredictiveCandidatesRequestDto(
             origin = origin.toDto(),
@@ -342,6 +345,7 @@ class CompassApiClient(
             excludedMimitStationIds = excludedMimitStationIds.sorted(),
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
+            intermediateStops = intermediateStops.map(Coordinate::toDto),
         )
         return post<PredictiveCandidatesResponseDto>(
             predictiveCandidatesUrl,
@@ -657,6 +661,7 @@ private data class DestinationSuggestionDto(
     val marginalAddedDurationSeconds: Double? = null,
     @SerialName("total_added_duration_seconds") val totalAddedDurationSeconds: Double? = null,
     @SerialName("within_time_budget") val withinTimeBudget: Boolean? = null,
+    @SerialName("insertion_leg_index") val insertionLegIndex: Int? = null,
 )
 
 @Serializable
@@ -908,6 +913,7 @@ private data class RankedCandidatesRequestDto(
     @SerialName("maximum_detour_minutes") val maximumDetourMinutes: Double,
     @SerialName("departure_at") val departureAt: String,
     @SerialName("include_closed") val includeClosed: Boolean,
+    @SerialName("intermediate_stops") val intermediateStops: List<CoordinateDto> = emptyList(),
 )
 
 @Serializable
@@ -930,6 +936,7 @@ private data class PredictiveCandidatesRequestDto(
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
+    @SerialName("intermediate_stops") val intermediateStops: List<CoordinateDto> = emptyList(),
 )
 
 @Serializable
@@ -1281,6 +1288,7 @@ private data class PredictiveItineraryStopDto(
     val operator: String?,
     @SerialName("osm_match_confidence") val osmMatchConfidence: Double?,
     val price: CngPriceDto?,
+    @SerialName("insertion_leg_index") val insertionLegIndex: Int = 0,
     @SerialName("dwell_time_seconds")
     val dwellTimeSeconds: Int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
 )
@@ -1503,6 +1511,7 @@ private fun DestinationSuggestResponseDto.toApi(): ApiDestinationSuggestions {
                 marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
                 totalAddedDurationSeconds = result.totalAddedDurationSeconds,
                 withinTimeBudget = result.withinTimeBudget,
+                insertionLegIndex = result.insertionLegIndex,
             )
         },
     )
@@ -1537,6 +1546,7 @@ private fun AlongRouteSearchResponseDto.toApi(): ApiAlongRouteSearchResults {
                 marginalAddedDurationSeconds = result.marginalAddedDurationSeconds,
                 totalAddedDurationSeconds = result.totalAddedDurationSeconds,
                 withinTimeBudget = result.withinTimeBudget,
+                insertionLegIndex = result.insertionLegIndex,
             )
         },
     )
@@ -1813,6 +1823,7 @@ private fun PredictiveItineraryDto.toApiPredictiveItinerary(): ApiPredictiveItin
                 operator = stop.operator,
                 osmMatchConfidence = stop.osmMatchConfidence,
                 price = stop.price?.toApiCngPrice(),
+                insertionLegIndex = stop.insertionLegIndex,
                 dwellTimeSeconds = stop.dwellTimeSeconds,
             )
         },

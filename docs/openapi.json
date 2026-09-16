@@ -1366,6 +1366,10 @@
             "title": "Id",
             "type": "string"
           },
+          "insertion_leg_index": {
+            "title": "Insertion Leg Index",
+            "type": "null"
+          },
           "kind": {
             "enum": [
               "business",
@@ -3099,6 +3103,14 @@
             "title": "Include Closed",
             "type": "boolean"
           },
+          "intermediate_stops": {
+            "items": {
+              "$ref": "#/components/schemas/CoordinateRequest"
+            },
+            "maxItems": 8,
+            "title": "Intermediate Stops",
+            "type": "array"
+          },
           "language": {
             "anyOf": [
               {
@@ -3434,6 +3446,13 @@
             "minimum": 0.0,
             "title": "Estimated Remaining Range At Arrival Km",
             "type": "number"
+          },
+          "insertion_leg_index": {
+            "default": 0,
+            "description": "Zero-based leg of the mandatory user-waypoint itinerary where this CNG stop must be inserted.",
+            "minimum": 0.0,
+            "title": "Insertion Leg Index",
+            "type": "integer"
           },
           "leg_distance_meters": {
             "minimum": 0.0,
@@ -4004,6 +4023,14 @@
             "description": "Include stations evaluated as closed at ETA with a zero opening score. Unknown opening state remains included regardless of this option.",
             "title": "Include Closed",
             "type": "boolean"
+          },
+          "intermediate_stops": {
+            "items": {
+              "$ref": "#/components/schemas/CoordinateRequest"
+            },
+            "maxItems": 8,
+            "title": "Intermediate Stops",
+            "type": "array"
           },
           "language": {
             "anyOf": [
@@ -5727,6 +5754,19 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "insertion_leg_index": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insertion Leg Index"
           },
           "kind": {
             "enum": [

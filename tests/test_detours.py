@@ -12,6 +12,7 @@ from compass.candidates.domain import (
     SpatialCandidate,
     SpatialPruningMetrics,
 )
+from compass.candidates.geometry import encode_polyline6
 from compass.detours.domain import (
     NetworkCostBasis,
     NetworkDetourPolicy,
@@ -29,7 +30,9 @@ from compass.routing.domain import (
     MatrixLocationError,
     MatrixRequest,
     MatrixResult,
+    RouteLeg,
     RouteRequest,
+    WaypointRoute,
 )
 
 
@@ -202,6 +205,76 @@ def test_network_service_batches_only_pruned_candidates_and_applies_inclusive_li
     assert result.cost_basis.traffic_state == "not_configured"
     assert result.cost_basis.traffic_aware is False
     assert all(call.departure_at == _request().departure_at for call in provider.matrix_calls)
+
+
+def test_waypoint_detour_costs_keep_mandatory_stops_before_the_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = _station(1)
+    candidate = SpatialCandidate(
+        station_id=original.station_id,
+        mimit_station_id=original.mimit_station_id,
+        name=original.name,
+        municipality=original.municipality,
+        province=original.province,
+        latitude=original.latitude,
+        longitude=original.longitude,
+        straight_line_distance_to_route_meters=10,
+        route_fraction=0.75,
+    )
+    spatial = _spatial_result((candidate,))
+
+    async def fake_find(*args: object, **kwargs: object) -> CorridorCandidateResult:
+        return spatial
+
+    monkeypatch.setattr("compass.detours.service.find_corridor_candidates", fake_find)
+    origin = _request().corridor_request.route.origin
+    destination = _request().corridor_request.route.destination
+    waypoint = Coordinate(44.5, 10)
+    waypoint_route = WaypointRoute(
+        distance_meters=2_000,
+        duration_seconds=200,
+        legs=(
+            RouteLeg(1_000, 100, encode_polyline6((origin, waypoint)), ()),
+            RouteLeg(1_000, 100, encode_polyline6((waypoint, destination)), ()),
+        ),
+        provider="valhalla",
+    )
+
+    class Provider:
+        def __init__(self) -> None:
+            self.requests: list[MatrixRequest] = []
+
+        async def matrix(self, request: MatrixRequest) -> MatrixResult:
+            self.requests.append(request)
+            cost = (
+                MatrixCost(400, 40)
+                if request.sources == (waypoint,)
+                else MatrixCost(500, 50)
+            )
+            return MatrixResult(((cost,),), "valhalla", "fixture")
+
+    provider = Provider()
+    result = asyncio.run(
+        evaluate_cng_detours(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            provider,  # type: ignore[arg-type]
+            _request(),
+            corridor_policy=CorridorPolicy(),
+            detour_policy=NetworkDetourPolicy(),
+            max_route_geometry_points=100,
+            base_route=spatial.base_route,
+            waypoint_route=waypoint_route,
+            mandatory_waypoints=(waypoint,),
+        )
+    )
+
+    evaluated = result.candidates[0]
+    assert evaluated.itinerary_leg_index == 1
+    assert evaluated.distance_from_previous_waypoint_meters == 1_400
+    assert evaluated.station_to_destination_distance_meters == 500
+    assert provider.requests[0].sources == (waypoint,)
+    assert provider.requests[1].targets == (destination,)
 
 
 def test_network_service_skips_matrix_when_spatial_pruning_returns_no_candidates(

@@ -28,7 +28,7 @@ from compass.ranking.domain import (
     RankingPolicy,
 )
 from compass.ranking.opening_hours import evaluate_opening_hours
-from compass.routing.domain import RoutingProvider
+from compass.routing.domain import BaseRoute, RoutingProvider
 
 
 async def rank_cng_candidates(
@@ -41,6 +41,7 @@ async def rank_cng_candidates(
     ranking_policy: RankingPolicy,
     max_route_geometry_points: int,
     cost_basis: NetworkCostBasis | None = None,
+    base_route: BaseRoute | None = None,
 ) -> RankedCandidatesResult:
     network_result = await evaluate_cng_detours(
         session,
@@ -50,6 +51,7 @@ async def rank_cng_candidates(
         detour_policy=detour_policy,
         max_route_geometry_points=max_route_geometry_points,
         cost_basis=cost_basis,
+        base_route=base_route,
     )
     return rank_network_candidates(
         session,
@@ -295,8 +297,7 @@ def _score_and_sort(
     comparable_prices = [
         float(candidate.price.unit_price)
         for candidate in candidates
-        if candidate.price is not None
-        and candidate.price.freshness_state != "future_observation"
+        if candidate.price is not None and candidate.price.freshness_state != "future_observation"
     ]
     minimum_price = min(comparable_prices) if comparable_prices else None
     maximum_price = max(comparable_prices) if comparable_prices else None
@@ -307,8 +308,7 @@ def _score_and_sort(
             if maximum_detour_seconds == 0
             else max(
                 0.0,
-                1.0
-                - candidate.detour.detour_duration_seconds / maximum_detour_seconds,
+                1.0 - candidate.detour.detour_duration_seconds / maximum_detour_seconds,
             )
         )
         opening_score = {
@@ -379,9 +379,7 @@ def _price_score(
     return (maximum_price - float(price.unit_price)) / (maximum_price - minimum_price)
 
 
-def _price_freshness_score(
-    price: EvaluatedCngPrice | None, freshness_seconds: float
-) -> float:
+def _price_freshness_score(price: EvaluatedCngPrice | None, freshness_seconds: float) -> float:
     if (
         price is None
         or price.age_seconds is None

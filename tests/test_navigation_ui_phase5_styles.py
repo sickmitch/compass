@@ -52,4 +52,4 @@ def test_day_and_night_backgrounds_are_deliberately_distinct() -> None:
     night_background = night["layers"][0]["paint"]["background-color"]
 
     assert day_background == "#f5f3ed"
-    assert night_background == "#111714"
+    assert night_background == "#090c0a"
