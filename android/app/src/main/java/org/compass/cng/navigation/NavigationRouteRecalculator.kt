@@ -30,6 +30,8 @@ interface NavigationRouteRecalculator {
     suspend fun replaceUnavailableFuelStop(
         state: NavigationState,
     ): FuelStopReplacementResult
+
+    suspend fun removeNextStop(state: NavigationState): NavigationRoute
 }
 
 data class NavigationRerouteDirectionPolicy(
@@ -54,10 +56,11 @@ class CompassNavigationRouteRecalculator(
     ): NavigationRoute {
         val route = requireNotNull(state.route)
         val origin = when (reason) {
-            RouteUpdateReason.OFF_ROUTE -> state.rawLocation?.coordinate ?: state.snappedLocation
+            RouteUpdateReason.OFF_ROUTE,
+            RouteUpdateReason.MANUAL_DEBUG,
+            -> state.rawLocation?.coordinate ?: state.snappedLocation
             RouteUpdateReason.TRAFFIC_REFRESH,
             RouteUpdateReason.CONNECTIVITY_RECOVERY,
-            RouteUpdateReason.MANUAL_DEBUG,
             RouteUpdateReason.FUEL_STOP_UNAVAILABLE,
             -> state.snappedLocation ?: state.rawLocation?.coordinate
         } ?: route.origin
@@ -74,14 +77,44 @@ class CompassNavigationRouteRecalculator(
         return recalculated.withFuelStopDetailsFrom(route.fuelStops)
     }
 
+    override suspend fun removeNextStop(state: NavigationState): NavigationRoute {
+        val route = requireNotNull(state.route)
+        val nextFuelSequence = state.nextFuelStop?.stop?.sequence
+        val nextIntermediateSequence = state.nextIntermediateStop?.stop?.sequence
+        require(nextFuelSequence != null || nextIntermediateSequence != null) {
+            "navigation route has no removable stop"
+        }
+        val removeFuel = when {
+            nextFuelSequence == null -> false
+            nextIntermediateSequence == null -> true
+            else -> nextFuelSequence < nextIntermediateSequence
+        }
+        val remainingFuelStops = remainingFuelStops(state).filterNot {
+            removeFuel && it.sequence == nextFuelSequence
+        }
+        val remainingIntermediateStops = remainingIntermediateStops(state).filterNot {
+            !removeFuel && it.stop.sequence == nextIntermediateSequence
+        }
+        val origin = state.rawLocation?.coordinate ?: state.snappedLocation ?: route.origin
+        return preserveRemainingPlan(
+            route = route,
+            state = state,
+            origin = origin,
+            remainingStops = remainingFuelStops,
+            originDirection = null,
+            remainingIntermediateStops = remainingIntermediateStops,
+        ).withFuelStopDetailsFrom(route.fuelStops)
+    }
+
     private suspend fun preserveRemainingPlan(
         route: NavigationRoute,
         state: NavigationState,
         origin: Coordinate,
         remainingStops: List<NavigationFuelStop>,
         originDirection: RouteOriginDirection?,
+        remainingIntermediateStops: List<NavigationIntermediateStopProgress> =
+            remainingIntermediateStops(state),
     ): NavigationRoute {
-        val remainingIntermediateStops = remainingIntermediateStops(state)
         if (remainingIntermediateStops.isNotEmpty()) {
             val orderedStops = (
                 remainingIntermediateStops.map { progress ->
@@ -109,14 +142,7 @@ class CompassNavigationRouteRecalculator(
             ).toNavigationRoute(orderedStops.map(RerouteStop::metadata))
         }
         return when (remainingStops.size) {
-            0 -> state.nextIntermediateStop?.stop?.let { stop ->
-                routingRepository.routeWithIntermediateStop(
-                    origin = origin,
-                    intermediateStop = stop.location,
-                    destination = route.destination,
-                    originDirection = originDirection,
-                ).toNavigationRoute()
-            } ?: routingRepository.previewRoute(
+            0 -> routingRepository.previewRoute(
                 origin = origin,
                 destination = route.destination,
                 originDirection = originDirection,

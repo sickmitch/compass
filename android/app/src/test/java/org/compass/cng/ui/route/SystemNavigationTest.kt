@@ -38,4 +38,60 @@ class SystemNavigationTest {
     fun navigationCardsShareTheMoreTransparentGlassOpacity() {
         assertEquals(0.70f, NAVIGATION_GLASS_PANEL_ALPHA)
     }
+
+    @Test
+    fun closestPlannedStopOwnsThePrimaryGuidancePosition() {
+        assertTrue(
+            shouldPrioritizeIntermediateStop(
+                intermediateDistanceMeters = 1_000.0,
+                cngDistanceMeters = 2_000.0,
+            ),
+        )
+        assertFalse(
+            shouldPrioritizeIntermediateStop(
+                intermediateDistanceMeters = 3_000.0,
+                cngDistanceMeters = 2_000.0,
+            ),
+        )
+        assertTrue(
+            shouldPrioritizeIntermediateStop(
+                intermediateDistanceMeters = 1_000.0,
+                cngDistanceMeters = null,
+            ),
+        )
+        assertFalse(
+            shouldPrioritizeIntermediateStop(
+                intermediateDistanceMeters = null,
+                cngDistanceMeters = 2_000.0,
+            ),
+        )
+    }
+
+    @Test
+    fun removeNextStopIsVisibleOnlyForAnUpcomingNonActiveStop() {
+        assertFalse(
+            shouldShowRemoveNextStop(
+                hasNextFuelStop = false,
+                hasNextIntermediateStop = false,
+                fuelStopVisitActive = false,
+                intermediateStopVisitActive = false,
+            ),
+        )
+        assertTrue(
+            shouldShowRemoveNextStop(
+                hasNextFuelStop = true,
+                hasNextIntermediateStop = false,
+                fuelStopVisitActive = false,
+                intermediateStopVisitActive = false,
+            ),
+        )
+        assertFalse(
+            shouldShowRemoveNextStop(
+                hasNextFuelStop = true,
+                hasNextIntermediateStop = false,
+                fuelStopVisitActive = true,
+                intermediateStopVisitActive = false,
+            ),
+        )
+    }
 }

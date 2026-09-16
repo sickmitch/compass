@@ -57,6 +57,9 @@ import org.compass.cng.domain.system.BackendSystemInfoRepository
 import org.compass.cng.domain.system.InMemoryBackendSystemInfoRepository
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.navigation.NavigationState
+import org.compass.cng.navigation.NavigationFuelStopLifecycle
+import org.compass.cng.navigation.NavigationIntermediateStopLifecycle
 import org.compass.cng.navigation.NavigationOrderedStop
 import org.compass.cng.navigation.FollowLocationPolicy
 import org.compass.cng.navigation.toNavigationRoute
@@ -1604,6 +1607,88 @@ class RoutePlannerViewModel(
             pendingIntermediateInsertionIndex = null,
             message = null,
         )
+    }
+
+    fun openIntermediateStopsFromNavigation() {
+        val navigation = navigationSession.state.value
+        val activeRoute = navigation.route ?: return
+        val currentOrigin = navigation.rawLocation?.coordinate
+            ?: navigation.snappedLocation
+            ?: activeRoute.origin
+        val futureStops = navigation.futurePlannerStops()
+        val state = mutableUiState.value
+        requestJob?.cancel()
+        navigationSession.pauseForRouteEditing()
+        mutableUiState.value = state.copy(
+            stage = PlannerStage.INTERMEDIATE_STOPS,
+            operation = PlannerOperation.INTERMEDIATE_STOP_ROUTE,
+            activeOrigin = currentOrigin,
+            activeDestination = activeRoute.destination,
+            originLatitudeInput = currentOrigin.latitude.toCoordinateInput(),
+            originLongitudeInput = currentOrigin.longitude.toCoordinateInput(),
+            destinationLatitudeInput = activeRoute.destination.latitude.toCoordinateInput(),
+            destinationLongitudeInput = activeRoute.destination.longitude.toCoordinateInput(),
+            originDisplayName = "Posizione attuale",
+            originAttributions = emptyList(),
+            originLocationMethod = RouteLocationMethod.CURRENT_LOCATION,
+            destinationLocationMethod = state.destinationLocationMethod
+                ?: RouteLocationMethod.COORDINATES,
+            routeInputsDirty = false,
+            plannedIntermediateStops = futureStops,
+            intermediateStopEnabled = futureStops.isNotEmpty(),
+            intermediateStopsMode = IntermediateStopsMode.ROUTE,
+            editingIntermediateStopId = null,
+            pendingIntermediateStopRoute = null,
+            pendingIntermediateStopsRoute = null,
+            pendingIntermediateStopCoordinate = null,
+            pendingIntermediateInsertionIndex = null,
+            predictiveInputStops = null,
+            predictiveInputRoute = null,
+            rankedStations = null,
+            predictiveSuggestion = null,
+            pendingStation = null,
+            selectedRoute = null,
+            selectedItineraryRoute = null,
+            summaryEditing = false,
+            message = null,
+        )
+        requestJob = viewModelScope.launch {
+            try {
+                val directRoute = routingRepository.previewRoute(
+                    origin = currentOrigin,
+                    destination = activeRoute.destination,
+                )
+                val viaRoute = if (futureStops.isEmpty()) {
+                    null
+                } else {
+                    routingRepository.routeWithIntermediateStops(
+                        origin = currentOrigin,
+                        intermediateStops = futureStops.map(PlannedIntermediateStop::location),
+                        destination = activeRoute.destination,
+                    )
+                }
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    baseRoute = directRoute,
+                    intermediateStopsRoute = viaRoute,
+                    intermediateStopMaximumAddedMinutesInput = mutableUiState.value
+                        .intermediateStopMaximumAddedMinutesInput.ifBlank {
+                            (
+                                directRoute.durationSeconds / 60.0 /
+                                    DEFAULT_INTERMEDIATE_STOP_TIME_DIVISOR
+                                ).toOneDecimalInput()
+                        },
+                    message = null,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = "Impossibile preparare il percorso dalla posizione attuale.",
+                )
+            }
+        }
     }
 
     fun addIntermediateStopForCngPlan() {
@@ -3384,6 +3469,72 @@ private fun parseCoordinate(
 }
 
 private fun String.isDecimalInput(): Boolean = matches(Regex("^[0-9]{0,4}([.,][0-9]{0,2})?$"))
+
+private fun NavigationState.futurePlannerStops(): List<PlannedIntermediateStop> {
+    val fuelProgress = if (fuelStopProgress.isNotEmpty()) {
+        fuelStopProgress
+    } else {
+        listOfNotNull(nextFuelStop)
+    }
+    val intermediateProgress = if (intermediateStopProgress.isNotEmpty()) {
+        intermediateStopProgress
+    } else {
+        listOfNotNull(nextIntermediateStop)
+    }
+    return buildList {
+        fuelProgress
+            .filter {
+                it.lifecycle in setOf(
+                    NavigationFuelStopLifecycle.PLANNED,
+                    NavigationFuelStopLifecycle.APPROACHING,
+                )
+            }
+            .forEach { progress ->
+                val stop = progress.stop
+                add(
+                    stop.sequence to PlannedIntermediateStop(
+                        id = "navigation-cng-${stop.sequence}-${stop.mimitStationId}",
+                        location = stop.location,
+                        locationMethod = RouteLocationMethod.SEARCH,
+                        privateDisplayName = stop.name
+                            ?: "Stazione CNG ${stop.mimitStationId}",
+                        cngStop = SelectedCngStop(
+                            mimitStationId = stop.mimitStationId,
+                            name = stop.name,
+                            municipality = stop.municipality,
+                            province = stop.province,
+                            location = stop.location,
+                            expectedArrivalAt = stop.expectedArrivalAt,
+                            dwellTimeSeconds = stop.dwellTimeSeconds,
+                            opening = stop.opening,
+                            phone = stop.phone,
+                            brand = stop.brand,
+                            operator = stop.operator,
+                            price = stop.price,
+                        ),
+                    ),
+                )
+            }
+        intermediateProgress
+            .filter {
+                it.lifecycle in setOf(
+                    NavigationIntermediateStopLifecycle.PLANNED,
+                    NavigationIntermediateStopLifecycle.APPROACHING,
+                )
+            }
+            .forEach { progress ->
+                val stop = progress.stop
+                add(
+                    stop.sequence to PlannedIntermediateStop(
+                        id = "navigation-stop-${stop.sequence}",
+                        location = stop.location,
+                        locationMethod = RouteLocationMethod.COORDINATES,
+                        privateDisplayName = stop.mapLabel,
+                    ),
+                )
+            }
+    }.sortedBy { it.first }.map { it.second }
+}
 
 private fun String.isCoordinateInput(): Boolean = matches(Regex("^-?[0-9]{0,3}([.,][0-9]{0,6})?$"))
 

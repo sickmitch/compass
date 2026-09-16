@@ -178,6 +178,17 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     },
+                    onRemoveNextStop = {
+                        ContextCompat.startForegroundService(
+                            this,
+                            Intent(this, NavigationForegroundService::class.java).apply {
+                                action = NavigationForegroundService.ACTION_REMOVE_NEXT_STOP
+                            },
+                        )
+                    },
+                    onPauseNavigationForRouteEditing = {
+                        stopService(Intent(this, NavigationForegroundService::class.java))
+                    },
                     onSimulateOffRoute = {
                         ContextCompat.startForegroundService(
                             this,

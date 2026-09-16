@@ -55,6 +55,10 @@ class NavigationRouteRecalculatorTest {
         recalculator.recalculate(state, RouteUpdateReason.CONNECTIVITY_RECOVERY)
         assertEquals(snapped, repository.lastOrigin)
         assertEquals(original.destination, repository.lastDestination)
+
+        recalculator.recalculate(state, RouteUpdateReason.MANUAL_DEBUG)
+        assertEquals(raw, repository.lastOrigin)
+        assertEquals(null, repository.lastOriginDirection)
     }
 
     @Test
@@ -154,6 +158,95 @@ class NavigationRouteRecalculatorTest {
         assertEquals(1, recalculated.intermediateStops.single().sequence)
         assertEquals(2, recalculated.fuelStops.single().sequence)
         assertEquals(1_200, recalculated.fuelStops.single().dwellTimeSeconds)
+    }
+
+    @Test
+    fun removingNextOrdinaryStopPreservesTheFollowingCngStop() = runTest {
+        val repository = RecordingRepository()
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val ordinary = Coordinate(44.8, 9.5)
+        val cng = SelectedCngStop(
+            mimitStationId = "1001",
+            name = "Metano test",
+            municipality = null,
+            province = null,
+            location = Coordinate(44.5, 10.0),
+        )
+        val destination = Coordinate(44.0, 11.0)
+        val original = repository.routeWithIntermediateStops(
+            origin = origin,
+            intermediateStops = listOf(ordinary, cng.location),
+            destination = destination,
+        ).toNavigationRoute(
+            listOf(
+                NavigationOrderedStop(label = "Tappa ordinaria"),
+                NavigationOrderedStop(label = "Metano test", cngStop = cng),
+            ),
+        )
+        val ordinaryStop = original.intermediateStops.single()
+        val fuelStop = original.fuelStops.single()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = original,
+            navigationPosition = position(origin),
+            nextIntermediateStop = NavigationIntermediateStopProgress(ordinaryStop, 1_000.0),
+            intermediateStopProgress = listOf(
+                NavigationIntermediateStopProgress(ordinaryStop, 1_000.0),
+            ),
+            nextFuelStop = NavigationFuelStopProgress(fuelStop, 2_000.0),
+            fuelStopProgress = listOf(NavigationFuelStopProgress(fuelStop, 2_000.0)),
+        )
+
+        val recalculated = recalculator.removeNextStop(state)
+
+        assertTrue(recalculated.intermediateStops.isEmpty())
+        assertEquals(listOf("1001"), recalculated.fuelStops.map { it.mimitStationId })
+    }
+
+    @Test
+    fun removingNextCngStopPreservesTheFollowingOrdinaryStop() = runTest {
+        val repository = RecordingRepository()
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val cng = SelectedCngStop(
+            mimitStationId = "1001",
+            name = "Metano test",
+            municipality = null,
+            province = null,
+            location = Coordinate(44.8, 9.5),
+        )
+        val ordinary = Coordinate(44.5, 10.0)
+        val destination = Coordinate(44.0, 11.0)
+        val original = repository.routeWithIntermediateStops(
+            origin = origin,
+            intermediateStops = listOf(cng.location, ordinary),
+            destination = destination,
+        ).toNavigationRoute(
+            listOf(
+                NavigationOrderedStop(label = "Metano test", cngStop = cng),
+                NavigationOrderedStop(label = "Tappa ordinaria"),
+            ),
+        )
+        val fuelStop = original.fuelStops.single()
+        val ordinaryStop = original.intermediateStops.single()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = original,
+            navigationPosition = position(origin),
+            nextFuelStop = NavigationFuelStopProgress(fuelStop, 1_000.0),
+            fuelStopProgress = listOf(NavigationFuelStopProgress(fuelStop, 1_000.0)),
+            nextIntermediateStop = NavigationIntermediateStopProgress(ordinaryStop, 2_000.0),
+            intermediateStopProgress = listOf(
+                NavigationIntermediateStopProgress(ordinaryStop, 2_000.0),
+            ),
+        )
+
+        val recalculated = recalculator.removeNextStop(state)
+
+        assertEquals(listOf(ordinary), repository.lastIntermediateStops)
+        assertTrue(recalculated.fuelStops.isEmpty())
+        assertEquals(listOf(ordinary), recalculated.intermediateStops.map { it.location })
     }
 
     @Test

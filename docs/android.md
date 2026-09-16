@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.20` (`versionCode=66`).
+Android version is `0.28.22` (`versionCode=68`).
 
 The global Options screen persists a system/light/dark theme choice and the default voice-guidance
 state. It reuses the existing private favourites and encrypted server-connection stores, and loads
@@ -292,6 +292,18 @@ Android `0.28.20` (`versionCode=66`) makes predictive CNG recalculation replace 
 generated refuelling plan. Only user-created intermediate stops are sent as fixed planning input;
 old automatic CNG stops are neither retained in the merge nor excluded from fresh station ranking.
 The active-navigation intermediate-stop card now uses the shared 70% glass-panel opacity.
+
+Android `0.28.21` (`versionCode=67`) balances destination-result cards across two information
+columns, removes the add-stop expander while a stop is being edited and keeps the waypoint route
+visible while a CNG plan is calculated. Active navigation uses a more compact top stack without the
+hidden status-bar inset; CNG and manual-stop cards are ordered by remaining route distance, and a
+manual stop shows its actual private map label.
+
+Android `0.28.22` (`versionCode=68`) replaces the permanent navigation stop button with an
+expandable action stack. The stack can stop navigation, remove the next ordered CNG or ordinary
+stop, reopen stop management from the live device location while preserving future waypoints, and
+force an immediate reroute from the raw current fix. Stop removal and manual rerouting remain
+server-authoritative and retain the downloaded route if the replacement request fails.
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

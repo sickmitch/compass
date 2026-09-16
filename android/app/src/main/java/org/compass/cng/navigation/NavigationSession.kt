@@ -84,6 +84,14 @@ class NavigationSession(
         eventLogger("navigation route cache cleared: reason=operator_stop")
     }
 
+    fun pauseForRouteEditing() {
+        engine.stopToPreview()
+        state.value.route?.let { route ->
+            routeStore.save(route, navigationWasActive = false, progress = null)
+        }
+        eventLogger("navigation paused: reason=route_editing")
+    }
+
     fun beginRouteUpdate(reason: RouteUpdateReason) {
         engine.beginRouteUpdate(reason)
     }

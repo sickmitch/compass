@@ -9,9 +9,14 @@ import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AddRoad
+import androidx.compose.material.icons.rounded.AddLocationAlt
 import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.StopCircle
@@ -28,9 +33,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -91,6 +98,7 @@ import org.compass.cng.navigation.mapControlPolicy
 import org.compass.cng.navigation.toggleOrientation
 import org.compass.cng.navigation.NavigationState
 import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.navigation.NavigationIntermediateStopProgress
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.ui.map.NavigationMap
 import org.compass.cng.ui.map.FollowMap
@@ -194,6 +202,8 @@ internal fun RouteFreeFollowScreen(
 internal fun ActiveNavigationScreen(
     state: NavigationState,
     onRequestRouteUpdate: () -> Unit,
+    onRemoveNextStop: () -> Unit,
+    onAddStop: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
@@ -392,14 +402,34 @@ internal fun ActiveNavigationScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                    ),
+                ),
         ) {
             ManeuverOverlay(
                 ui = ui,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
             )
+            val intermediateFirst = shouldPrioritizeIntermediateStop(
+                intermediateDistanceMeters = state.nextIntermediateStop?.distanceRemainingMeters,
+                cngDistanceMeters = state.nextFuelStop?.distanceRemainingMeters,
+            )
+            if (intermediateFirst) {
+                state.nextIntermediateStop?.let { stop ->
+                    IntermediateGuidanceCard(
+                        stop = stop,
+                        reached = state.activeIntermediateStopVisit != null,
+                        onCompleteIntermediateStop = onCompleteIntermediateStop,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(horizontal = 12.dp, vertical = 3.dp),
+                    )
+                }
+            }
             ui.nextCngStop?.let { stop ->
                 CngGuidanceCard(
                     stop = stop,
@@ -407,49 +437,19 @@ internal fun ActiveNavigationScreen(
                     onCompleteFuelStop = onCompleteFuelStop,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 3.dp),
                 )
             }
-            state.nextIntermediateStop?.let { stop ->
-                Surface(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = (if (state.activeIntermediateStopVisit != null) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    }).copy(alpha = NAVIGATION_GLASS_PANEL_ALPHA),
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .testTag("navigation_intermediate_stop_card"),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column {
-                            Text(
-                                if (state.activeIntermediateStopVisit != null) {
-                                    "Tappa raggiunta"
-                                } else {
-                                    "Tappa intermedia"
-                                },
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            if (state.activeIntermediateStopVisit == null) {
-                                Text(
-                                    stop.distanceRemainingMeters.navigationDistanceLabel(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                            }
-                        }
-                        if (state.activeIntermediateStopVisit != null) {
-                            CompassButton(onClick = onCompleteIntermediateStop) {
-                                Text("Termina tappa")
-                            }
-                        }
-                    }
+            if (!intermediateFirst) {
+                state.nextIntermediateStop?.let { stop ->
+                    IntermediateGuidanceCard(
+                        stop = stop,
+                        reached = state.activeIntermediateStopVisit != null,
+                        onCompleteIntermediateStop = onCompleteIntermediateStop,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(horizontal = 12.dp, vertical = 3.dp),
+                    )
                 }
             }
             AnimatedVisibility(
@@ -497,6 +497,12 @@ internal fun ActiveNavigationScreen(
                 MapModeControls(
                     cameraMode = cameraMode,
                     tripSummaryVisible = showTripSummary,
+                    hasRemovableNextStop = shouldShowRemoveNextStop(
+                        hasNextFuelStop = state.nextFuelStop != null,
+                        hasNextIntermediateStop = state.nextIntermediateStop != null,
+                        fuelStopVisitActive = state.activeFuelStopVisit != null,
+                        intermediateStopVisitActive = state.activeIntermediateStopVisit != null,
+                    ),
                     onOverview = {
                         Log.i(NAVIGATION_UI_LOG_TAG, "camera_mode=overview reason=control")
                         cameraMode = NavigationCameraMode.OVERVIEW
@@ -517,6 +523,9 @@ internal fun ActiveNavigationScreen(
                         showTripSummary = true
                         Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=true")
                     },
+                    onForceRouteUpdate = onRequestRouteUpdate,
+                    onRemoveNextStop = onRemoveNextStop,
+                    onAddStop = onAddStop,
                     onStopNavigation = {
                         confirmStopNavigation = true
                         Log.i(
@@ -568,6 +577,67 @@ internal fun ActiveNavigationScreen(
         }
     }
 }
+@Composable
+private fun IntermediateGuidanceCard(
+    stop: NavigationIntermediateStopProgress,
+    reached: Boolean,
+    onCompleteIntermediateStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = (if (reached) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        }).copy(alpha = NAVIGATION_GLASS_PANEL_ALPHA),
+        tonalElevation = 8.dp,
+        modifier = modifier.testTag("navigation_intermediate_stop_card"),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.extraSmall,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Text(
+                    text = "TAPPA",
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stop.stop.mapLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (reached) {
+                        "Tappa raggiunta"
+                    } else {
+                        stop.distanceRemainingMeters.navigationDistanceLabel()
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            if (reached) {
+                CompassButton(onClick = onCompleteIntermediateStop) {
+                    Text("Termina")
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun CngGuidanceCard(
@@ -604,7 +674,7 @@ private fun CngGuidanceCard(
         color = MaterialTheme.colorScheme.surface.copy(alpha = NAVIGATION_GLASS_PANEL_ALPHA),
         tonalElevation = 8.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -829,13 +899,13 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PrimaryManeuverIcon(
                         visual = ui.maneuverVisual,
                         roundaboutExitCount = ui.roundaboutExitCount,
                     )
-                    Spacer(modifier = Modifier.width(14.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = ui.distanceToManeuver,
@@ -861,7 +931,7 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
                     }
                 }
                 ui.followingInstruction?.let { following ->
-                    HorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+                    HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 5.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ui.followingManeuverVisual?.let { visual ->
                             ManeuverIcon(
@@ -886,11 +956,29 @@ private fun ManeuverOverlay(ui: NavigationDrivingUiModel, modifier: Modifier = M
                 sign = sign,
                 modifier = Modifier
                     .align(Alignment.End)
-                    .padding(top = 8.dp, end = 12.dp),
+                    .padding(top = 4.dp, end = 12.dp),
             )
         }
     }
 }
+
+internal fun shouldPrioritizeIntermediateStop(
+    intermediateDistanceMeters: Double?,
+    cngDistanceMeters: Double?,
+): Boolean {
+    val intermediate = intermediateDistanceMeters?.takeIf { it.isFinite() && it >= 0.0 }
+        ?: return false
+    val cng = cngDistanceMeters?.takeIf { it.isFinite() && it >= 0.0 }
+    return cng == null || intermediate <= cng
+}
+
+internal fun shouldShowRemoveNextStop(
+    hasNextFuelStop: Boolean,
+    hasNextIntermediateStop: Boolean,
+    fuelStopVisitActive: Boolean,
+    intermediateStopVisitActive: Boolean,
+): Boolean = (hasNextFuelStop || hasNextIntermediateStop) &&
+    !fuelStopVisitActive && !intermediateStopVisitActive
 
 internal const val NAVIGATION_GLASS_PANEL_ALPHA = 0.70f
 
@@ -995,15 +1083,24 @@ private fun JunctionSignPanel(
 private fun MapModeControls(
     cameraMode: NavigationCameraMode,
     tripSummaryVisible: Boolean,
+    hasRemovableNextStop: Boolean,
     onOverview: () -> Unit,
     onRecenter: () -> Unit,
     onToggleOrientation: () -> Unit,
     onShowTripSummary: () -> Unit,
+    onForceRouteUpdate: () -> Unit,
+    onRemoveNextStop: () -> Unit,
+    onAddStop: () -> Unit,
     onStopNavigation: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val policy = cameraMode.mapControlPolicy()
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    var actionsExpanded by rememberSaveable { mutableStateOf(false) }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
         if (!tripSummaryVisible) {
             MapIconControlButton(
                 testTag = "navigation_trip_toggle",
@@ -1058,14 +1155,81 @@ private fun MapModeControls(
                 ) { Text("Ricentra") }
             }
         }
-        MapIconControlButton(
-            testTag = "navigation_stop",
-            contentDescription = "Termina navigazione",
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            onClick = onStopNavigation,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Rounded.StopCircle, contentDescription = null)
+            AnimatedVisibility(
+                visible = actionsExpanded,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MapIconControlButton(
+                        testTag = "navigation_stop",
+                        contentDescription = "Termina navigazione",
+                        onClick = {
+                            actionsExpanded = false
+                            onStopNavigation()
+                        },
+                    ) {
+                        Icon(Icons.Rounded.StopCircle, contentDescription = null)
+                    }
+                    if (hasRemovableNextStop) {
+                        MapIconControlButton(
+                            testTag = "navigation_remove_next_stop",
+                            contentDescription = "Rimuovi prossima tappa",
+                            onClick = {
+                                actionsExpanded = false
+                                onRemoveNextStop()
+                            },
+                        ) {
+                            Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = null)
+                        }
+                    }
+                    MapIconControlButton(
+                        testTag = "navigation_add_stop",
+                        contentDescription = "Aggiungi tappa",
+                        onClick = {
+                            actionsExpanded = false
+                            onAddStop()
+                        },
+                    ) {
+                        Icon(Icons.Rounded.AddLocationAlt, contentDescription = null)
+                    }
+                    MapIconControlButton(
+                        testTag = "navigation_force_route_update",
+                        contentDescription = "Forza ricalcolo percorso",
+                        onClick = {
+                            actionsExpanded = false
+                            onForceRouteUpdate()
+                        },
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = null)
+                    }
+                }
+            }
+            MapIconControlButton(
+                testTag = "navigation_actions_toggle",
+                contentDescription = if (actionsExpanded) {
+                    "Chiudi azioni navigazione"
+                } else {
+                    "Apri azioni navigazione"
+                },
+                onClick = { actionsExpanded = !actionsExpanded },
+            ) {
+                Icon(
+                    imageVector = if (actionsExpanded) {
+                        Icons.Rounded.KeyboardArrowDown
+                    } else {
+                        Icons.Rounded.KeyboardArrowUp
+                    },
+                    contentDescription = null,
+                )
+            }
         }
     }
 }

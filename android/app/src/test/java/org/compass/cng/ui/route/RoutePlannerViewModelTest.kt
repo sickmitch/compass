@@ -67,6 +67,7 @@ import org.compass.cng.domain.system.BackendSystemInfo
 import org.compass.cng.domain.system.BackendSystemInfoRepository
 import org.compass.cng.navigation.NavigationPhase
 import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.navigation.NavigationOrderedStop
 import org.compass.cng.navigation.NavigationSession
 import org.compass.cng.navigation.toNavigationRoute
 import org.compass.cng.domain.vehicle.InMemoryVehicleProfileRepository
@@ -1515,6 +1516,75 @@ class RoutePlannerViewModelTest {
         assertEquals(route.navigation.routeId, recreated.navigationState.value.route?.routeId)
         assertEquals(NavigationPhase.NAVIGATING, recreated.navigationState.value.phase)
         assertEquals(0, repository.previewCalls)
+    }
+
+    @Test
+    fun addingStopDuringNavigationUsesCurrentOriginAndPreservesFutureStops() = runTest {
+        val origin = Coordinate(45.4, 11.0)
+        val ordinary = Coordinate(45.0, 10.7)
+        val cng = SelectedCngStop(
+            mimitStationId = "1001",
+            name = "Metano futuro",
+            municipality = "Parma",
+            province = "PR",
+            location = Coordinate(44.8, 10.5),
+        )
+        val destination = Coordinate(44.4, 10.0)
+        val direct = sampleRoute(origin, destination, 100_000.0, 3_600.0)
+        fun routed(stops: List<Coordinate>): RouteWithIntermediateStops {
+            val points = listOf(origin) + stops + destination
+            val legs = points.zipWithNext().map { (legOrigin, legDestination) ->
+                sampleRoute(legOrigin, legDestination, 1_000.0, 60.0)
+            }
+            return RouteWithIntermediateStops(
+                stops = stops,
+                distanceMeters = legs.sumOf(RoutePreview::distanceMeters),
+                durationSeconds = legs.sumOf(RoutePreview::durationSeconds),
+                legs = legs,
+                provider = "valhalla",
+                navigation = direct.navigation,
+            )
+        }
+        val activeRoute = routed(listOf(ordinary, cng.location)).toNavigationRoute(
+            listOf(
+                NavigationOrderedStop(label = "Modena"),
+                NavigationOrderedStop(label = "Metano futuro", cngStop = cng),
+            ),
+        )
+        val session = NavigationSession().apply {
+            preview(activeRoute)
+            start()
+            updateLocation(
+                NavigationLocation(
+                    coordinate = origin,
+                    accuracyMeters = 5.0,
+                    speedMetersPerSecond = 10.0,
+                    bearingDegrees = 180.0,
+                    timestampEpochMillis = 1_000L,
+                ),
+            )
+        }
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(direct),
+            multipleIntermediateRouteFactory = ::routed,
+        )
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            navigationSession = session,
+        )
+
+        viewModel.openIntermediateStopsFromNavigation()
+
+        val state = viewModel.uiState.value
+        assertEquals(PlannerStage.INTERMEDIATE_STOPS, state.stage)
+        assertEquals(NavigationPhase.ROUTE_PREVIEW, session.state.value.phase)
+        assertEquals("Posizione attuale", state.originDisplayName)
+        assertEquals(origin, repository.lastPreviewOrigin)
+        assertEquals(listOf(ordinary, cng.location), repository.lastIntermediateStops)
+        assertEquals(listOf("Modena", "Metano futuro"), state.plannedIntermediateStops.map {
+            it.privateDisplayName
+        })
+        assertEquals(listOf(false, true), state.plannedIntermediateStops.map { it.isCng })
     }
 
     @Test

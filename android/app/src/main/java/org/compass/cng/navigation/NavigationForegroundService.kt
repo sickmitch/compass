@@ -111,6 +111,10 @@ class NavigationForegroundService : Service(), LocationListener {
             requestRouteUpdate(RouteUpdateReason.MANUAL_DEBUG, System.currentTimeMillis())
             return START_STICKY
         }
+        if (intent?.action == ACTION_REMOVE_NEXT_STOP) {
+            requestNextStopRemoval(System.currentTimeMillis())
+            return START_STICKY
+        }
         if (intent?.action == ACTION_REPLACE_UNAVAILABLE_FUEL_STOP) {
             requestFuelStopReplacement(System.currentTimeMillis())
             return START_STICKY
@@ -469,6 +473,51 @@ class NavigationForegroundService : Service(), LocationListener {
         }
     }
 
+    private fun requestNextStopRemoval(nowEpochMillis: Long) {
+        if (routeUpdateJob?.isActive == true) return
+        val snapshot = session.state.value
+        if (
+            snapshot.route == null ||
+            snapshot.activeFuelStopVisit != null ||
+            snapshot.activeIntermediateStopVisit != null ||
+            snapshot.nextFuelStop == null && snapshot.nextIntermediateStop == null
+        ) return
+        routeUpdateController.attemptStarted(nowEpochMillis)
+        session.beginRouteUpdate(RouteUpdateReason.MANUAL_DEBUG)
+        Log.i(
+            LOG_TAG,
+            "next stop removal started: fuel_sequence=${snapshot.nextFuelStop?.stop?.sequence} " +
+                "intermediate_sequence=${snapshot.nextIntermediateStop?.stop?.sequence}",
+        )
+        routeUpdateJob = serviceScope.launch {
+            try {
+                val route = routeRecalculator.removeNextStop(snapshot)
+                val completedAt = System.currentTimeMillis()
+                session.replaceRoute(route, completedAt, snapshot.rawLocation)
+                routeUpdateController.updateSucceeded(completedAt)
+                maneuverController.reset()
+                Log.i(
+                    LOG_TAG,
+                    "next stop removal committed: route=${route.routeId} " +
+                        "fuel_stops=${route.fuelStopIdsForLog()} " +
+                        "intermediate_stops=${route.intermediateStops.size}",
+                )
+                processNavigationState(completedAt)
+            } catch (error: CancellationException) {
+                session.failRouteUpdate()
+                throw error
+            } catch (_: Exception) {
+                session.failRouteUpdate()
+                routeUpdateController.updateFailed(retryConnectivityRecovery = false)
+                Log.w(LOG_TAG, "next stop removal failed; continuing downloaded route")
+                getSystemService(NotificationManager::class.java).notify(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                )
+            }
+        }
+    }
+
     private fun simulateOffRoute() {
         val state = session.state.value
         val reference = state.rawLocation ?: return
@@ -584,6 +633,7 @@ class NavigationForegroundService : Service(), LocationListener {
         const val ACTION_START = "org.compass.cng.navigation.START"
         const val ACTION_START_REPLAY = "org.compass.cng.navigation.START_REPLAY"
         const val ACTION_TRIGGER_ROUTE_UPDATE = "org.compass.cng.navigation.TRIGGER_ROUTE_UPDATE"
+        const val ACTION_REMOVE_NEXT_STOP = "org.compass.cng.navigation.REMOVE_NEXT_STOP"
         const val ACTION_REPLACE_UNAVAILABLE_FUEL_STOP =
             "org.compass.cng.navigation.REPLACE_UNAVAILABLE_FUEL_STOP"
         const val ACTION_SIMULATE_OFF_ROUTE = "org.compass.cng.navigation.SIMULATE_OFF_ROUTE"

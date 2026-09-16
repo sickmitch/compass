@@ -148,6 +148,8 @@ fun RoutePlannerScreen(
     onStartNavigation: () -> Unit,
     onStartNavigationReplay: () -> Unit,
     onRequestRouteUpdate: () -> Unit,
+    onRemoveNextStop: () -> Unit,
+    onPauseNavigationForRouteEditing: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
@@ -217,6 +219,11 @@ fun RoutePlannerScreen(
             ActiveNavigationScreen(
                 state = navigationState,
                 onRequestRouteUpdate = onRequestRouteUpdate,
+                onRemoveNextStop = onRemoveNextStop,
+                onAddStop = {
+                    viewModel.openIntermediateStopsFromNavigation()
+                    onPauseNavigationForRouteEditing()
+                },
                 onSimulateOffRoute = onSimulateOffRoute,
                 onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
                 onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
@@ -392,7 +399,7 @@ fun RoutePlannerScreen(
                     message = "Cerco e valuto le stazioni Metano…",
                 )
                 state.operation == PlannerOperation.PREDICTIVE_CANDIDATES -> LoadingRouteState(
-                    route = baseRoute,
+                    route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                     message = "Valuto autonomia e stazioni raggiungibili…",
                 )
                 else -> when (visibleStage) {
@@ -537,6 +544,11 @@ fun RoutePlannerScreen(
                             onStartNavigation = onStartNavigation,
                             onStartNavigationReplay = onStartNavigationReplay,
                             onRequestRouteUpdate = onRequestRouteUpdate,
+                            onRemoveNextStop = onRemoveNextStop,
+                            onAddStop = {
+                                viewModel.openIntermediateStopsFromNavigation()
+                                onPauseNavigationForRouteEditing()
+                            },
                             onSimulateOffRoute = onSimulateOffRoute,
                             onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
                             onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
@@ -1481,38 +1493,41 @@ private fun IntermediateStopsContent(
                         }
                     }
                 }
-                if (stops.isNotEmpty()) {
-                    CompassOutlinedButton(
-                        onClick = {
-                            if (addControlsExpanded) {
-                                addControlsExpanded = false
-                                if (editingStopId != null) onCancelEdit()
-                            } else {
-                                onStartAdding()
-                                addControlsExpanded = true
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Aggiungi tappa")
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = if (addControlsExpanded) {
-                                Icons.Rounded.ExpandLess
-                            } else {
-                                Icons.Rounded.ExpandMore
+                if (editingStop == null) {
+                    if (stops.isNotEmpty()) {
+                        CompassOutlinedButton(
+                            onClick = {
+                                if (addControlsExpanded) {
+                                    addControlsExpanded = false
+                                } else {
+                                    onStartAdding()
+                                    addControlsExpanded = true
+                                }
                             },
-                            contentDescription = if (addControlsExpanded) {
-                                "Comprimi opzioni"
-                            } else {
-                                "Espandi opzioni"
-                            },
-                        )
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Aggiungi tappa")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = if (addControlsExpanded) {
+                                    Icons.Rounded.ExpandLess
+                                } else {
+                                    Icons.Rounded.ExpandMore
+                                },
+                                contentDescription = if (addControlsExpanded) {
+                                    "Comprimi opzioni"
+                                } else {
+                                    "Espandi opzioni"
+                                },
+                            )
+                        }
+                    } else {
+                        Text("Aggiungi tappa", fontWeight = FontWeight.SemiBold)
                     }
-                } else {
-                    Text("Aggiungi tappa", fontWeight = FontWeight.SemiBold)
                 }
-                AnimatedVisibility(visible = stops.isEmpty() || addControlsExpanded) {
+                AnimatedVisibility(
+                    visible = editingStop != null || stops.isEmpty() || addControlsExpanded,
+                ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1603,6 +1618,8 @@ private fun NavigationPreviewContent(
     onStartNavigation: () -> Unit,
     onStartNavigationReplay: () -> Unit,
     onRequestRouteUpdate: () -> Unit,
+    onRemoveNextStop: () -> Unit,
+    onAddStop: () -> Unit,
     onSimulateOffRoute: () -> Unit,
     onReplaceUnavailableFuelStop: () -> Unit,
     onVoiceGuidanceEnabledChange: (Boolean) -> Unit,
@@ -1620,6 +1637,8 @@ private fun NavigationPreviewContent(
         ActiveNavigationScreen(
             state = state,
             onRequestRouteUpdate = onRequestRouteUpdate,
+            onRemoveNextStop = onRemoveNextStop,
+            onAddStop = onAddStop,
             onSimulateOffRoute = onSimulateOffRoute,
             onReplaceUnavailableFuelStop = onReplaceUnavailableFuelStop,
             onVoiceGuidanceEnabledChange = onVoiceGuidanceEnabledChange,
@@ -2681,61 +2700,74 @@ private fun DestinationSearchContent(
                 enabled = !isBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(
+                Row(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Text(result.title, fontWeight = FontWeight.SemiBold)
-                    result.subtitle?.let {
+                    Column(
+                        modifier = Modifier.weight(1.15f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(result.title, fontWeight = FontWeight.SemiBold)
+                        result.subtitle?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        when (result.kind) {
-                            DestinationKind.ADDRESS -> "Indirizzo"
-                            DestinationKind.LOCALITY -> "Città o località"
-                            DestinationKind.BUSINESS -> "Attività"
-                            DestinationKind.UNKNOWN -> "Risultato"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    result.distanceMeters?.let { distance ->
-                        Text(
-                            "${formatDistance(distance.toDouble())} in linea d'aria",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                    result.marginalAddedDurationSeconds?.let { seconds ->
-                        Text(
-                            buildString {
-                                append("Tempo aggiunto ")
-                                append(formatAddedDuration(seconds))
-                                if (result.withinTimeBudget == false) append(" · oltre il limite")
+                            when (result.kind) {
+                                DestinationKind.ADDRESS -> "Indirizzo"
+                                DestinationKind.LOCALITY -> "Città o località"
+                                DestinationKind.BUSINESS -> "Attività"
+                                DestinationKind.UNKNOWN -> "Risultato"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    if (
-                        target == RouteEndpoint.INTERMEDIATE_STOP &&
-                        result.searchIntent in setOf("specific", "ambiguous") &&
-                        result.withinTimeBudget == null
+                    Column(
+                        modifier = Modifier.weight(0.85f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalAlignment = Alignment.End,
                     ) {
+                        result.distanceMeters?.let { distance ->
+                            Text(
+                                "${formatDistance(distance.toDouble())} in linea d'aria",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        result.marginalAddedDurationSeconds?.let { seconds ->
+                            Text(
+                                buildString {
+                                    append("Tempo aggiunto ")
+                                    append(formatAddedDuration(seconds))
+                                    if (result.withinTimeBudget == false) {
+                                        append(" · oltre il limite")
+                                    }
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (
+                            target == RouteEndpoint.INTERMEDIATE_STOP &&
+                            result.searchIntent in setOf("specific", "ambiguous") &&
+                            result.withinTimeBudget == null
+                        ) {
+                            Text(
+                                "Deviazione da verificare nell'anteprima",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
-                            "Deviazione non verificabile · sarà calcolata nell'anteprima",
+                            result.attribution,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
-                        result.attribution,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
