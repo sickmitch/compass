@@ -67,6 +67,7 @@
     "reachable_candidate_count": 183,
     "unreachable_candidate_count": 17,
     "eligible_candidate_count": 20,
+    "excluded_by_range_count": 0,
     "excluded_by_detour_count": 163,
     "matrix_batch_size": 40,
     "matrix_calls": 10,

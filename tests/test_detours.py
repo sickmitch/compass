@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -93,6 +94,7 @@ def _request() -> NetworkDetourRequest:
 
 
 class _MatrixProvider:
+    baseline = MatrixCost(1_000, 600)
     outward: dict[int, MatrixCost | None] = {
         1: MatrixCost(400, 200),
         2: MatrixCost(450, 300),
@@ -115,7 +117,9 @@ class _MatrixProvider:
         self.matrix_calls.append(request)
         if request.sources == (Coordinate(45, 9),):
             costs = tuple(
-                self.outward[round((target.latitude - 44) * 100)]
+                self.baseline
+                if target == Coordinate(44, 11)
+                else self.outward[round((target.latitude - 44) * 100)]
                 for target in request.targets
             )
             return MatrixResult((costs,), "valhalla", "costmatrix")
@@ -194,6 +198,7 @@ def test_network_service_batches_only_pruned_candidates_and_applies_inclusive_li
     assert result.metrics.reachable_candidate_count == 4
     assert result.metrics.unreachable_candidate_count == 1
     assert result.metrics.eligible_candidate_count == 3
+    assert result.metrics.excluded_by_range_count is None
     assert result.metrics.excluded_by_detour_count == 1
     assert result.metrics.matrix_calls == 6
     assert result.metrics.matrix_fallback_splits == 0
@@ -205,6 +210,93 @@ def test_network_service_batches_only_pruned_candidates_and_applies_inclusive_li
     assert result.cost_basis.traffic_state == "not_configured"
     assert result.cost_basis.traffic_aware is False
     assert all(call.departure_at == _request().departure_at for call in provider.matrix_calls)
+
+
+def test_network_detour_compares_matrix_costs_instead_of_mismatched_route_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spatial = replace(
+        _spatial_result((_station(2),)),
+        base_route=replace(_base_route(), duration_seconds=900),
+    )
+
+    async def fake_find(*args: object, **kwargs: object) -> CorridorCandidateResult:
+        return spatial
+
+    monkeypatch.setattr("compass.detours.service.find_corridor_candidates", fake_find)
+    result = asyncio.run(
+        evaluate_cng_detours(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            _MatrixProvider(),  # type: ignore[arg-type]
+            _request(),
+            corridor_policy=CorridorPolicy(),
+            detour_policy=NetworkDetourPolicy(),
+            max_route_geometry_points=100,
+        )
+    )
+
+    candidate = result.candidates[0]
+    assert candidate.route_via_station_duration_seconds == 660
+    assert candidate.detour_duration_seconds == 60
+    assert candidate.detour_minutes == 1
+
+
+def test_matrix_baseline_excludes_real_detour_above_limit_when_route_summary_is_slower(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spatial = replace(
+        _spatial_result((_station(2),)),
+        base_route=replace(_base_route(), duration_seconds=900),
+    )
+
+    async def fake_find(*args: object, **kwargs: object) -> CorridorCandidateResult:
+        return spatial
+
+    class MismatchedProvider(_MatrixProvider):
+        outward = {2: MatrixCost(450, 300)}
+        onward = {2: MatrixCost(650, 901)}
+
+    monkeypatch.setattr("compass.detours.service.find_corridor_candidates", fake_find)
+    result = asyncio.run(
+        evaluate_cng_detours(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            MismatchedProvider(),  # type: ignore[arg-type]
+            replace(_request(), maximum_detour_seconds=600),
+            corridor_policy=CorridorPolicy(),
+            detour_policy=NetworkDetourPolicy(),
+            max_route_geometry_points=100,
+        )
+    )
+
+    assert result.candidates == ()
+    assert result.metrics.excluded_by_detour_count == 1
+
+
+def test_network_service_excludes_candidates_beyond_inclusive_road_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spatial = _spatial_result(tuple(_station(index) for index in range(1, 6)))
+
+    async def fake_find(*args: object, **kwargs: object) -> CorridorCandidateResult:
+        return spatial
+
+    monkeypatch.setattr("compass.detours.service.find_corridor_candidates", fake_find)
+    result = asyncio.run(
+        evaluate_cng_detours(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            _MatrixProvider(),  # type: ignore[arg-type]
+            replace(_request(), maximum_reachable_distance_meters=400),
+            corridor_policy=CorridorPolicy(candidate_limit=200),
+            detour_policy=NetworkDetourPolicy(matrix_batch_size=2),
+            max_route_geometry_points=100,
+        )
+    )
+
+    assert [candidate.station.station_id for candidate in result.candidates] == [5, 1]
+    assert result.metrics.reachable_candidate_count == 4
+    assert result.metrics.excluded_by_range_count == 2
+    assert result.metrics.excluded_by_detour_count == 0
+    assert result.metrics.eligible_candidate_count == 2
 
 
 def test_waypoint_detour_costs_keep_mandatory_stops_before_the_candidate(
@@ -247,12 +339,13 @@ def test_waypoint_detour_costs_keep_mandatory_stops_before_the_candidate(
 
         async def matrix(self, request: MatrixRequest) -> MatrixResult:
             self.requests.append(request)
-            cost = (
-                MatrixCost(400, 40)
-                if request.sources == (waypoint,)
-                else MatrixCost(500, 50)
-            )
-            return MatrixResult(((cost,),), "valhalla", "fixture")
+            if request.sources == (waypoint,):
+                return MatrixResult(
+                    ((MatrixCost(400, 40), MatrixCost(1_000, 100)),),
+                    "valhalla",
+                    "fixture",
+                )
+            return MatrixResult(((MatrixCost(500, 50),),), "valhalla", "fixture")
 
     provider = Provider()
     result = asyncio.run(

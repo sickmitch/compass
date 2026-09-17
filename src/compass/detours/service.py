@@ -102,39 +102,63 @@ async def evaluate_cng_detours(
         fallback_splits += splits
         location_failures += failures
 
-        for station, (previous_to_station, station_to_destination) in zip(
+        for station, (
+            previous_to_station,
+            station_to_destination,
+            direct_leg_cost,
+        ) in zip(
             batch, pairs, strict=True
         ):
-            if previous_to_station is None or station_to_destination is None:
+            if (
+                previous_to_station is None
+                or station_to_destination is None
+                or direct_leg_cost is None
+            ):
                 unreachable += 1
                 continue
+            prefix_distance = 0.0
+            prefix_duration = 0.0
+            suffix_distance = 0.0
+            suffix_duration = 0.0
             if waypoint_route is not None:
+                prefix_distance = sum(
+                    leg.distance_meters for leg in waypoint_route.legs[:leg_index]
+                )
+                prefix_duration = sum(
+                    leg.duration_seconds for leg in waypoint_route.legs[:leg_index]
+                )
+                suffix_distance = sum(
+                    leg.distance_meters for leg in waypoint_route.legs[leg_index + 1 :]
+                )
+                suffix_duration = sum(
+                    leg.duration_seconds for leg in waypoint_route.legs[leg_index + 1 :]
+                )
                 previous_to_station = MatrixCost(
                     distance_meters=(
-                        sum(leg.distance_meters for leg in waypoint_route.legs[:leg_index])
-                        + previous_to_station.distance_meters
+                        prefix_distance + previous_to_station.distance_meters
                     ),
                     duration_seconds=(
-                        sum(leg.duration_seconds for leg in waypoint_route.legs[:leg_index])
-                        + previous_to_station.duration_seconds
+                        prefix_duration + previous_to_station.duration_seconds
                     ),
                 )
                 station_to_destination = MatrixCost(
                     distance_meters=(
                         station_to_destination.distance_meters
-                        + sum(
-                            leg.distance_meters
-                            for leg in waypoint_route.legs[leg_index + 1 :]
-                        )
+                        + suffix_distance
                     ),
                     duration_seconds=(
                         station_to_destination.duration_seconds
-                        + sum(
-                            leg.duration_seconds
-                            for leg in waypoint_route.legs[leg_index + 1 :]
-                        )
+                        + suffix_duration
                     ),
                 )
+            comparison_base_cost = MatrixCost(
+                distance_meters=(
+                    prefix_distance + direct_leg_cost.distance_meters + suffix_distance
+                ),
+                duration_seconds=(
+                    prefix_duration + direct_leg_cost.duration_seconds + suffix_duration
+                ),
+            )
             evaluated.append(
                 calculate_detour_candidate(
                     station=station,
@@ -143,14 +167,22 @@ async def evaluate_cng_detours(
                     station_to_destination=station_to_destination,
                     departure_at=request.departure_at,
                     itinerary_leg_index=leg_index,
+                    comparison_base_cost=comparison_base_cost,
                 )
             )
 
+    range_eligible = tuple(
+        candidate
+        for candidate in evaluated
+        if request.maximum_reachable_distance_meters is None
+        or candidate.distance_from_previous_waypoint_meters
+        <= request.maximum_reachable_distance_meters
+    )
     eligible = tuple(
         sorted(
             (
                 candidate
-                for candidate in evaluated
+                for candidate in range_eligible
                 if candidate.detour_duration_seconds <= request.maximum_detour_seconds
             ),
             key=lambda candidate: (
@@ -161,7 +193,8 @@ async def evaluate_cng_detours(
             ),
         )
     )
-    excluded_by_detour = len(evaluated) - len(eligible)
+    excluded_by_range = len(evaluated) - len(range_eligible)
+    excluded_by_detour = len(range_eligible) - len(eligible)
     return NetworkDetourResult(
         spatial_result=spatial,
         maximum_detour_seconds=request.maximum_detour_seconds,
@@ -178,6 +211,11 @@ async def evaluate_cng_detours(
             matrix_calls=matrix_calls,
             matrix_fallback_splits=fallback_splits,
             matrix_location_failures=location_failures,
+            excluded_by_range_count=(
+                excluded_by_range
+                if request.maximum_reachable_distance_meters is not None
+                else None
+            ),
         ),
         candidates=eligible,
     )
@@ -208,7 +246,7 @@ async def _matrix_cost_pairs(
     costing: str,
     departure_at: datetime | None,
 ) -> tuple[
-    tuple[tuple[MatrixCost | None, MatrixCost | None], ...],
+    tuple[tuple[MatrixCost | None, MatrixCost | None, MatrixCost | None], ...],
     int,
     int,
     int,
@@ -219,7 +257,7 @@ async def _matrix_cost_pairs(
     requests = (
         MatrixRequest(
             sources=(origin,),
-            targets=station_coordinates,
+            targets=station_coordinates + (destination,),
             costing=costing,
             departure_at=departure_at,
         ),
@@ -242,7 +280,7 @@ async def _matrix_cost_pairs(
 
     if any(isinstance(result, MatrixLocationError) for result in results):
         if len(candidates) == 1:
-            return (((None, None),), 2, 0, 1)
+            return (((None, None, None),), 2, 0, 1)
         split_at = len(candidates) // 2
         left = await _matrix_cost_pairs(
             provider,
@@ -270,11 +308,14 @@ async def _matrix_cost_pairs(
     outward, onward = results
     if not isinstance(outward, MatrixResult) or not isinstance(onward, MatrixResult):
         raise RoutingProviderError("Routing provider returned an invalid matrix result")
-    _require_matrix_shape(outward, source_count=1, target_count=len(candidates))
+    _require_matrix_shape(outward, source_count=1, target_count=len(candidates) + 1)
     _require_matrix_shape(onward, source_count=len(candidates), target_count=1)
+    direct_leg_cost = outward.costs[0][-1]
+    if direct_leg_cost is None:
+        raise RoutingProviderError("Routing matrix returned no direct comparison cost")
     return (
         tuple(
-            (outward.costs[0][index], onward.costs[index][0])
+            (outward.costs[0][index], onward.costs[index][0], direct_leg_cost)
             for index in range(len(candidates))
         ),
         2,

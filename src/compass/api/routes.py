@@ -332,6 +332,12 @@ class NetworkEvaluationMetricsResponse(StrictModel):
     reachable_candidate_count: int = Field(ge=0)
     unreachable_candidate_count: int = Field(ge=0)
     eligible_candidate_count: int = Field(ge=0)
+    excluded_by_range_count: int | None = Field(
+        default=None,
+        ge=0,
+        exclude_if=lambda value: value is None,
+        description="Road-reachable candidates beyond the supplied remaining CNG range.",
+    )
     excluded_by_detour_count: int = Field(ge=0)
     matrix_batch_size: int = Field(gt=0)
     matrix_calls: int = Field(ge=0)

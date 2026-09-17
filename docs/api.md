@@ -218,6 +218,18 @@ cannot shortcut a manual stop. Every predictive itinerary stop exposes `insertio
 zero-based user-route leg where the client must insert it before the final mixed-waypoint reroute.
 The field is omitted by older clients and therefore remains backwards compatible.
 
+The ranked-candidate request also accepts optional `estimated_remaining_cng_range_km`. When it is
+present, Compass excludes every candidate whose road-network distance from the route origin is
+greater than that inclusive limit. This check runs after the routing matrix: route-corridor
+distance remains only a spatial prefilter, while `maximum_detour_minutes` remains an independent
+extra-travel-time constraint. `network_evaluation.excluded_by_range_count` reports this pruning
+separately from `excluded_by_detour_count`.
+
+Candidate detour time and extra distance use a direct origin-to-destination comparison cell from
+the same Valhalla matrix request as the origin-to-station cells. This keeps the base and constrained
+costs on the same routing algorithm, departure instant and traffic model. The `/route` result remains
+authoritative for preview geometry and maneuvers, but is not mixed arithmetically with matrix costs.
+
 When a current provider snapshot and native Valhalla overlay are both usable, `navigation` also
 contains `traffic_state=fresh`, `traffic_aware=true`, `traffic_observed_at` and
 `traffic_delay_state=estimated`. The numeric `traffic_delay_seconds` is the non-negative difference

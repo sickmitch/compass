@@ -459,7 +459,7 @@ assert p["cost_basis"]["distance_model"] == "road_network"
 assert n["spatial_candidate_count"] == s["corridor_candidate_count"]
 assert n["matrix_candidate_count"] == s["returned_candidate_count"]
 assert n["reachable_candidate_count"] + n["unreachable_candidate_count"] == n["matrix_candidate_count"]
-assert n["eligible_candidate_count"] + n["excluded_by_detour_count"] == n["reachable_candidate_count"]
+assert n["eligible_candidate_count"] + n.get("excluded_by_range_count", 0) + n["excluded_by_detour_count"] == n["reachable_candidate_count"]
 assert n["eligible_candidate_count"] == len(candidates)
 assert n["base_route_calls"] == 1
 assert n["per_candidate_route_calls"] == 0

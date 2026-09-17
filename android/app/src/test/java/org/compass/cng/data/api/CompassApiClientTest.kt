@@ -774,6 +774,10 @@ class CompassApiClientTest {
             requestJson.getValue("effective_cng_range_km").jsonPrimitive.content,
         )
         assertEquals(
+            "300.0",
+            requestJson.getValue("estimated_remaining_cng_range_km").jsonPrimitive.content,
+        )
+        assertEquals(
             "10.0",
             requestJson.getValue("maximum_detour_minutes").jsonPrimitive.content,
         )

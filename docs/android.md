@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.22` (`versionCode=68`).
+Android version is `0.28.24` (`versionCode=70`).
 
 The global Options screen persists a system/light/dark theme choice and the default voice-guidance
 state. It reuses the existing private favourites and encrypted server-connection stores, and loads
@@ -304,6 +304,15 @@ expandable action stack. The stack can stop navigation, remove the next ordered 
 stop, reopen stop management from the live device location while preserving future waypoints, and
 force an immediate reroute from the raw current fix. Stop removal and manual rerouting remain
 server-authoritative and retain the downloaded route if the replacement request fails.
+
+Android `0.28.23` (`versionCode=69`) makes the manually entered residual CNG autonomy an
+authoritative reachability constraint. The ranked-station request sends it explicitly and the
+backend excludes stations whose Valhalla road distance from departure exceeds that inclusive
+limit; corridor proximity and maximum detour remain separate filters.
+
+Android `0.28.24` (`versionCode=70`) calculates manual CNG detours against a direct cost returned
+by the same Valhalla matrix call used for each candidate. It no longer compares matrix legs with a
+potentially different `/route` algorithm and then masks a material negative delta as `+0,0 min`.
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

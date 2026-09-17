@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -46,6 +46,15 @@ router = APIRouter(prefix="/api/v1", tags=["ranking"])
 
 class RankedCandidatesApiRequest(DetourCandidatesRequest):
     intermediate_stops: list[CoordinateRequest] = Field(default_factory=list, max_length=8)
+    estimated_remaining_cng_range_km: float | None = Field(
+        default=None,
+        gt=0,
+        le=2000,
+        description=(
+            "Optional remaining CNG road range from the route origin. Candidates beyond "
+            "this inclusive limit are excluded after the routing matrix is evaluated."
+        ),
+    )
     include_closed: bool = Field(
         default=False,
         description=(
@@ -53,6 +62,15 @@ class RankedCandidatesApiRequest(DetourCandidatesRequest):
             "Unknown opening state remains included regardless of this option."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_remaining_range(self) -> "RankedCandidatesApiRequest":
+        if (
+            self.estimated_remaining_cng_range_km is not None
+            and self.estimated_remaining_cng_range_km > self.effective_cng_range_km
+        ):
+            raise ValueError("estimated remaining range cannot exceed effective range")
+        return self
 
 
 class OpeningHoursEvaluationResponse(StrictModel):
@@ -178,6 +196,11 @@ async def ranked_candidates(
             ),
             maximum_detour_seconds=request.maximum_detour_minutes * 60,
             departure_at=request.departure_at,
+            maximum_reachable_distance_meters=(
+                request.estimated_remaining_cng_range_km * 1_000
+                if request.estimated_remaining_cng_range_km is not None
+                else None
+            ),
         ),
         include_closed=request.include_closed,
     )

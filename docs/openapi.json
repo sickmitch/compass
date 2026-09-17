@@ -2655,6 +2655,19 @@
             "title": "Excluded By Detour Count",
             "type": "integer"
           },
+          "excluded_by_range_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Road-reachable candidates beyond the supplied remaining CNG range.",
+            "title": "Excluded By Range Count"
+          },
           "matrix_batch_size": {
             "exclusiveMinimum": 0.0,
             "title": "Matrix Batch Size",
@@ -4017,6 +4030,20 @@
             "maximum": 2000.0,
             "title": "Effective Cng Range Km",
             "type": "number"
+          },
+          "estimated_remaining_cng_range_km": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional remaining CNG road range from the route origin. Candidates beyond this inclusive limit are excluded after the routing matrix is evaluated.",
+            "title": "Estimated Remaining Cng Range Km"
           },
           "include_closed": {
             "default": false,

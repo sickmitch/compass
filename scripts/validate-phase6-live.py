@@ -78,9 +78,11 @@ def validate_payload(payload: dict[str, Any]) -> None:
         "reachable and unreachable counts must reconcile",
     )
     check(
-        eligible + network["excluded_by_detour_count"]
+        eligible
+        + network.get("excluded_by_range_count", 0)
+        + network["excluded_by_detour_count"]
         == network["reachable_candidate_count"],
-        "eligible and detour-excluded counts must reconcile",
+        "eligible, range-excluded and detour-excluded counts must reconcile",
     )
     check(network["base_route_calls"] == 1, "exactly one base route call is required")
     check(

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Literal
 
 from compass.candidates.domain import (
@@ -16,12 +17,18 @@ class NetworkDetourRequest:
     corridor_request: CorridorCandidateRequest
     maximum_detour_seconds: float
     departure_at: datetime
+    maximum_reachable_distance_meters: float | None = None
 
     def __post_init__(self) -> None:
         if self.maximum_detour_seconds < 0:
             raise ValueError("maximum_detour_seconds must not be negative")
         if self.departure_at.tzinfo is None or self.departure_at.utcoffset() is None:
             raise ValueError("departure_at must include a UTC offset")
+        if self.maximum_reachable_distance_meters is not None and (
+            not isfinite(self.maximum_reachable_distance_meters)
+            or self.maximum_reachable_distance_meters <= 0
+        ):
+            raise ValueError("maximum_reachable_distance_meters must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +83,7 @@ class NetworkEvaluationMetrics:
     matrix_location_failures: int
     base_route_calls: int = 1
     per_candidate_route_calls: int = 0
+    excluded_by_range_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +104,7 @@ def calculate_detour_candidate(
     station_to_destination: MatrixCost,
     departure_at: datetime,
     itinerary_leg_index: int = 0,
+    comparison_base_cost: MatrixCost | None = None,
 ) -> EligibleDetourCandidate:
     via_distance = (
         previous_to_station.distance_meters + station_to_destination.distance_meters
@@ -104,8 +113,18 @@ def calculate_detour_candidate(
         previous_to_station.duration_seconds + station_to_destination.duration_seconds
     )
     # Independent route/matrix snapping can produce tiny negative deltas for equivalent paths.
-    extra_distance = max(0.0, via_distance - base_route.distance_meters)
-    detour_duration = max(0.0, via_duration - base_route.duration_seconds)
+    comparison_distance = (
+        comparison_base_cost.distance_meters
+        if comparison_base_cost is not None
+        else base_route.distance_meters
+    )
+    comparison_duration = (
+        comparison_base_cost.duration_seconds
+        if comparison_base_cost is not None
+        else base_route.duration_seconds
+    )
+    extra_distance = max(0.0, via_distance - comparison_distance)
+    detour_duration = max(0.0, via_duration - comparison_duration)
     return EligibleDetourCandidate(
         station=station,
         distance_from_previous_waypoint_meters=previous_to_station.distance_meters,

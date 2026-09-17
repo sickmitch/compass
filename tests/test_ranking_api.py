@@ -188,6 +188,7 @@ def _payload() -> dict[str, object]:
         "origin": {"latitude": 45.4642, "longitude": 9.19},
         "destination": {"latitude": 44.4949, "longitude": 11.3426},
         "effective_cng_range_km": 300,
+        "estimated_remaining_cng_range_km": 10,
         "maximum_detour_minutes": 10,
         "departure_at": "2026-08-28T08:00:00+02:00",
     }
@@ -209,6 +210,7 @@ def _post_fixture_result(
         request = args[2]
         assert request.include_closed is False  # type: ignore[attr-defined]
         assert request.network_request.maximum_detour_seconds == 600  # type: ignore[attr-defined]
+        assert request.network_request.maximum_reachable_distance_meters == 10_000  # type: ignore[attr-defined]
         assert kwargs["ranking_policy"] == RankingPolicy()
         return _result()
 
@@ -295,6 +297,38 @@ def test_ranked_candidates_exposes_arrival_availability_price_and_score(
     }
 
 
+def test_legacy_ranked_request_keeps_network_metrics_response_compatible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def override_session() -> AsyncIterator[object]:
+        yield object()
+
+    async def override_provider() -> object:
+        return object()
+
+    async def override_settings() -> Settings:
+        return Settings(_env_file=None)
+
+    async def fake_rank(*args: object, **kwargs: object) -> RankedCandidatesResult:
+        request = args[2]
+        assert request.network_request.maximum_reachable_distance_meters is None  # type: ignore[attr-defined]
+        return _result()
+
+    payload = _payload()
+    payload.pop("estimated_remaining_cng_range_km")
+    monkeypatch.setattr("compass.api.ranking.rank_cng_candidates", fake_rank)
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        response = _post(payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "excluded_by_range_count" not in response.json()["network_evaluation"]
+
+
 def test_phase6_live_verifier_rejects_spaced_sunday_off_reported_open(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -321,6 +355,20 @@ def test_ranked_candidates_request_is_strict_and_requires_offset() -> None:
     payload = _payload()
     payload["departure_at"] = "2026-08-28T08:00:00"
     payload["unknown_policy"] = True
+
+    response = _post(payload)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "invalid_request",
+        "message": "The request payload is invalid.",
+    }
+
+
+def test_ranked_candidates_rejects_remaining_range_above_effective_range() -> None:
+    payload = _payload()
+    payload["effective_cng_range_km"] = 9
+    payload["estimated_remaining_cng_range_km"] = 10
 
     response = _post(payload)
 
