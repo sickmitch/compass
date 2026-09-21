@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.24` (`versionCode=70`).
+Android version is `0.28.27` (`versionCode=73`).
 
 The global Options screen persists a system/light/dark theme choice and the default voice-guidance
 state. It reuses the existing private favourites and encrypted server-connection stores, and loads
@@ -313,6 +313,18 @@ limit; corridor proximity and maximum detour remain separate filters.
 Android `0.28.24` (`versionCode=70`) calculates manual CNG detours against a direct cost returned
 by the same Valhalla matrix call used for each candidate. It no longer compares matrix legs with a
 potentially different `/route` algorithm and then masks a material negative delta as `+0,0 min`.
+
+Android `0.28.25` (`versionCode=71`) gives every intermediate-stop action an explicit 56 dp height,
+equal width within its row and a compact single-line label. Route mode keeps its two-by-three action
+layout, while CNG-plan mode remains a regular two-by-two grid without exposing manual CNG stops.
+
+Android `0.28.26` (`versionCode=72`) removes the current-location shortcut from intermediate-stop
+management and redistributes the four route-mode actions into a regular two-by-two grid.
+
+Android `0.28.27` (`versionCode=73`) stabilizes the route-free follow camera before MapLibre sees a
+location update. It rejects out-of-order fixes and recent provider fallbacks with materially worse
+accuracy, limits camera-driving fixes to 75 metres, and reuses the navigation position/bearing
+filter so stationary heading noise cannot rotate the map.
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

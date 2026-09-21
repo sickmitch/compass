@@ -31,6 +31,22 @@ class FollowLocationPolicyTest {
         )
     }
 
+    @Test
+    fun cameraRepollsWhenTheCurrentFixIsTooImprecise() {
+        assertTrue(
+            FollowLocationPolicy.shouldRepoll(
+                location(now, accuracyMeters = 76.0),
+                now,
+            ),
+        )
+        assertFalse(
+            FollowLocationPolicy.shouldRepoll(
+                location(now, accuracyMeters = 75.0),
+                now,
+            ),
+        )
+    }
+
     private fun location(
         timestampEpochMillis: Long,
         accuracyMeters: Double = 8.0,

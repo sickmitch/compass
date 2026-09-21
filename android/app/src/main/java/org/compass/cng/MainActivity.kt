@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.navigation.NavigationForegroundService
 import org.compass.cng.navigation.FollowLocationPolicy
+import org.compass.cng.navigation.FollowLocationStabilizer
 import org.compass.cng.navigation.NavigationLocation
 import org.compass.cng.ui.route.PlannerStage
 import org.compass.cng.ui.route.RoutePlannerScreen
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val followLocationStabilizer = FollowLocationStabilizer()
     private var followPollingActive = false
     private var registeredFollowProviders: Set<String> = emptySet()
     private val followCurrentLocationSignals = mutableListOf<CancellationSignal>()
@@ -65,9 +67,7 @@ class MainActivity : ComponentActivity() {
 
     private val followLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            if (location.isUsableFollowFix(System.currentTimeMillis())) {
-                routePlannerViewModel.updateFollowLocation(location.toNavigationLocation())
-            }
+            submitFollowLocation(location)
         }
 
         override fun onProviderEnabled(provider: String) {
@@ -343,6 +343,8 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private fun startFollowLocationUpdates() {
         if (!hasLocationPermission()) return
+        if (followPollingActive) return
+        followLocationStabilizer.reset()
         followPollingActive = true
         refreshFollowProviderSubscriptions()
         requestFreshFollowLocation(force = true)
@@ -382,7 +384,7 @@ class MainActivity : ComponentActivity() {
             enabledProviders.mapNotNull(manager::getLastKnownLocation)
                 .filter { it.isUsableFollowFix(now) }
                 .maxWithOrNull(compareBy<Location> { it.time }.thenBy { -it.accuracy })
-                ?.let { routePlannerViewModel.updateFollowLocation(it.toNavigationLocation()) }
+                ?.let(::submitFollowLocation)
         } catch (_: SecurityException) {
             routePlannerViewModel.currentLocationUnavailable()
         }
@@ -411,9 +413,7 @@ class MainActivity : ComponentActivity() {
                     signal,
                     ContextCompat.getMainExecutor(this),
                 ) { location ->
-                    if (location?.isUsableFollowFix(System.currentTimeMillis()) == true) {
-                        routePlannerViewModel.updateFollowLocation(location.toNavigationLocation())
-                    }
+                    location?.let(::submitFollowLocation)
                 }
             }
         } catch (_: SecurityException) {
@@ -428,6 +428,14 @@ class MainActivity : ComponentActivity() {
         followCurrentLocationSignals.clear()
         getSystemService(LocationManager::class.java).removeUpdates(followLocationListener)
         registeredFollowProviders = emptySet()
+        followLocationStabilizer.reset()
+    }
+
+    private fun submitFollowLocation(location: Location) {
+        if (!followPollingActive) return
+        if (!location.isUsableFollowFix(System.currentTimeMillis())) return
+        followLocationStabilizer.update(location.toNavigationLocation())
+            ?.let(routePlannerViewModel::updateFollowLocation)
     }
 
     private fun Location.toNavigationLocation() = NavigationLocation(
@@ -441,8 +449,8 @@ class MainActivity : ComponentActivity() {
 
     private fun Location.isUsableFollowFix(nowEpochMillis: Long): Boolean =
         latitude.isFinite() && longitude.isFinite() && accuracy.isFinite() &&
-            accuracy in 0f..FollowLocationPolicy.MAXIMUM_ACCURACY_METERS.toFloat() &&
-            time in (nowEpochMillis - FollowLocationPolicy.SEARCH_ORIGIN_MAX_AGE_MILLIS)..
+            accuracy in 0f..FollowLocationPolicy.CAMERA_MAXIMUM_ACCURACY_METERS.toFloat() &&
+            time in (nowEpochMillis - FollowLocationPolicy.CAMERA_FIX_MAX_AGE_MILLIS)..
             (nowEpochMillis + FollowLocationPolicy.MAXIMUM_FUTURE_SKEW_MILLIS)
 
     private companion object {

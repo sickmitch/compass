@@ -50,4 +50,21 @@ class RouteFormattingTest {
 
         assertEquals(listOf(modena), ordinaryStopsForSummary(listOf(fuel, modena)))
     }
+
+    @Test
+    fun intermediateStopActionsUseCompactLabelsAndKeepCngModeSeparate() {
+        val routeRows = intermediateStopActionRows(IntermediateStopsMode.ROUTE)
+        val planningRows = intermediateStopActionRows(IntermediateStopsMode.CNG_PLAN)
+
+        assertEquals(listOf(2, 2), routeRows.map { it.size })
+        assertEquals(listOf(2, 1), planningRows.map { it.size })
+        assertEquals(
+            listOf("Preferiti", "Cerca", "Mappa", "Sosta CNG"),
+            routeRows.flatten().map(IntermediateStopAddAction::label),
+        )
+        assertEquals(
+            listOf("Preferiti", "Cerca", "Mappa"),
+            planningRows.flatten().map(IntermediateStopAddAction::label),
+        )
+    }
 }

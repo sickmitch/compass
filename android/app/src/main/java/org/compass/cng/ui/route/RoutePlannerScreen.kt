@@ -141,6 +141,8 @@ import org.compass.cng.ui.theme.CompassOutlinedButton
 import org.compass.cng.ui.theme.CompassTextButton
 import org.compass.cng.ui.theme.compassSemanticColors
 
+private val INTERMEDIATE_STOP_ACTION_HEIGHT = 56.dp
+
 @Composable
 fun RoutePlannerScreen(
     viewModel: RoutePlannerViewModel,
@@ -416,9 +418,6 @@ fun RoutePlannerScreen(
                         editingStopId = state.editingIntermediateStopId,
                         isCalculating = state.operation == PlannerOperation.INTERMEDIATE_STOP_ROUTE,
                         message = state.message,
-                        onUseCurrentLocation = {
-                            onUseCurrentLocation(RouteEndpoint.INTERMEDIATE_STOP)
-                        },
                         onFavorites = {
                             viewModel.openFavoritePlaces(RouteEndpoint.INTERMEDIATE_STOP)
                         },
@@ -1322,7 +1321,6 @@ private fun IntermediateStopsContent(
     editingStopId: String?,
     isCalculating: Boolean,
     message: String?,
-    onUseCurrentLocation: () -> Unit,
     onFavorites: () -> Unit,
     onSearch: () -> Unit,
     onMapSelection: () -> Unit,
@@ -1529,43 +1527,34 @@ private fun IntermediateStopsContent(
                     visible = editingStop != null || stops.isEmpty() || addControlsExpanded,
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CompassOutlinedButton(
-                                onClick = onUseCurrentLocation,
-                                modifier = Modifier.weight(1f),
+                        intermediateStopActionRows(mode).forEach { actions ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Text("Posizione attuale")
-                            }
-                            CompassOutlinedButton(
-                                onClick = onFavorites,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("Posizioni preferite")
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CompassOutlinedButton(
-                                onClick = onSearch,
-                                modifier = Modifier.weight(1f),
-                            ) { Text("Ricerca") }
-                            CompassOutlinedButton(
-                                onClick = onMapSelection,
-                                modifier = Modifier.weight(1.6f),
-                            ) {
-                                Text("Selezione dalla mappa")
-                            }
-                            if (mode == IntermediateStopsMode.ROUTE) {
-                                CompassOutlinedButton(
-                                    onClick = onCngStop,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("Sosta CNG")
+                                actions.forEach { action ->
+                                    val onClick = when (action) {
+                                        IntermediateStopAddAction.FAVORITES -> onFavorites
+                                        IntermediateStopAddAction.SEARCH -> onSearch
+                                        IntermediateStopAddAction.MAP -> onMapSelection
+                                        IntermediateStopAddAction.CNG -> onCngStop
+                                    }
+                                    CompassOutlinedButton(
+                                        onClick = onClick,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(INTERMEDIATE_STOP_ACTION_HEIGHT),
+                                    ) {
+                                        Text(
+                                            action.label,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                if (actions.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
                         }
@@ -4136,6 +4125,37 @@ internal fun formatTripStopSummary(
 internal fun ordinaryStopsForSummary(
     stops: List<PlannedIntermediateStop>,
 ): List<PlannedIntermediateStop> = stops.filterNot { it.isCng }
+
+internal enum class IntermediateStopAddAction(val label: String) {
+    FAVORITES("Preferiti"),
+    SEARCH("Cerca"),
+    MAP("Mappa"),
+    CNG("Sosta CNG"),
+}
+
+internal fun intermediateStopActionRows(
+    mode: IntermediateStopsMode,
+): List<List<IntermediateStopAddAction>> = when (mode) {
+    IntermediateStopsMode.ROUTE -> listOf(
+        listOf(
+            IntermediateStopAddAction.FAVORITES,
+            IntermediateStopAddAction.SEARCH,
+        ),
+        listOf(
+            IntermediateStopAddAction.MAP,
+            IntermediateStopAddAction.CNG,
+        ),
+    )
+    IntermediateStopsMode.CNG_PLAN -> listOf(
+        listOf(
+            IntermediateStopAddAction.FAVORITES,
+            IntermediateStopAddAction.SEARCH,
+        ),
+        listOf(
+            IntermediateStopAddAction.MAP,
+        ),
+    )
+}
 
 private fun formatDetour(minutes: Double): String = String.format(Locale.ITALY, "+%.1f min", minutes)
 
