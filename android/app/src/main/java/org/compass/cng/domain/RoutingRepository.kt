@@ -62,6 +62,13 @@ interface RoutingRepository {
         originDirection: RouteOriginDirection? = null,
     ): RoutePreview
 
+    suspend fun previewRoute(
+        origin: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): RoutePreview = previewRoute(origin, destination, originDirection)
+
     suspend fun routeWithIntermediateStop(
         origin: Coordinate,
         intermediateStop: Coordinate,
@@ -69,6 +76,16 @@ interface RoutingRepository {
         originDirection: RouteOriginDirection? = null,
     ): RouteWithIntermediateStop = throw UnsupportedOperationException(
         "intermediate-stop routing is unavailable",
+    )
+
+    suspend fun routeWithIntermediateStop(
+        origin: Coordinate,
+        intermediateStop: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): RouteWithIntermediateStop = routeWithIntermediateStop(
+        origin, intermediateStop, destination, originDirection,
     )
 
     suspend fun routeWithIntermediateStops(
@@ -89,6 +106,16 @@ interface RoutingRepository {
             .asMultiple()
     }
 
+    suspend fun routeWithIntermediateStops(
+        origin: Coordinate,
+        intermediateStops: List<Coordinate>,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): RouteWithIntermediateStops = routeWithIntermediateStops(
+        origin, intermediateStops, destination, originDirection,
+    )
+
     suspend fun rankedCngStations(
         origin: Coordinate,
         destination: Coordinate,
@@ -96,6 +123,17 @@ interface RoutingRepository {
         maximumDetourMinutes: Double,
         departureAt: OffsetDateTime,
     ): RankedCngStations
+
+    suspend fun rankedCngStations(
+        origin: Coordinate,
+        destination: Coordinate,
+        effectiveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        allowHighways: Boolean,
+    ): RankedCngStations = rankedCngStations(
+        origin, destination, effectiveCngRangeKm, maximumDetourMinutes, departureAt,
+    )
 
     suspend fun rankedCngStationsAlongItinerary(
         origin: Coordinate,
@@ -112,12 +150,36 @@ interface RoutingRepository {
         departureAt = departureAt,
     )
 
+
+    suspend fun rankedCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        allowHighways: Boolean,
+    ): RankedCngStations = rankedCngStationsAlongItinerary(
+        origin, destination, intermediateStops, effectiveCngRangeKm,
+        maximumDetourMinutes, departureAt,
+    )
+
     suspend fun routeWithCngStop(
         origin: Coordinate,
         destination: Coordinate,
         mimitStationId: String,
         originDirection: RouteOriginDirection? = null,
     ): RouteWithCngStop
+
+    suspend fun routeWithCngStop(
+        origin: Coordinate,
+        destination: Coordinate,
+        mimitStationId: String,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): RouteWithCngStop = routeWithCngStop(
+        origin, destination, mimitStationId, originDirection,
+    )
 
     suspend fun predictiveCngStations(
         origin: Coordinate,
@@ -132,6 +194,25 @@ interface RoutingRepository {
         reserveGasolineRangeKm: Double? = null,
         originDirection: RouteOriginDirection? = null,
     ): PredictiveCngSuggestion
+
+    suspend fun predictiveCngStations(
+        origin: Coordinate,
+        destination: Coordinate,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String> = emptySet(),
+        estimatedRemainingGasolineRangeKm: Double? = null,
+        reserveGasolineRangeKm: Double? = null,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): PredictiveCngSuggestion = predictiveCngStations(
+        origin, destination, effectiveCngRangeKm, estimatedRemainingCngRangeKm,
+        reserveCngRangeKm, maximumDetourMinutes, departureAt, excludedMimitStationIds,
+        estimatedRemainingGasolineRangeKm, reserveGasolineRangeKm, originDirection,
+    )
 
     suspend fun predictiveCngStationsAlongItinerary(
         origin: Coordinate,
@@ -160,6 +241,27 @@ interface RoutingRepository {
         originDirection = originDirection,
     )
 
+    suspend fun predictiveCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String> = emptySet(),
+        estimatedRemainingGasolineRangeKm: Double? = null,
+        reserveGasolineRangeKm: Double? = null,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): PredictiveCngSuggestion = predictiveCngStationsAlongItinerary(
+        origin, destination, intermediateStops, effectiveCngRangeKm,
+        estimatedRemainingCngRangeKm, reserveCngRangeKm, maximumDetourMinutes,
+        departureAt, excludedMimitStationIds, estimatedRemainingGasolineRangeKm,
+        reserveGasolineRangeKm, originDirection,
+    )
+
     suspend fun routeWithCngItinerary(
         origin: Coordinate,
         destination: Coordinate,
@@ -169,6 +271,20 @@ interface RoutingRepository {
         reserveCngRangeKm: Double,
         originDirection: RouteOriginDirection? = null,
     ): RouteWithCngItinerary
+
+    suspend fun routeWithCngItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        mimitStationIds: List<String>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+    ): RouteWithCngItinerary = routeWithCngItinerary(
+        origin, destination, mimitStationIds, effectiveCngRangeKm,
+        estimatedRemainingCngRangeKm, reserveCngRangeKm, originDirection,
+    )
 }
 
 enum class RoutePreviewFailure {

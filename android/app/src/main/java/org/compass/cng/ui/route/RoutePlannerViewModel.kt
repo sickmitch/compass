@@ -110,6 +110,7 @@ enum class CurrentLocationAcquisitionStatus {
 
 enum class PlannerOperation {
     BASE_ROUTE,
+    HIGHWAY_RECALCULATION,
     PLACE_SEARCH,
     PLACE_RESOLUTION,
     INTERMEDIATE_STOP_ROUTE,
@@ -230,6 +231,8 @@ data class RoutePlannerUiState(
     val serverAllowInsecureHttp: Boolean = false,
     val appTheme: AppThemePreference = AppThemePreference.SYSTEM,
     val voiceGuidanceDefault: Boolean = true,
+    val highwaysEnabled: Boolean = true,
+    val highwayConfirmationPromptVisible: Boolean = false,
     val backendSystemInfo: BackendSystemInfo? = null,
     val backendSystemInfoLoading: Boolean = false,
     val backendSystemInfoError: String? = null,
@@ -334,6 +337,7 @@ class RoutePlannerViewModel(
             .copy(
                 appTheme = initialAppPreferences.theme,
                 voiceGuidanceDefault = initialAppPreferences.voiceGuidanceDefault,
+                highwaysEnabled = initialAppPreferences.highwaysEnabled,
             )
             .let { state ->
                 if (
@@ -454,6 +458,187 @@ class RoutePlannerViewModel(
             voiceGuidanceDefault = saved.voiceGuidanceDefault,
             message = null,
         )
+    }
+
+    fun updateHighwaysEnabled(enabled: Boolean) {
+        val state = mutableUiState.value
+        val saved = runCatching {
+            appPreferencesRepository.save(
+                appPreferencesRepository.load().copy(highwaysEnabled = enabled),
+            )
+        }.getOrElse {
+            mutableUiState.value = state.copy(
+                message = "Impossibile salvare la preferenza autostrade.",
+            )
+            return
+        }
+        mutableUiState.value = state.copy(
+            highwaysEnabled = saved.highwaysEnabled,
+            message = null,
+        )
+    }
+
+    fun confirmHighwayRoute() {
+        mutableUiState.value = mutableUiState.value.copy(
+            highwayConfirmationPromptVisible = false,
+            message = null,
+        )
+    }
+
+    fun recalculateWithoutHighways() {
+        val state = mutableUiState.value
+        if (!state.highwayConfirmationPromptVisible || state.isBusy) return
+        requestJob?.cancel()
+        requestJob = viewModelScope.launch {
+            mutableUiState.value = state.copy(
+                highwayConfirmationPromptVisible = false,
+                operation = PlannerOperation.HIGHWAY_RECALCULATION,
+                message = null,
+            )
+            try {
+                when {
+                    state.selectedItineraryRoute != null -> {
+                        val suggestion = requireNotNull(state.predictiveSuggestion)
+                        val recalculated = routingRepository.routeWithCngItinerary(
+                            origin = state.selectedItineraryRoute.asRoutePreview().origin,
+                            destination = state.selectedItineraryRoute.asRoutePreview().destination,
+                            mimitStationIds = state.selectedItineraryRoute.selectedStops.map {
+                                it.mimitStationId
+                            },
+                            effectiveCngRangeKm = suggestion.rangeBasis.effectiveCngRangeKm,
+                            estimatedRemainingCngRangeKm =
+                                suggestion.rangeBasis.estimatedRemainingCngRangeKm,
+                            reserveCngRangeKm = suggestion.rangeBasis.reserveCngRangeKm,
+                            allowHighways = false,
+                        )
+                        val previousStops = state.selectedItineraryRoute.selectedStops.associateBy {
+                            it.mimitStationId
+                        }
+                        val route = recalculated.copy(
+                            selectedStops = recalculated.selectedStops.map { stop ->
+                                previousStops[stop.mimitStationId]
+                                    ?.let(stop::withNavigationDetailsFrom)
+                                    ?: stop
+                            },
+                        )
+                        navigationSession.preview(
+                            route.toNavigationRoute(
+                                maximumDetourMinutes = suggestion.maximumDetourMinutes,
+                            ),
+                        )
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            selectedItineraryRoute = route,
+                            message = null,
+                        )
+                    }
+                    state.selectedRoute != null -> {
+                        val recalculated = routingRepository.routeWithCngStop(
+                            origin = state.selectedRoute.asRoutePreview().origin,
+                            destination = state.selectedRoute.asRoutePreview().destination,
+                            mimitStationId = state.selectedRoute.selectedStop.mimitStationId,
+                            allowHighways = false,
+                        )
+                        val route = recalculated.copy(
+                            selectedStop = recalculated.selectedStop.withNavigationDetailsFrom(
+                                state.selectedRoute.selectedStop,
+                            ),
+                        )
+                        navigationSession.preview(route.toNavigationRoute())
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            selectedRoute = route,
+                            message = null,
+                        )
+                    }
+                    state.intermediateStopsRoute != null -> {
+                        val route = routingRepository.routeWithIntermediateStops(
+                            origin = state.intermediateStopsRoute.asRoutePreview().origin,
+                            intermediateStops = state.plannedIntermediateStops.map { it.location },
+                            destination = state.intermediateStopsRoute.asRoutePreview().destination,
+                            allowHighways = false,
+                        )
+                        if (state.stage == PlannerStage.NAVIGATION_PREVIEW) {
+                            navigationSession.preview(
+                                route.toNavigationRoute(
+                                    state.plannedIntermediateStops.toNavigationStops(),
+                                ),
+                            )
+                        }
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            intermediateStopsRoute = route,
+                            message = null,
+                        )
+                    }
+                    state.intermediateStopRoute != null -> {
+                        val preview = state.intermediateStopRoute.asRoutePreview()
+                        val route = routingRepository.routeWithIntermediateStop(
+                            origin = preview.origin,
+                            intermediateStop = state.intermediateStopRoute.stop,
+                            destination = preview.destination,
+                            allowHighways = false,
+                        )
+                        if (state.stage == PlannerStage.NAVIGATION_PREVIEW) {
+                            navigationSession.preview(route.toNavigationRoute())
+                        }
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            intermediateStopRoute = route,
+                            baseRoute = route.asRoutePreview(),
+                            message = null,
+                        )
+                    }
+                    state.baseRoute != null -> {
+                        val route = routingRepository.previewRoute(
+                            origin = state.baseRoute.origin,
+                            destination = state.baseRoute.destination,
+                            allowHighways = false,
+                        )
+                        if (state.stage == PlannerStage.NAVIGATION_PREVIEW) {
+                            navigationSession.preview(route.toNavigationRoute())
+                        }
+                        mutableUiState.value = mutableUiState.value.copy(
+                            operation = null,
+                            baseRoute = route,
+                            message = null,
+                        )
+                    }
+                    else -> mutableUiState.value = mutableUiState.value.copy(operation = null)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: RoutePreviewException) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = if (error.failure == RoutePreviewFailure.NO_ROUTE) {
+                        "Non è disponibile un percorso senza autostrade."
+                    } else {
+                        error.failure.baseRouteMessage()
+                    },
+                )
+            } catch (_: Exception) {
+                mutableUiState.value = mutableUiState.value.copy(
+                    operation = null,
+                    message = "Impossibile ricalcolare il percorso senza autostrade.",
+                )
+            }
+        }
+    }
+
+    private fun showHighwayConfirmationIfNeeded(route: RoutePreview?) {
+        val state = mutableUiState.value
+        if (state.highwaysEnabled && route?.allowsHighways == true && route.usesHighways) {
+            mutableUiState.value = state.copy(highwayConfirmationPromptVisible = true)
+        }
+    }
+
+    private fun currentCalculatedRoutePreview(): RoutePreview? = mutableUiState.value.let { state ->
+        state.selectedItineraryRoute?.asRoutePreview()
+            ?: state.selectedRoute?.asRoutePreview()
+            ?: state.intermediateStopsRoute?.asRoutePreview()
+            ?: state.intermediateStopRoute?.asRoutePreview()
+            ?: state.baseRoute
     }
 
     fun refreshBackendSystemInfo() {
@@ -1199,6 +1384,7 @@ class RoutePlannerViewModel(
                     origin = directRoute.origin,
                     intermediateStops = proposedStops.map(PlannedIntermediateStop::location),
                     destination = directRoute.destination,
+                    allowHighways = state.highwaysEnabled,
                 )
                 val extraDurationSeconds =
                     (candidateRoute.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
@@ -1657,6 +1843,7 @@ class RoutePlannerViewModel(
                 val directRoute = routingRepository.previewRoute(
                     origin = currentOrigin,
                     destination = activeRoute.destination,
+                    allowHighways = state.highwaysEnabled,
                 )
                 val viaRoute = if (futureStops.isEmpty()) {
                     null
@@ -1665,6 +1852,7 @@ class RoutePlannerViewModel(
                         origin = currentOrigin,
                         intermediateStops = futureStops.map(PlannedIntermediateStop::location),
                         destination = activeRoute.destination,
+                        allowHighways = state.highwaysEnabled,
                     )
                 }
                 mutableUiState.value = mutableUiState.value.copy(
@@ -1792,6 +1980,7 @@ class RoutePlannerViewModel(
                     origin = directRoute.origin,
                     intermediateStops = stops.map(PlannedIntermediateStop::location),
                     destination = directRoute.destination,
+                    allowHighways = mutableUiState.value.highwaysEnabled,
                 )
                 if (mutableUiState.value.plannedIntermediateStops.map { it.id } != stops.map { it.id }) {
                     return@launch
@@ -1851,6 +2040,7 @@ class RoutePlannerViewModel(
                     val refreshedDirectRoute = routingRepository.previewRoute(
                         directRoute.origin,
                         directRoute.destination,
+                        allowHighways = state.highwaysEnabled,
                     )
                     navigationSession.preview(refreshedDirectRoute.toNavigationRoute())
                     mutableUiState.value = mutableUiState.value.copy(
@@ -1862,11 +2052,13 @@ class RoutePlannerViewModel(
                         intermediateStopEnabled = false,
                         message = null,
                     )
+                    showHighwayConfirmationIfNeeded(refreshedDirectRoute)
                 } else {
                     val route = routingRepository.routeWithIntermediateStops(
                         origin = directRoute.origin,
                         intermediateStops = remaining.map(PlannedIntermediateStop::location),
                         destination = directRoute.destination,
+                        allowHighways = state.highwaysEnabled,
                     )
                     navigationSession.preview(route.toNavigationRoute(remaining.toNavigationStops()))
                     mutableUiState.value = mutableUiState.value.copy(
@@ -1877,6 +2069,7 @@ class RoutePlannerViewModel(
                         intermediateStopEnabled = true,
                         message = null,
                     )
+                    showHighwayConfirmationIfNeeded(route.asRoutePreview())
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -1922,6 +2115,7 @@ class RoutePlannerViewModel(
                 intermediateStopEnabled = false,
                 message = null,
             )
+            showHighwayConfirmationIfNeeded(directRoute)
             return
         }
         requestJob?.cancel()
@@ -1937,6 +2131,7 @@ class RoutePlannerViewModel(
                         it.location
                     },
                     destination = directRoute.destination,
+                    allowHighways = state.highwaysEnabled,
                 )
                 if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN) {
                     mutableUiState.value = mutableUiState.value.copy(
@@ -1960,6 +2155,7 @@ class RoutePlannerViewModel(
                     intermediateStopsRoute = route,
                     message = null,
                 )
+                showHighwayConfirmationIfNeeded(route.asRoutePreview())
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
@@ -2389,6 +2585,7 @@ class RoutePlannerViewModel(
                     maximumDetourMinutes = requireNotNull(detourMinutes),
                     departureAt = OffsetDateTime.now(clock),
                     intermediateStops = state.plannedIntermediateStops.map { it.location },
+                    allowHighways = state.highwaysEnabled,
                 )
                 mutableUiState.value = mutableUiState.value.copy(
                     stage = PlannerStage.CNG_CANDIDATES,
@@ -2528,6 +2725,7 @@ class RoutePlannerViewModel(
                     } else {
                         null
                     },
+                    allowHighways = state.highwaysEnabled,
                     intermediateStops = planningStops.map { it.location },
                 )
                 mutableUiState.value = mutableUiState.value.copy(
@@ -2595,6 +2793,7 @@ class RoutePlannerViewModel(
                     origin = routeBase.origin,
                     destination = routeBase.destination,
                     mimitStationId = station.mimitStationId,
+                    allowHighways = state.highwaysEnabled,
                 )
                 require(route.selectedStop.mimitStationId == station.mimitStationId) {
                     "selected station does not match route response"
@@ -2625,6 +2824,7 @@ class RoutePlannerViewModel(
                         origin = routeBase.origin,
                         intermediateStops = stops.map(PlannedIntermediateStop::location),
                         destination = routeBase.destination,
+                        allowHighways = state.highwaysEnabled,
                     )
                     cngSelectionReturnsToStops = false
                     mutableUiState.value = mutableUiState.value.copy(
@@ -2647,6 +2847,7 @@ class RoutePlannerViewModel(
                     selectedRoute = navigationReadyRoute,
                     message = null,
                 ).withMapSafeSearchLabels()
+                showHighwayConfirmationIfNeeded(navigationReadyRoute.asRoutePreview())
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
@@ -2738,6 +2939,7 @@ class RoutePlannerViewModel(
                         origin = routeBase.origin,
                         intermediateStops = mergedStops.map(PlannedIntermediateStop::location),
                         destination = routeBase.destination,
+                        allowHighways = state.highwaysEnabled,
                     )
                     if (
                         !mixedRoute.preservesCngReserve(
@@ -2772,6 +2974,7 @@ class RoutePlannerViewModel(
                             suggestion.rangeBasis.estimatedRemainingCngRangeKm
                         ),
                         reserveCngRangeKm = suggestion.rangeBasis.reserveCngRangeKm,
+                        allowHighways = state.highwaysEnabled,
                     )
                     val detailsByStationId = itinerary.stops.associateBy {
                         it.station.mimitStationId
@@ -2798,6 +3001,7 @@ class RoutePlannerViewModel(
                     selectedRoute = null,
                     message = null,
                 ).withMapSafeSearchLabels()
+                showHighwayConfirmationIfNeeded(currentCalculatedRoutePreview())
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
@@ -3077,6 +3281,7 @@ class RoutePlannerViewModel(
             stage = PlannerStage.NAVIGATION_PREVIEW,
             message = null,
         )
+        showHighwayConfirmationIfNeeded(currentCalculatedRoutePreview())
     }
 
     fun openGasolineFallbackNavigation() {
@@ -3096,7 +3301,10 @@ class RoutePlannerViewModel(
     }
 
     fun startNavigation() {
-        if (mutableUiState.value.stage != PlannerStage.NAVIGATION_PREVIEW) return
+        if (
+            mutableUiState.value.stage != PlannerStage.NAVIGATION_PREVIEW ||
+            mutableUiState.value.highwayConfirmationPromptVisible
+        ) return
         val voiceDefault = runCatching {
             appPreferencesRepository.load().voiceGuidanceDefault
         }.getOrElse {
@@ -3209,6 +3417,7 @@ class RoutePlannerViewModel(
                 selectedItineraryRoute = null,
                 message = null,
             )
+            showHighwayConfirmationIfNeeded(directRoute)
             return
         }
         val suggestion = state.predictiveSuggestion
@@ -3233,6 +3442,7 @@ class RoutePlannerViewModel(
                     estimatedRemainingCngRangeKm =
                         suggestion.rangeBasis.estimatedRemainingCngRangeKm,
                     reserveCngRangeKm = suggestion.rangeBasis.reserveCngRangeKm,
+                    allowHighways = state.highwaysEnabled,
                 )
                 navigationSession.preview(
                     route.toNavigationRoute(
@@ -3245,6 +3455,7 @@ class RoutePlannerViewModel(
                     selectedItineraryRoute = route,
                     message = null,
                 )
+                showHighwayConfirmationIfNeeded(route.asRoutePreview())
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
@@ -3319,7 +3530,11 @@ class RoutePlannerViewModel(
                 message = null,
             )
             try {
-                val directRoute = routingRepository.previewRoute(origin, destination)
+                val directRoute = routingRepository.previewRoute(
+                    origin,
+                    destination,
+                    allowHighways = mutableUiState.value.highwaysEnabled,
+                )
                 val viaRoute = intermediateStop?.let { stop ->
                     val maximumAddedMinutes = maximumIntermediateAddedMinutes
                     if (maximumAddedMinutes == null || maximumAddedMinutes < 0.0) {
@@ -3330,7 +3545,12 @@ class RoutePlannerViewModel(
                         )
                         return@launch
                     }
-                    routingRepository.routeWithIntermediateStop(origin, stop, destination).also {
+                    routingRepository.routeWithIntermediateStop(
+                        origin,
+                        stop,
+                        destination,
+                        allowHighways = mutableUiState.value.highwaysEnabled,
+                    ).also {
                         val extraDurationSeconds =
                             (it.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
                         if (extraDurationSeconds > maximumAddedMinutes * 60.0) {
@@ -3352,6 +3572,7 @@ class RoutePlannerViewModel(
                     intermediateStopRoute = viaRoute,
                     routeInputsDirty = false,
                 )
+                showHighwayConfirmationIfNeeded(viaRoute?.asRoutePreview() ?: directRoute)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RoutePreviewException) {
@@ -3595,6 +3816,7 @@ private fun RoutePlannerUiState.alongRouteContext(): AlongRouteContext? {
         finalDestination = activeLegs.last().destination,
         remainingWaypoints = multiLeg?.stops ?: emptyList(),
         legs = encodedLegs,
+        allowHighways = activeLegs.all { it.allowsHighways },
         baselineDurationSeconds = direct.durationSeconds,
         currentDurationSeconds = multiLeg?.durationSeconds ?: direct.durationSeconds,
         maximumTotalAddedDurationSeconds = maximumAddedMinutes * 60.0,

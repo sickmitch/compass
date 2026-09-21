@@ -405,12 +405,15 @@ def test_base_route_contract_is_provider_independent() -> None:
             {
                 "origin": {"latitude": 45.4642, "longitude": 9.19},
                 "destination": {"latitude": 45.4781, "longitude": 9.2271},
+                "allow_highways": False,
             },
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert provider.request is not None
+    assert provider.request.allow_highways is False
     assert response.json() == {
         "distance_meters": 2500.0,
         "duration_seconds": 320.0,
@@ -455,6 +458,7 @@ def test_base_route_contract_is_provider_independent() -> None:
         ],
         "speed_limit_source": "valhalla_graph",
         "provider": "valhalla",
+        "uses_highways": False,
         "navigation": {
             "route_id": "route_9491c0c629955aa1cb1599fa2af10efe",
             "driving_duration_seconds": 320.0,
@@ -477,6 +481,7 @@ def test_base_route_contract_is_provider_independent() -> None:
         origin=Coordinate(latitude=45.4642, longitude=9.19),
         destination=Coordinate(latitude=45.4781, longitude=9.2271),
         language="it-IT",
+        allow_highways=False,
     )
 
 

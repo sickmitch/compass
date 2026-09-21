@@ -51,6 +51,13 @@ class BaseRouteRequest(StrictModel):
     origin: CoordinateRequest
     destination: CoordinateRequest
     costing: Literal["auto"] = "auto"
+    allow_highways: bool = Field(
+        default=True,
+        description=(
+            "Whether motorway-class roads may be used. False applies Valhalla's hard "
+            "highway exclusion and verifies the returned route."
+        ),
+    )
     departure_at: datetime | None = Field(
         default=None,
         description=(
@@ -208,6 +215,7 @@ class BaseRouteResponse(StrictModel):
     speed_limits: list[RouteSpeedLimitResponse]
     speed_limit_source: Literal["valhalla_graph"] | None
     provider: Literal["valhalla"]
+    uses_highways: bool
     navigation: NavigationTimingResponse
 
 
@@ -229,6 +237,7 @@ class IntermediateStopRouteLegResponse(StrictModel):
     maneuvers: list[ManeuverResponse]
     speed_limits: list[RouteSpeedLimitResponse]
     speed_limit_source: Literal["valhalla_graph"] | None
+    uses_highways: bool
 
 
 class RouteWithIntermediateStopResponse(StrictModel):
@@ -237,6 +246,7 @@ class RouteWithIntermediateStopResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     legs: list[IntermediateStopRouteLegResponse] = Field(min_length=2, max_length=2)
     provider: Literal["valhalla"]
+    uses_highways: bool
     navigation: NavigationTimingResponse
 
 
@@ -255,6 +265,7 @@ class IntermediateStopsRouteLegResponse(StrictModel):
     maneuvers: list[ManeuverResponse]
     speed_limits: list[RouteSpeedLimitResponse]
     speed_limit_source: Literal["valhalla_graph"] | None
+    uses_highways: bool
 
 
 class RouteWithIntermediateStopsResponse(StrictModel):
@@ -263,6 +274,7 @@ class RouteWithIntermediateStopsResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     legs: list[IntermediateStopsRouteLegResponse] = Field(min_length=2, max_length=9)
     provider: Literal["valhalla"]
+    uses_highways: bool
     navigation: NavigationTimingResponse
 
 
@@ -412,6 +424,7 @@ async def base_route(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     try:
         route = await provider.route(domain_request)
@@ -470,6 +483,7 @@ async def route_with_intermediate_stop(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     try:
         route = await provider.route_with_waypoints(domain_request)
@@ -531,6 +545,7 @@ async def route_with_intermediate_stop(
             speed_limit_source=(
                 "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
             ),
+            uses_highways=leg.uses_highways,
         )
         for index, leg in enumerate(route.legs)
     ]
@@ -540,6 +555,7 @@ async def route_with_intermediate_stop(
         duration_seconds=route.duration_seconds,
         legs=legs,
         provider="valhalla",
+        uses_highways=route.uses_highways,
         navigation=_navigation_timing_response(navigation),
     )
 
@@ -574,6 +590,7 @@ async def route_with_intermediate_stops(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     try:
         route = await provider.route_with_waypoints(domain_request)
@@ -642,6 +659,7 @@ async def route_with_intermediate_stops(
             speed_limit_source=(
                 "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
             ),
+            uses_highways=leg.uses_highways,
         )
         for index, leg in enumerate(route.legs)
     ]
@@ -651,6 +669,7 @@ async def route_with_intermediate_stops(
         duration_seconds=route.duration_seconds,
         legs=legs,
         provider="valhalla",
+        uses_highways=route.uses_highways,
         navigation=_navigation_timing_response(navigation),
     )
 
@@ -684,6 +703,7 @@ async def corridor_candidates(
             language=request.language or settings.valhalla_route_language,
             departure_at=request.departure_at,
             origin_direction=route_origin_direction(request),
+            allow_highways=request.allow_highways,
         ),
         effective_cng_range_km=request.effective_cng_range_km,
     )
@@ -753,6 +773,7 @@ async def detour_candidates(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     domain_request = NetworkDetourRequest(
         corridor_request=CorridorCandidateRequest(
@@ -838,6 +859,7 @@ def _base_route_response(
             "valhalla_graph" if route.speed_limit_source == "valhalla_graph" else None
         ),
         provider="valhalla",
+        uses_highways=route.uses_highways,
         navigation=_navigation_timing_response(navigation),
     )
 

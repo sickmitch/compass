@@ -25,6 +25,8 @@ data class RouteWithIntermediateStop(
         navigation = navigation,
         speedLimits = emptyList(),
         speedLimitSource = legs.mapNotNull(RoutePreview::speedLimitSource).firstOrNull(),
+        usesHighways = legs.any(RoutePreview::usesHighways),
+        allowsHighways = legs.all(RoutePreview::allowsHighways),
     )
 }
 
@@ -63,6 +65,8 @@ data class RouteWithIntermediateStops(
         navigation = navigation,
         speedLimits = emptyList(),
         speedLimitSource = legs.mapNotNull(RoutePreview::speedLimitSource).firstOrNull(),
+        usesHighways = legs.any(RoutePreview::usesHighways),
+        allowsHighways = legs.all(RoutePreview::allowsHighways),
     )
 }
 

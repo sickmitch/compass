@@ -115,6 +115,7 @@ data class AlongRouteContext(
     val finalDestination: Coordinate,
     val remainingWaypoints: List<Coordinate>,
     val legs: List<AlongRouteLeg>,
+    val allowHighways: Boolean = true,
     val progressShapeIndex: Int? = null,
     val insertionLegIndex: Int? = null,
     val baselineDurationSeconds: Double? = null,

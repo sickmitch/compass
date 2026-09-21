@@ -121,6 +121,7 @@ class RouteLegResponse(StrictModel):
     maneuvers: list[ManeuverResponse]
     speed_limits: list[RouteSpeedLimitResponse]
     speed_limit_source: Literal["valhalla_graph"] | None
+    uses_highways: bool
 
 
 class RouteWithCngStopResponse(StrictModel):
@@ -129,6 +130,7 @@ class RouteWithCngStopResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     legs: list[RouteLegResponse] = Field(min_length=2, max_length=2)
     provider: Literal["valhalla"]
+    uses_highways: bool
     navigation: NavigationTimingResponse
 
 
@@ -180,6 +182,7 @@ class CngItineraryRouteLegResponse(StrictModel):
     maneuvers: list[ManeuverResponse]
     speed_limits: list[RouteSpeedLimitResponse]
     speed_limit_source: Literal["valhalla_graph"] | None
+    uses_highways: bool
     available_range_at_departure_km: float = Field(gt=0)
     estimated_remaining_range_at_arrival_km: float = Field(ge=0)
     reserve_margin_at_arrival_km: float = Field(ge=0)
@@ -194,6 +197,7 @@ class RouteWithCngItineraryResponse(StrictModel):
     duration_seconds: float = Field(ge=0)
     legs: list[CngItineraryRouteLegResponse] = Field(min_length=2, max_length=33)
     provider: Literal["valhalla"]
+    uses_highways: bool
     range_validation: Literal["all_legs_preserve_reserve"] = "all_legs_preserve_reserve"
     navigation: NavigationTimingResponse
 
@@ -273,6 +277,7 @@ async def route_with_cng_stop(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     try:
         route = await provider.route_with_waypoints(route_request)
@@ -340,6 +345,7 @@ async def route_with_cng_stop(
             speed_limit_source=(
                 "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
             ),
+            uses_highways=leg.uses_highways,
         )
         for index, leg in enumerate(route.legs)
     ]
@@ -357,6 +363,7 @@ async def route_with_cng_stop(
         duration_seconds=route.duration_seconds,
         legs=legs,
         provider="valhalla",
+        uses_highways=route.uses_highways,
         navigation=_navigation_timing_response(navigation),
     )
 
@@ -420,6 +427,7 @@ async def route_with_cng_itinerary(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     try:
         route = await provider.route_with_waypoints(route_request)
@@ -501,6 +509,7 @@ async def route_with_cng_itinerary(
                 speed_limit_source=(
                     "valhalla_graph" if leg.speed_limit_source == "valhalla_graph" else None
                 ),
+                uses_highways=leg.uses_highways,
                 available_range_at_departure_km=available_range_km,
                 estimated_remaining_range_at_arrival_km=remaining_range_km,
                 reserve_margin_at_arrival_km=reserve_margin_km,
@@ -552,6 +561,7 @@ async def route_with_cng_itinerary(
         duration_seconds=duration_seconds,
         legs=response_legs,
         provider="valhalla",
+        uses_highways=route.uses_highways,
         navigation=_navigation_timing_response(navigation),
     )
 

@@ -29,6 +29,7 @@ class RouteRequest:
     language: str = "it-IT"
     departure_at: datetime | None = None
     origin_direction: RouteOriginDirection | None = None
+    allow_highways: bool = True
 
     def __post_init__(self) -> None:
         if self.departure_at is not None and (
@@ -46,6 +47,7 @@ class WaypointRouteRequest:
     language: str = "it-IT"
     departure_at: datetime | None = None
     origin_direction: RouteOriginDirection | None = None
+    allow_highways: bool = True
 
     def __post_init__(self) -> None:
         if not self.waypoints:
@@ -109,6 +111,7 @@ class BaseRoute:
     traffic_fallback_used: bool = False
     speed_limits: tuple[RouteSpeedLimit, ...] = ()
     speed_limit_source: str | None = None
+    uses_highways: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +122,7 @@ class RouteLeg:
     maneuvers: tuple[Maneuver, ...]
     speed_limits: tuple[RouteSpeedLimit, ...] = ()
     speed_limit_source: str | None = None
+    uses_highways: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +135,10 @@ class WaypointRoute:
     traffic_delay_seconds: float | None = None
     traffic_fallback_used: bool = False
 
+    @property
+    def uses_highways(self) -> bool:
+        return any(leg.uses_highways for leg in self.legs)
+
 
 @dataclass(frozen=True, slots=True)
 class MatrixRequest:
@@ -138,6 +146,7 @@ class MatrixRequest:
     targets: tuple[Coordinate, ...]
     costing: str = "auto"
     departure_at: datetime | None = None
+    allow_highways: bool = True
 
     def __post_init__(self) -> None:
         if not self.sources:

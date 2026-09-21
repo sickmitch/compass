@@ -88,10 +88,11 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.27` (`versionCode=73`).
+Android version is `0.28.29` (`versionCode=75`).
 
-The global Options screen persists a system/light/dark theme choice and the default voice-guidance
-state. It reuses the existing private favourites and encrypted server-connection stores, and loads
+The global Options screen persists a system/light/dark theme choice, the default voice-guidance
+state and whether new route calculations may use motorways. It reuses the existing private
+favourites and encrypted server-connection stores, and loads
 backend/traffic diagnostics from `/health/live` and `/api/v1/traffic/health` only while its Info
 panel is open. Form screens share one title-only header. The explicit back arrow is displayed for
 three-button/two-button system navigation and hidden when Android reports gestural navigation;
@@ -325,6 +326,15 @@ Android `0.28.27` (`versionCode=73`) stabilizes the route-free follow camera bef
 location update. It rejects out-of-order fixes and recent provider fallbacks with materially worse
 accuracy, limits camera-driving fixes to 75 metres, and reuses the navigation position/bearing
 filter so stationary heading noise cannot rotate the map.
+
+Android `0.28.28` (`versionCode=74`) adds the persistent **Autostrade** option. Disabled requests
+exclude motorways from the first calculation onward. Enabled requests permit them but show a
+mandatory confirmation when Valhalla reports actual motorway use; choosing **Ricalcola senza**
+applies only to the current route and its later reroutes, without changing the saved option.
+
+Android `0.28.29` (`versionCode=75`) shows a non-dismissible animated progress dialog while the
+route selected from the motorway confirmation is being recalculated without motorways. The dialog
+remains visible until the replacement route or an explicit error is available.
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

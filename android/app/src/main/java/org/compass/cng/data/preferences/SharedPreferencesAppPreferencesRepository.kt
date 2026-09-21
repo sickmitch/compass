@@ -16,6 +16,7 @@ class SharedPreferencesAppPreferencesRepository(context: Context) : AppPreferenc
             ?.let { stored -> AppThemePreference.entries.firstOrNull { it.name == stored } }
             ?: AppThemePreference.SYSTEM,
         voiceGuidanceDefault = preferences.getBoolean(VOICE_DEFAULT_KEY, true),
+        highwaysEnabled = preferences.getBoolean(HIGHWAYS_ENABLED_KEY, true),
     )
 
     override fun save(value: AppPreferences): AppPreferences {
@@ -23,6 +24,7 @@ class SharedPreferencesAppPreferencesRepository(context: Context) : AppPreferenc
             preferences.edit()
                 .putString(THEME_KEY, value.theme.name)
                 .putBoolean(VOICE_DEFAULT_KEY, value.voiceGuidanceDefault)
+                .putBoolean(HIGHWAYS_ENABLED_KEY, value.highwaysEnabled)
                 .commit(),
         ) { "app preferences could not be persisted" }
         return value
@@ -32,5 +34,6 @@ class SharedPreferencesAppPreferencesRepository(context: Context) : AppPreferenc
         const val PREFERENCES_NAME = "compass_app_preferences"
         const val THEME_KEY = "theme_v1"
         const val VOICE_DEFAULT_KEY = "voice_guidance_default_v1"
+        const val HIGHWAYS_ENABLED_KEY = "highways_enabled_v1"
     }
 }

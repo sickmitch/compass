@@ -30,6 +30,7 @@ import org.compass.cng.navigation.NavigationPosition
 import org.compass.cng.navigation.NavigationProgressSnapshot
 import org.compass.cng.navigation.toNavigationRoute
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -38,7 +39,7 @@ class NavigationRouteDocumentCodecTest {
 
     @Test
     fun roundTripPreservesDownloadedGeometryManeuversStationAndTiming() {
-        val route = routeWithStop().toNavigationRoute()
+        val route = routeWithStop().toNavigationRoute().copy(allowsHighways = false)
         val cached = CachedNavigationRoute(route, 1_725_000_000_000, navigationWasActive = true)
 
         val restored = requireNotNull(codec.decode(codec.encode(cached)))
@@ -53,6 +54,7 @@ class NavigationRouteDocumentCodecTest {
         assertEquals("valhalla_graph", restored.route.speedLimitSource)
         assertEquals(listOf(0, 1), restored.route.speedLimits.map { it.beginShapeIndex })
         assertEquals(listOf(1, 2), restored.route.speedLimits.map { it.endShapeIndex })
+        assertFalse(restored.route.allowsHighways)
     }
 
     @Test

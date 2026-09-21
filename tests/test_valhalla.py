@@ -9,6 +9,7 @@ import pytest
 
 from compass.routing.domain import (
     Coordinate,
+    MatrixCost,
     MatrixLocationError,
     MatrixRequest,
     NoRouteError,
@@ -161,6 +162,103 @@ def test_route_applies_direction_only_to_the_origin_location() -> None:
         asyncio.run(client.aclose())
 
     assert route.provider == "valhalla"
+
+
+def test_route_excludes_highways_and_reports_provider_highway_usage() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    fixture["trip"]["legs"][0]["summary"]["has_highway"] = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["costing_options"] == {
+            "auto": {"use_highways": 0.0, "exclude_highways": True}
+        }
+        return httpx.Response(200, json=fixture)
+
+    adapter, client = _adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(
+            adapter.route(
+                RouteRequest(
+                    origin=Coordinate(45.4642, 9.19),
+                    destination=Coordinate(45.4781, 9.2271),
+                    allow_highways=False,
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.uses_highways is False
+
+
+def test_route_rejects_highway_returned_for_no_highway_request() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    fixture["trip"]["legs"][0]["summary"]["has_highway"] = True
+    adapter, client = _adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json=fixture))
+    )
+    try:
+        with pytest.raises(NoRouteError, match="without highways"):
+            asyncio.run(
+                adapter.route(
+                    RouteRequest(
+                        origin=Coordinate(45.4642, 9.19),
+                        destination=Coordinate(45.4781, 9.2271),
+                        allow_highways=False,
+                    )
+                )
+            )
+    finally:
+        asyncio.run(client.aclose())
+
+
+def test_route_uses_trip_summary_as_highway_detection_fallback() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    fixture["trip"]["summary"]["has_highway"] = True
+    fixture["trip"]["legs"][0]["summary"]["has_highway"] = False
+    adapter, client = _adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json=fixture))
+    )
+    try:
+        route = asyncio.run(adapter.route(_request()))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.uses_highways is True
+
+
+def test_traffic_fallback_preserves_no_highway_costing() -> None:
+    fixture = json.loads(FIXTURE.read_text())
+    fixture["trip"]["legs"][0]["summary"]["has_highway"] = False
+    payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        payloads.append(payload)
+        if "date_time" in payload:
+            return httpx.Response(400, json={"error_code": 442, "error": "No path"})
+        return httpx.Response(200, json=fixture)
+
+    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
+    try:
+        route = asyncio.run(
+            adapter.route(
+                RouteRequest(
+                    origin=Coordinate(45.4642, 9.19),
+                    destination=Coordinate(45.4781, 9.2271),
+                    allow_highways=False,
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert route.uses_highways is False
+    assert payloads[0]["costing_options"]["auto"]["speed_types"]
+    assert payloads[1]["costing_options"] == {
+        "auto": {"use_highways": 0.0, "exclude_highways": True}
+    }
 
 
 def test_route_enriches_speed_limits_by_shape_index_and_merges_equal_edges() -> None:
@@ -839,6 +937,47 @@ def test_matrix_translates_request_and_preserves_unreachable_pairs() -> None:
     assert result.costs[0][0].distance_meters == 12_345
     assert result.costs[0][0].duration_seconds == 678
     assert result.costs[0][1] is None
+
+
+def test_matrix_applies_hard_highway_exclusion() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["costing_options"] == {
+            "auto": {"use_highways": 0.0, "exclude_highways": True}
+        }
+        return httpx.Response(
+            200,
+            json={
+                "algorithm": "costmatrix",
+                "units": "kilometers",
+                "sources_to_targets": [
+                    [
+                        {
+                            "from_index": 0,
+                            "to_index": 0,
+                            "distance": 1.0,
+                            "time": 60.0,
+                        }
+                    ]
+                ],
+            },
+        )
+
+    adapter, client = _adapter(httpx.MockTransport(handler))
+    try:
+        result = asyncio.run(
+            adapter.matrix(
+                MatrixRequest(
+                    sources=(Coordinate(45.0, 9.0),),
+                    targets=(Coordinate(45.1, 9.1),),
+                    allow_highways=False,
+                )
+            )
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert result.costs[0][0] == MatrixCost(1_000.0, 60.0)
 
 
 def test_matrix_maps_no_path_response_to_unreachable_cells() -> None:

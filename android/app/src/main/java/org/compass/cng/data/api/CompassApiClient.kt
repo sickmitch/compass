@@ -189,6 +189,7 @@ class CompassApiClient(
         origin: Coordinate,
         destination: Coordinate,
         originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean = true,
     ): ApiRoute {
         val payload = RouteRequestDto(
             origin = origin.toDto(),
@@ -197,6 +198,7 @@ class CompassApiClient(
             language = "it-IT",
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
+            allowHighways = allowHighways,
         )
         val response = post<RouteResponseDto>(routeUrl, json.encodeToString(payload))
         return try {
@@ -221,6 +223,7 @@ class CompassApiClient(
         intermediateStop: Coordinate,
         destination: Coordinate,
         originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean = true,
     ): ApiRouteWithIntermediateStop {
         val payload = RouteWithIntermediateStopRequestDto(
             origin = origin.toDto(),
@@ -230,6 +233,7 @@ class CompassApiClient(
             language = "it-IT",
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
+            allowHighways = allowHighways,
         )
         val response = post<RouteWithIntermediateStopResponseDto>(
             routeWithIntermediateStopUrl,
@@ -247,6 +251,7 @@ class CompassApiClient(
         intermediateStops: List<Coordinate>,
         destination: Coordinate,
         originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean = true,
     ): ApiRouteWithIntermediateStops {
         require(intermediateStops.size in 1..8) { "between one and eight stops are required" }
         val payload = RouteWithIntermediateStopsRequestDto(
@@ -257,6 +262,7 @@ class CompassApiClient(
             language = "it-IT",
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
+            allowHighways = allowHighways,
         )
         val response = post<RouteWithIntermediateStopsResponseDto>(
             routeWithIntermediateStopsUrl,
@@ -276,6 +282,7 @@ class CompassApiClient(
         maximumDetourMinutes: Double,
         departureAt: String,
         intermediateStops: List<Coordinate> = emptyList(),
+        allowHighways: Boolean = true,
     ): ApiRankedCandidates {
         val payload = RankedCandidatesRequestDto(
             origin = origin.toDto(),
@@ -288,6 +295,7 @@ class CompassApiClient(
             departureAt = departureAt,
             includeClosed = false,
             intermediateStops = intermediateStops.map(Coordinate::toDto),
+            allowHighways = allowHighways,
         )
         return post<RankedCandidatesResponseDto>(
             rankedCandidatesUrl,
@@ -300,6 +308,7 @@ class CompassApiClient(
         destination: Coordinate,
         mimitStationId: String,
         originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean = true,
     ): ApiRouteWithCngStop {
         val payload = RouteWithCngStopRequestDto(
             origin = origin.toDto(),
@@ -309,6 +318,7 @@ class CompassApiClient(
             mimitStationId = mimitStationId,
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
+            allowHighways = allowHighways,
         )
         return post<RouteWithCngStopResponseDto>(
             routeWithCngStopUrl,
@@ -329,6 +339,7 @@ class CompassApiClient(
         reserveGasolineRangeKm: Double? = null,
         originDirection: RouteOriginDirection? = null,
         intermediateStops: List<Coordinate> = emptyList(),
+        allowHighways: Boolean = true,
     ): ApiPredictiveCandidates {
         val payload = PredictiveCandidatesRequestDto(
             origin = origin.toDto(),
@@ -347,6 +358,7 @@ class CompassApiClient(
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
             intermediateStops = intermediateStops.map(Coordinate::toDto),
+            allowHighways = allowHighways,
         )
         return post<PredictiveCandidatesResponseDto>(
             predictiveCandidatesUrl,
@@ -363,6 +375,7 @@ class CompassApiClient(
         estimatedRemainingCngRangeKm: Double,
         reserveCngRangeKm: Double,
         originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean = true,
     ): ApiRouteWithCngItinerary {
         val payload = RouteWithCngItineraryRequestDto(
             origin = origin.toDto(),
@@ -375,6 +388,7 @@ class CompassApiClient(
             reserveCngRangeKm = reserveCngRangeKm,
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
+            allowHighways = allowHighways,
         )
         return post<RouteWithCngItineraryResponseDto>(
             routeWithCngItineraryUrl,
@@ -713,6 +727,7 @@ private data class AlongRouteContextDto(
     @SerialName("final_destination") val finalDestination: CoordinateDto,
     @SerialName("remaining_waypoints") val remainingWaypoints: List<CoordinateDto>,
     val legs: List<AlongRouteLegDto>,
+    @SerialName("allow_highways") val allowHighways: Boolean,
     @SerialName("progress_shape_index") val progressShapeIndex: Int?,
     @SerialName("insertion_leg_index") val insertionLegIndex: Int?,
     @SerialName("baseline_duration_seconds") val baselineDurationSeconds: Double?,
@@ -734,6 +749,7 @@ private fun org.compass.cng.domain.model.AlongRouteContext.toDto() = AlongRouteC
     finalDestination = finalDestination.toDto(),
     remainingWaypoints = remainingWaypoints.map(Coordinate::toDto),
     legs = legs.map { AlongRouteLegDto(it.encodedPolyline6, precision = 6) },
+    allowHighways = allowHighways,
     progressShapeIndex = progressShapeIndex,
     insertionLegIndex = insertionLegIndex,
     baselineDurationSeconds = baselineDurationSeconds,
@@ -878,6 +894,7 @@ private data class RouteRequestDto(
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -890,6 +907,7 @@ private data class RouteWithIntermediateStopRequestDto(
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -902,6 +920,7 @@ private data class RouteWithIntermediateStopsRequestDto(
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -917,6 +936,7 @@ private data class RankedCandidatesRequestDto(
     @SerialName("departure_at") val departureAt: String,
     @SerialName("include_closed") val includeClosed: Boolean,
     @SerialName("intermediate_stops") val intermediateStops: List<CoordinateDto> = emptyList(),
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -940,6 +960,7 @@ private data class PredictiveCandidatesRequestDto(
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
     @SerialName("intermediate_stops") val intermediateStops: List<CoordinateDto> = emptyList(),
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -952,6 +973,7 @@ private data class RouteWithCngStopRequestDto(
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -968,6 +990,7 @@ private data class RouteWithCngItineraryRequestDto(
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
+    @SerialName("allow_highways") val allowHighways: Boolean = true,
 )
 
 @Serializable
@@ -1033,6 +1056,7 @@ private data class RouteResponseDto(
     @SerialName("speed_limits") val speedLimits: List<RouteSpeedLimitDto> = emptyList(),
     @SerialName("speed_limit_source") val speedLimitSource: String? = null,
     val provider: String,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
     val navigation: NavigationTimingDto? = null,
 )
 
@@ -1382,6 +1406,7 @@ private data class RouteLegDto(
     val maneuvers: List<ManeuverDto>,
     @SerialName("speed_limits") val speedLimits: List<RouteSpeedLimitDto> = emptyList(),
     @SerialName("speed_limit_source") val speedLimitSource: String? = null,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
 )
 
 @Serializable
@@ -1391,6 +1416,7 @@ private data class RouteWithCngStopResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<RouteLegDto>,
     val provider: String,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
     val navigation: NavigationTimingDto? = null,
 )
 
@@ -1401,6 +1427,7 @@ private data class RouteWithIntermediateStopResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<RouteLegDto>,
     val provider: String,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
     val navigation: NavigationTimingDto? = null,
 )
 
@@ -1411,6 +1438,7 @@ private data class RouteWithIntermediateStopsResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<RouteLegDto>,
     val provider: String,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
     val navigation: NavigationTimingDto? = null,
 )
 
@@ -1439,6 +1467,7 @@ private data class CngItineraryRouteLegDto(
     val maneuvers: List<ManeuverDto>,
     @SerialName("speed_limits") val speedLimits: List<RouteSpeedLimitDto> = emptyList(),
     @SerialName("speed_limit_source") val speedLimitSource: String? = null,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
     @SerialName("available_range_at_departure_km") val availableRangeAtDepartureKm: Double,
     @SerialName("estimated_remaining_range_at_arrival_km")
     val estimatedRemainingRangeAtArrivalKm: Double,
@@ -1452,6 +1481,7 @@ private data class RouteWithCngItineraryResponseDto(
     @SerialName("duration_seconds") val durationSeconds: Double,
     val legs: List<CngItineraryRouteLegDto>,
     val provider: String,
+    @SerialName("uses_highways") val usesHighways: Boolean = false,
     @SerialName("range_validation") val rangeValidation: String,
     val navigation: NavigationTimingDto? = null,
 )
@@ -1649,6 +1679,7 @@ private fun RouteResponseDto.toApiRoute(): ApiRoute {
         navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
         speedLimits = speedLimits.toApiRouteSpeedLimits(),
         speedLimitSource = speedLimitSource.validatedSpeedLimitSource(),
+        usesHighways = usesHighways,
     )
 }
 
@@ -1935,10 +1966,12 @@ private fun RouteWithCngStopResponseDto.toApiRouteWithCngStop(): ApiRouteWithCng
                 maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
                 speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
                 speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
+                usesHighways = leg.usesHighways,
             )
         },
         provider = provider,
         navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 1),
+        usesHighways = usesHighways,
     )
 }
 
@@ -1974,10 +2007,12 @@ private fun RouteWithIntermediateStopResponseDto.toApiRouteWithIntermediateStop(
                 maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
                 speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
                 speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
+                usesHighways = leg.usesHighways,
             )
         },
         provider = provider,
         navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
+        usesHighways = usesHighways,
     )
 }
 
@@ -2013,10 +2048,12 @@ private fun RouteWithIntermediateStopsResponseDto.toApiRouteWithIntermediateStop
                 maneuvers = leg.maneuvers.map(ManeuverDto::toApiManeuver),
                 speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
                 speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
+                usesHighways = leg.usesHighways,
             )
         },
         provider = provider,
         navigation = navigation.toApiNavigationTiming(durationSeconds, refuelingStopCount = 0),
+        usesHighways = usesHighways,
     )
 }
 
@@ -2072,6 +2109,7 @@ private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
                 reserveMarginAtArrivalKm = leg.reserveMarginAtArrivalKm,
                 speedLimits = leg.speedLimits.toApiRouteSpeedLimits(),
                 speedLimitSource = leg.speedLimitSource.validatedSpeedLimitSource(),
+                usesHighways = leg.usesHighways,
             )
         },
         provider = provider,
@@ -2080,6 +2118,7 @@ private fun RouteWithCngItineraryResponseDto.toApiRouteWithCngItinerary():
             durationSeconds,
             refuelingStopCount = selectedStops.size,
         ),
+        usesHighways = usesHighways,
     )
 }
 

@@ -22,10 +22,32 @@ import org.compass.cng.domain.model.RouteWithIntermediateStop
 import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.model.SelectedCngStop
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NavigationRouteRecalculatorTest {
+    @Test
+    fun reroutePreservesOneOffHighwayExclusion() = runTest {
+        val repository = RecordingRepository()
+        val recalculator = CompassNavigationRouteRecalculator(repository)
+        val origin = Coordinate(45.0, 9.0)
+        val route = repository.route(origin, Coordinate(44.0, 11.0))
+            .copy(allowsHighways = false)
+            .toNavigationRoute()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            rawLocation = NavigationLocation(origin, 5.0, 10.0, 90.0, 1_000),
+            navigationPosition = position(origin),
+        )
+
+        val recalculated = recalculator.recalculate(state, RouteUpdateReason.MANUAL_DEBUG)
+
+        assertFalse(requireNotNull(repository.lastAllowHighways))
+        assertFalse(recalculated.allowsHighways)
+    }
+
     @Test
     fun offRouteUsesRawFixWhileTrafficAndConnectivityRecoveryUseSnappedPosition() = runTest {
         val repository = RecordingRepository()
@@ -461,6 +483,7 @@ class NavigationRouteRecalculatorTest {
         var lastIntermediateStop: Coordinate? = null
         var lastIntermediateStops: List<Coordinate>? = null
         var lastOriginDirection: RouteOriginDirection? = null
+        var lastAllowHighways: Boolean? = null
         var failNextItinerary: Boolean = false
 
         override suspend fun previewRoute(
@@ -472,6 +495,18 @@ class NavigationRouteRecalculatorTest {
             lastDestination = destination
             lastOriginDirection = originDirection
             return route(origin, destination)
+        }
+
+        override suspend fun previewRoute(
+            origin: Coordinate,
+            destination: Coordinate,
+            originDirection: RouteOriginDirection?,
+            allowHighways: Boolean,
+        ): RoutePreview {
+            lastAllowHighways = allowHighways
+            return previewRoute(origin, destination, originDirection).copy(
+                allowsHighways = allowHighways,
+            )
         }
 
         fun route(origin: Coordinate, destination: Coordinate): RoutePreview = RoutePreview(

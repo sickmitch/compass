@@ -624,6 +624,7 @@ private data class StoredNavigationRoute(
     val gasolineFallback: StoredGasolineFallback?,
     val speedLimits: List<StoredRouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
+    val allowsHighways: Boolean = true,
 ) {
     fun toDomain() = NavigationRoute(
         routeId = routeId,
@@ -643,6 +644,7 @@ private data class StoredNavigationRoute(
         gasolineFallback = gasolineFallback?.toDomain(),
         speedLimits = speedLimits.map(StoredRouteSpeedLimit::toDomain),
         speedLimitSource = speedLimitSource,
+        allowsHighways = allowsHighways,
     )
 
     companion object {
@@ -659,6 +661,7 @@ private data class StoredNavigationRoute(
             StoredNavigationTiming.fromDomain(value.timing), value.provider,
             value.gasolineFallback?.let(StoredGasolineFallback::fromDomain),
             value.speedLimits.map(StoredRouteSpeedLimit::fromDomain), value.speedLimitSource,
+            value.allowsHighways,
         )
     }
 }

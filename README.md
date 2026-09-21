@@ -151,6 +151,10 @@ curl --fail -H 'Content-Type: application/json' \
   http://127.0.0.1:8000/api/v1/routes
 ```
 
+The `routing` profile runs the one-shot `valhalla-config` service before Valhalla. It enables
+`service_limits.allow_hard_exclusions` in the generated runtime configuration so
+`allow_highways=false` is a strict motorway exclusion rather than only a route-cost preference.
+
 The first full-Italy build is a substantial operator task. Image pulls, resource expectations,
 regional overrides, rollback-safe graph updates, exact acceptance invariants and diagnostics are documented in
 [deployment and live validation](docs/deployment.md#phase-3-valhalla-bootstrap-and-base-route-validation).

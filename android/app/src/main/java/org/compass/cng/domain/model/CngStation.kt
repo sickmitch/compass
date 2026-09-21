@@ -379,6 +379,14 @@ fun SelectedCngStop.withNavigationDetailsFrom(
     price = stop.price,
 )
 
+fun SelectedCngStop.withNavigationDetailsFrom(stop: SelectedCngStop): SelectedCngStop = copy(
+    opening = stop.opening,
+    phone = stop.phone,
+    brand = stop.brand,
+    operator = stop.operator,
+    price = stop.price,
+)
+
 enum class CngRouteLegKind {
     ORIGIN_TO_CNG_STATION,
     CNG_STATION_TO_CNG_STATION,
@@ -431,6 +439,8 @@ data class RouteWithCngStop(
         maneuvers = legs.flatMap { it.route.maneuvers },
         provider = provider,
         navigation = navigation,
+        usesHighways = legs.any { it.route.usesHighways },
+        allowsHighways = legs.all { it.route.allowsHighways },
     )
 
     private companion object {
@@ -526,5 +536,7 @@ data class RouteWithCngItinerary(
         maneuvers = legs.flatMap { it.route.maneuvers },
         provider = provider,
         navigation = navigation,
+        usesHighways = legs.any { it.route.usesHighways },
+        allowsHighways = legs.all { it.route.allowsHighways },
     )
 }

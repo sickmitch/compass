@@ -287,6 +287,7 @@ def test_specific_query_uses_global_text_search_without_silent_global_fallback()
 def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_time() -> None:
     route = replace(
         _route(),
+        allow_highways=False,
         baseline_duration_seconds=100.0,
         current_duration_seconds=130.0,
         maximum_total_added_duration_seconds=50.0,
@@ -360,6 +361,7 @@ def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_
     assert all(item.insertion_leg_index == 1 for item in response.results)
     assert all(item.within_time_budget for item in response.results)
     assert all(request.waypoints[0] == route.remaining_waypoints[0] for request in routing.requests)
+    assert all(request.allow_highways is False for request in routing.requests)
 
 
 def test_candidate_uses_nearest_leg_and_existing_stop_is_not_suggested_again() -> None:

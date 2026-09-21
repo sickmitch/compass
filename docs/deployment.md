@@ -271,6 +271,11 @@ curl --fail --silent --show-error \
   http://127.0.0.1:8000/api/v1/routes
 ```
 
+The `valhalla-config` one-shot dependency updates the generated `valhalla.json` idempotently before
+the routing service starts. It sets `service_limits.allow_hard_exclusions=true`, which is required
+for Compass requests with `allow_highways=false`. A missing configuration fails early and means the
+`valhalla-tiles` build step must be completed first.
+
 The representative route stays within Milan so it is valid for the default Italy graph and for
 regional graphs that include Milan. Expected invariants:
 

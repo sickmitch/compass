@@ -187,6 +187,7 @@ async def ranked_candidates(
         language=request.language or settings.valhalla_route_language,
         departure_at=request.departure_at,
         origin_direction=route_origin_direction(request),
+        allow_highways=request.allow_highways,
     )
     domain_request = RankedCandidatesRequest(
         network_request=NetworkDetourRequest(
@@ -226,6 +227,7 @@ async def ranked_candidates(
                     language=route_request.language,
                     departure_at=route_request.departure_at,
                     origin_direction=route_request.origin_direction,
+                    allow_highways=route_request.allow_highways,
                 )
             )
             base_route = waypoint_route_as_base_route(

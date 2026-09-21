@@ -118,6 +118,7 @@ data class ApiRoute(
     val navigation: ApiNavigationTiming,
     val speedLimits: List<ApiRouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
+    val usesHighways: Boolean = false,
 )
 
 data class ApiRouteWithIntermediateStop(
@@ -127,6 +128,7 @@ data class ApiRouteWithIntermediateStop(
     val legs: List<ApiRouteLeg>,
     val provider: String,
     val navigation: ApiNavigationTiming,
+    val usesHighways: Boolean = false,
 )
 
 data class ApiRouteWithIntermediateStops(
@@ -136,6 +138,7 @@ data class ApiRouteWithIntermediateStops(
     val legs: List<ApiRouteLeg>,
     val provider: String,
     val navigation: ApiNavigationTiming,
+    val usesHighways: Boolean = false,
 )
 
 data class ApiRouteSpeedLimit(
@@ -349,6 +352,7 @@ data class ApiRouteWithCngStop(
     val legs: List<ApiRouteLeg>,
     val provider: String,
     val navigation: ApiNavigationTiming,
+    val usesHighways: Boolean = false,
 )
 
 data class ApiRouteWithCngItinerary(
@@ -359,6 +363,7 @@ data class ApiRouteWithCngItinerary(
     val provider: String,
     val rangeValidation: String,
     val navigation: ApiNavigationTiming,
+    val usesHighways: Boolean = false,
 )
 
 data class ApiCngItineraryRouteLeg(
@@ -377,6 +382,7 @@ data class ApiCngItineraryRouteLeg(
     val reserveMarginAtArrivalKm: Double,
     val speedLimits: List<ApiRouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
+    val usesHighways: Boolean = false,
 )
 
 data class ApiSelectedCngStop(
@@ -402,4 +408,5 @@ data class ApiRouteLeg(
     val maneuvers: List<ApiManeuver>,
     val speedLimits: List<ApiRouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
+    val usesHighways: Boolean = false,
 )

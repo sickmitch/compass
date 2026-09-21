@@ -80,6 +80,7 @@ class ValhallaRoutingAdapter:
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
             origin_direction=request.origin_direction,
+            allow_highways=request.allow_highways,
         )
         response = await self._request("POST", "/route", json=payload)
         if self._traffic_aware and _is_no_route_response(response):
@@ -97,12 +98,14 @@ class ValhallaRoutingAdapter:
                 _parse_route(_json_mapping(response)),
                 costing=request.costing,
             )
+            _require_highway_policy(route, allow_highways=request.allow_highways)
             return replace(route, traffic_fallback_used=True)
         _raise_route_http_error(response)
         route = await self._with_base_speed_limits(
             _parse_route(_json_mapping(response)),
             costing=request.costing,
         )
+        _require_highway_policy(route, allow_highways=request.allow_highways)
         if not self._traffic_aware:
             return route
         baseline = await self._route_baseline(payload, expected_leg_count=1)
@@ -127,6 +130,7 @@ class ValhallaRoutingAdapter:
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
             origin_direction=request.origin_direction,
+            allow_highways=request.allow_highways,
         )
         response = await self._request(
             "POST",
@@ -150,6 +154,7 @@ class ValhallaRoutingAdapter:
                 ),
                 costing=request.costing,
             )
+            _require_highway_policy(route, allow_highways=request.allow_highways)
             return replace(route, traffic_fallback_used=True)
         _raise_route_http_error(response)
         route = await self._with_waypoint_speed_limits(
@@ -158,6 +163,7 @@ class ValhallaRoutingAdapter:
             ),
             costing=request.costing,
         )
+        _require_highway_policy(route, allow_highways=request.allow_highways)
         if not self._traffic_aware:
             return route
         baseline = await self._route_baseline(
@@ -195,6 +201,11 @@ class ValhallaRoutingAdapter:
             traffic_aware=self._traffic_aware,
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
+        )
+        _apply_highway_policy(
+            payload,
+            costing=request.costing,
+            allow_highways=request.allow_highways,
         )
         response = await self._request("POST", "/sources_to_targets", json=payload)
         if response.status_code >= 500:
@@ -461,6 +472,7 @@ def _route_payload(
     ),
     departure_timezone: ZoneInfo = DEFAULT_DEPARTURE_TIMEZONE,
     origin_direction: RouteOriginDirection | None = None,
+    allow_highways: bool = True,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "locations": [
@@ -492,6 +504,11 @@ def _route_payload(
         traffic_speed_types=traffic_speed_types,
         departure_timezone=departure_timezone,
     )
+    _apply_highway_policy(
+        payload,
+        costing=costing,
+        allow_highways=allow_highways,
+    )
     if traffic_aware:
         # Valhalla's bidirectional mode consumes current traffic close to the
         # departure and fades it along the route. It avoids the convergence
@@ -513,9 +530,22 @@ def _apply_time_dependent_costing(
         return
     payload["date_time"] = _date_time_payload(departure_at, departure_timezone)
     if costing == "auto":
-        payload["costing_options"] = {
-            "auto": {"speed_types": list(traffic_speed_types)}
-        }
+        costing_options = payload.setdefault("costing_options", {})
+        costing_options.setdefault("auto", {})["speed_types"] = list(traffic_speed_types)
+
+
+def _apply_highway_policy(
+    payload: dict[str, Any],
+    *,
+    costing: str,
+    allow_highways: bool,
+) -> None:
+    if allow_highways or costing != "auto":
+        return
+    auto_options = payload.setdefault("costing_options", {}).setdefault("auto", {})
+    # use_highways keeps compatibility with older Valhalla deployments, while
+    # exclude_highways is the hard exclusion supported by the pinned 3.8.3 image.
+    auto_options.update({"use_highways": 0.0, "exclude_highways": True})
 
 
 def _date_time_payload(
@@ -566,9 +596,32 @@ def _is_no_route_response(response: httpx.Response) -> bool:
 def _without_time_dependent_costing(payload: Mapping[str, Any]) -> dict[str, Any]:
     fallback = dict(payload)
     fallback.pop("date_time", None)
-    fallback.pop("costing_options", None)
     fallback.pop("prioritize_bidirectional", None)
+    raw_options = fallback.get("costing_options")
+    if isinstance(raw_options, Mapping):
+        costing_options = {
+            key: dict(value) if isinstance(value, Mapping) else value
+            for key, value in raw_options.items()
+        }
+        auto_options = costing_options.get("auto")
+        if isinstance(auto_options, dict):
+            auto_options.pop("speed_types", None)
+            if not auto_options:
+                costing_options.pop("auto", None)
+        if costing_options:
+            fallback["costing_options"] = costing_options
+        else:
+            fallback.pop("costing_options", None)
     return fallback
+
+
+def _require_highway_policy(
+    route: BaseRoute | WaypointRoute,
+    *,
+    allow_highways: bool,
+) -> None:
+    if not allow_highways and route.uses_highways:
+        raise NoRouteError("Valhalla could not find a route without highways")
 
 
 def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
@@ -582,6 +635,10 @@ def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
         if len(legs) != 1:
             raise RoutingProviderError("A base route must contain exactly one leg")
         leg = _parse_leg(_mapping(legs[0], "trip.legs[0]"), leg_index=0)
+        summary_uses_highways = _optional_boolean(
+            summary.get("has_highway"),
+            "trip.summary.has_highway",
+        ) or False
         distance_meters = _number(summary["length"], "trip.summary.length") * 1000
         duration_seconds = _number(summary["time"], "trip.summary.time")
         if distance_meters <= 0 or duration_seconds <= 0:
@@ -592,6 +649,7 @@ def _parse_route(payload: Mapping[str, Any]) -> BaseRoute:
             encoded_polyline=leg.encoded_polyline,
             maneuvers=leg.maneuvers,
             provider="valhalla",
+            uses_highways=leg.uses_highways or summary_uses_highways,
         )
     except KeyError as error:
         raise RoutingProviderError(f"Valhalla response is missing {error.args[0]}") from error
@@ -613,6 +671,12 @@ def _parse_waypoint_route(payload: Mapping[str, Any], *, expected_leg_count: int
             _parse_leg(_mapping(value, f"trip.legs[{index}]"), leg_index=index)
             for index, value in enumerate(raw_legs)
         )
+        summary_uses_highways = _optional_boolean(
+            summary.get("has_highway"),
+            "trip.summary.has_highway",
+        ) or False
+        if summary_uses_highways and not any(leg.uses_highways for leg in legs):
+            legs = (replace(legs[0], uses_highways=True), *legs[1:])
         return WaypointRoute(
             distance_meters=_number(summary["length"], "trip.summary.length") * 1000,
             duration_seconds=_number(summary["time"], "trip.summary.time"),
@@ -649,6 +713,10 @@ def _parse_leg(value: Mapping[str, Any], *, leg_index: int) -> RouteLeg:
             duration_seconds=duration_seconds,
             encoded_polyline=shape,
             maneuvers=maneuvers,
+            uses_highways=_optional_boolean(
+                summary.get("has_highway"),
+                f"{field}.summary.has_highway",
+            ) or False,
         )
     except KeyError as error:
         raise RoutingProviderError(
@@ -865,4 +933,12 @@ def _optional_int(value: Any, field: str = "value") -> int | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise RoutingProviderError(f"{field} must be an integer or null")
+    return value
+
+
+def _optional_boolean(value: Any, field: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise RoutingProviderError(f"{field} must be a boolean or null")
     return value

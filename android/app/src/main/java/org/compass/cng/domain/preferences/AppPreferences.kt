@@ -9,6 +9,7 @@ enum class AppThemePreference {
 data class AppPreferences(
     val theme: AppThemePreference = AppThemePreference.SYSTEM,
     val voiceGuidanceDefault: Boolean = true,
+    val highwaysEnabled: Boolean = true,
 )
 
 interface AppPreferencesRepository {

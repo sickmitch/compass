@@ -92,6 +92,7 @@ class CompassApiClientTest {
         val route = client.getRoute(
             origin = Coordinate(45.4642, 9.19),
             destination = Coordinate(44.4949, 11.3426),
+            allowHighways = false,
         )
 
         assertEquals(210_925.0, route.distanceMeters, 0.0)
@@ -115,6 +116,7 @@ class CompassApiClientTest {
         val requestJson = json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
         assertEquals("auto", requestJson.getValue("costing").jsonPrimitive.content)
         assertEquals("it-IT", requestJson.getValue("language").jsonPrimitive.content)
+        assertFalse(requestJson.getValue("allow_highways").jsonPrimitive.content.toBoolean())
         assertEquals(
             "45.4642",
             requestJson.getValue("origin").jsonObject.getValue("latitude").jsonPrimitive.content,
@@ -365,6 +367,7 @@ class CompassApiClientTest {
                     finalDestination = Coordinate(45.2, 10.2),
                     remainingWaypoints = emptyList(),
                     legs = listOf(AlongRouteLeg("_izlhA~rlgdF_{geC_{geC")),
+                    allowHighways = false,
                 ),
                 pageCursor = null,
                 fullSearch = false,
@@ -377,6 +380,7 @@ class CompassApiClientTest {
         assertEquals("ADD_STOP_ALONG_ROUTE", body.getValue("intent").jsonPrimitive.content)
         val route = body.getValue("route").jsonObject
         assertEquals("selected-route", route.getValue("route_id").jsonPrimitive.content)
+        assertFalse(route.getValue("allow_highways").jsonPrimitive.content.toBoolean())
         assertEquals(
             "6",
             route.getValue("legs").jsonArray.single().jsonObject

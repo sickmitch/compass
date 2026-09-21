@@ -123,6 +123,7 @@ def waypoint_route_as_base_route(
             (leg.speed_limit_source for leg in route.legs if leg.speed_limit_source),
             None,
         ),
+        uses_highways=route.uses_highways,
     )
 
 

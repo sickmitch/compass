@@ -97,7 +97,7 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun optionsPersistThemeAndVoiceAndReturnToTheOpeningScreen() = runTest {
+    fun optionsPersistThemeVoiceAndHighwaysAndReturnToTheOpeningScreen() = runTest {
         val preferences = InMemoryAppPreferencesRepository(
             AppPreferences(theme = AppThemePreference.SYSTEM, voiceGuidanceDefault = true),
         )
@@ -125,15 +125,91 @@ class RoutePlannerViewModelTest {
         runCurrent()
         viewModel.updateAppTheme(AppThemePreference.DARK)
         viewModel.updateVoiceGuidanceDefault(false)
+        viewModel.updateHighwaysEnabled(false)
 
         assertEquals(PlannerStage.OPTIONS, viewModel.uiState.value.stage)
         assertEquals(AppThemePreference.DARK, preferences.load().theme)
         assertFalse(preferences.load().voiceGuidanceDefault)
+        assertFalse(preferences.load().highwaysEnabled)
         assertFalse(viewModel.navigationState.value.voiceGuidanceEnabled)
         assertEquals(backendInfo, viewModel.uiState.value.backendSystemInfo)
 
         viewModel.navigateBack()
         assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun disabledHighwayPreferenceExcludesThemFromInitialRouteWithoutPrompt() = runTest {
+        val preferences = InMemoryAppPreferencesRepository(
+            AppPreferences(highwaysEnabled = false),
+        )
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            appPreferencesRepository = preferences,
+        )
+
+        runCurrent()
+
+        assertEquals(false, repository.lastAllowHighways)
+        assertFalse(viewModel.uiState.value.highwayConfirmationPromptVisible)
+        assertFalse(viewModel.uiState.value.baseRoute?.allowsHighways ?: true)
+    }
+
+    @Test
+    fun rejectingHighwayRouteRecalculatesOnlyThatRouteWithoutChangingPreference() = runTest {
+        val preferences = InMemoryAppPreferencesRepository(
+            AppPreferences(highwaysEnabled = true),
+        )
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute().copy(usesHighways = true)),
+        )
+        val viewModel = RoutePlannerViewModel(
+            routingRepository = repository,
+            appPreferencesRepository = preferences,
+        )
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.highwayConfirmationPromptVisible)
+
+        viewModel.recalculateWithoutHighways()
+        runCurrent()
+
+        assertEquals(false, repository.lastAllowHighways)
+        assertTrue(preferences.load().highwaysEnabled)
+        assertFalse(viewModel.uiState.value.highwayConfirmationPromptVisible)
+        assertFalse(viewModel.uiState.value.baseRoute?.usesHighways ?: true)
+        assertFalse(viewModel.uiState.value.baseRoute?.allowsHighways ?: true)
+    }
+
+    @Test
+    fun rejectingHighwayRouteExposesProgressUntilRecalculationCompletes() = runTest {
+        val repository = FakeRoutingRepository(
+            baseResult = Result.success(sampleRoute().copy(usesHighways = true)),
+            highwayExcludedPreviewDelayMillis = 1_000L,
+        )
+        val viewModel = RoutePlannerViewModel(repository)
+        runCurrent()
+
+        viewModel.recalculateWithoutHighways()
+        runCurrent()
+
+        assertFalse(viewModel.uiState.value.highwayConfirmationPromptVisible)
+        assertEquals(
+            PlannerOperation.HIGHWAY_RECALCULATION,
+            viewModel.uiState.value.operation,
+        )
+
+        advanceTimeBy(999L)
+        runCurrent()
+        assertEquals(
+            PlannerOperation.HIGHWAY_RECALCULATION,
+            viewModel.uiState.value.operation,
+        )
+
+        advanceTimeBy(1L)
+        runCurrent()
+        assertNull(viewModel.uiState.value.operation)
     }
 
     @Test
@@ -2488,6 +2564,7 @@ class RoutePlannerViewModelTest {
         private val multipleIntermediateRouteFactory:
             ((List<Coordinate>) -> RouteWithIntermediateStops)? = null,
         private val intermediateRouteDelayMillis: Long = 0L,
+        private val highwayExcludedPreviewDelayMillis: Long = 0L,
         private val placeSearchResult: Result<PlaceSearchResults> = Result.failure(
             AssertionError("searchPlaces was not expected"),
         ),
@@ -2536,6 +2613,7 @@ class RoutePlannerViewModelTest {
         var lastItineraryEffectiveRangeKm = 0.0
         var lastRemainingGasolineRangeKm: Double? = null
         var lastGasolineReserveRangeKm: Double? = null
+        var lastAllowHighways: Boolean? = null
 
         override suspend fun searchPlaces(query: String, limit: Int): PlaceSearchResults =
             placeSearchResult.getOrThrow()
@@ -2589,6 +2667,23 @@ class RoutePlannerViewModelTest {
                     geometry = listOf(origin, destination),
                 )
             }
+        }
+
+        override suspend fun previewRoute(
+            origin: Coordinate,
+            destination: Coordinate,
+            originDirection: RouteOriginDirection?,
+            allowHighways: Boolean,
+        ): RoutePreview {
+            lastAllowHighways = allowHighways
+            if (!allowHighways && highwayExcludedPreviewDelayMillis > 0L) {
+                delay(highwayExcludedPreviewDelayMillis)
+            }
+            val route = previewRoute(origin, destination, originDirection)
+            return route.copy(
+                allowsHighways = allowHighways,
+                usesHighways = route.usesHighways && allowHighways,
+            )
         }
 
         override suspend fun routeWithIntermediateStop(

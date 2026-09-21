@@ -87,6 +87,8 @@ data class RoutePreview(
     val navigation: NavigationTiming = NavigationTiming.legacy(durationSeconds),
     val speedLimits: List<RouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
+    val usesHighways: Boolean = false,
+    val allowsHighways: Boolean = true,
 ) {
     init {
         require(speedLimitSource == null || speedLimitSource == "valhalla_graph") {

@@ -50,6 +50,7 @@ class RouteContextRequest(StrictModel):
     final_destination: CoordinateRequest
     remaining_waypoints: list[CoordinateRequest] = Field(default_factory=list, max_length=8)
     legs: list[RouteLegRequest] = Field(min_length=1, max_length=9)
+    allow_highways: bool = True
     progress_shape_index: int | None = Field(default=None, ge=0)
     insertion_leg_index: int | None = Field(default=None, ge=0, le=8)
     baseline_duration_seconds: float | None = Field(default=None, ge=0)
@@ -312,6 +313,7 @@ def _domain_route(route: RouteContextRequest) -> AlongRouteContext:
             Coordinate(point.latitude, point.longitude) for point in route.remaining_waypoints
         ),
         legs=tuple(AlongRouteLeg(leg.encoded_polyline) for leg in route.legs),
+        allow_highways=route.allow_highways,
         progress_shape_index=route.progress_shape_index,
         insertion_leg_index=route.insertion_leg_index,
         baseline_duration_seconds=route.baseline_duration_seconds,

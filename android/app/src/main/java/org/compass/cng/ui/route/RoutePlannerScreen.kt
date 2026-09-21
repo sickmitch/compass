@@ -213,6 +213,44 @@ fun RoutePlannerScreen(
             },
         )
     }
+    if (state.highwayConfirmationPromptVisible) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Il percorso usa l'autostrada") },
+            text = {
+                Text(
+                    "Vuoi mantenere il percorso calcolato oppure ricalcolarlo " +
+                        "escludendo tutte le autostrade?",
+                )
+            },
+            confirmButton = {
+                CompassButton(onClick = viewModel::confirmHighwayRoute) {
+                    Text("Usa autostrada")
+                }
+            },
+            dismissButton = {
+                CompassTextButton(onClick = viewModel::recalculateWithoutHighways) {
+                    Text("Ricalcola senza")
+                }
+            },
+        )
+    }
+    if (state.operation == PlannerOperation.HIGHWAY_RECALCULATION) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Ricalcolo del percorso") },
+            text = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                    Text("Cerco un percorso senza autostrade…")
+                }
+            },
+            confirmButton = {},
+        )
+    }
     val showDrivingSurface = state.stage == PlannerStage.NAVIGATION_PREVIEW &&
         navigationState.route != null &&
         navigationState.phase != NavigationPhase.ROUTE_PREVIEW
@@ -303,6 +341,7 @@ fun RoutePlannerScreen(
                 visibleStage == PlannerStage.OPTIONS -> OptionsContent(
                     theme = state.appTheme,
                     voiceGuidanceDefault = state.voiceGuidanceDefault,
+                    highwaysEnabled = state.highwaysEnabled,
                     serverBaseUrl = state.serverBaseUrlInput,
                     backendInfo = state.backendSystemInfo,
                     backendInfoLoading = state.backendSystemInfoLoading,
@@ -312,6 +351,7 @@ fun RoutePlannerScreen(
                     routeProvider = navigationState.route?.provider ?: state.baseRoute?.provider,
                     onThemeChanged = viewModel::updateAppTheme,
                     onVoiceDefaultChanged = viewModel::updateVoiceGuidanceDefault,
+                    onHighwaysEnabledChanged = viewModel::updateHighwaysEnabled,
                     onFavoritePlaces = viewModel::openFavoritePlaceManagement,
                     onConnection = viewModel::openServerConnection,
                     onRefreshInfo = viewModel::refreshBackendSystemInfo,
@@ -700,6 +740,7 @@ private fun PlannerStage.creationStep(searchTarget: RouteEndpoint): Int? = when 
 private fun OptionsContent(
     theme: AppThemePreference,
     voiceGuidanceDefault: Boolean,
+    highwaysEnabled: Boolean,
     serverBaseUrl: String,
     backendInfo: BackendSystemInfo?,
     backendInfoLoading: Boolean,
@@ -708,6 +749,7 @@ private fun OptionsContent(
     routeProvider: String?,
     onThemeChanged: (AppThemePreference) -> Unit,
     onVoiceDefaultChanged: (Boolean) -> Unit,
+    onHighwaysEnabledChanged: (Boolean) -> Unit,
     onFavoritePlaces: () -> Unit,
     onConnection: () -> Unit,
     onRefreshInfo: () -> Unit,
@@ -757,6 +799,32 @@ private fun OptionsContent(
                     Switch(
                         checked = voiceGuidanceDefault,
                         onCheckedChange = onVoiceDefaultChanged,
+                    )
+                }
+            }
+        }
+        item {
+            SettingsSection(title = "Percorso") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Autostrade", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (highwaysEnabled) {
+                                "Attivo · verrà chiesta conferma se il percorso le usa."
+                            } else {
+                                "Disattivo · escluse da ogni nuovo calcolo."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = highwaysEnabled,
+                        onCheckedChange = onHighwaysEnabledChanged,
                     )
                 }
             }

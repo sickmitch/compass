@@ -123,6 +123,7 @@ data class NavigationRoute(
     val gasolineFallback: GasolineFallback? = null,
     val speedLimits: List<RouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
+    val allowsHighways: Boolean = true,
 ) {
     init {
         require(speedLimitSource == null || speedLimitSource == "valhalla_graph")
@@ -146,6 +147,7 @@ data class NavigationRoute(
         navigation = timing,
         speedLimits = speedLimits,
         speedLimitSource = speedLimitSource,
+        allowsHighways = allowsHighways,
     )
 }
 
@@ -528,6 +530,7 @@ private fun buildNavigationRoute(
         speedLimits = navigationLegs.flatMap(NavigationLeg::speedLimits),
         speedLimitSource = sourceLegs.mapNotNull(RoutePreview::speedLimitSource)
             .firstOrNull(),
+        allowsHighways = route.allowsHighways,
     )
 }
 

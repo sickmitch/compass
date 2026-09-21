@@ -353,6 +353,12 @@
       "BaseRouteRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -476,6 +482,10 @@
             },
             "title": "Speed Limits",
             "type": "array"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -486,6 +496,7 @@
           "speed_limits",
           "speed_limit_source",
           "provider",
+          "uses_highways",
           "navigation"
         ],
         "title": "BaseRouteResponse",
@@ -567,6 +578,10 @@
             },
             "title": "Speed Limits",
             "type": "array"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -580,6 +595,7 @@
           "maneuvers",
           "speed_limits",
           "speed_limit_source",
+          "uses_highways",
           "available_range_at_departure_km",
           "estimated_remaining_range_at_arrival_km",
           "reserve_margin_at_arrival_km"
@@ -691,6 +707,12 @@
       "CorridorCandidatesRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -1448,6 +1470,12 @@
       "DetourCandidatesRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -1957,6 +1985,10 @@
             },
             "title": "Speed Limits",
             "type": "array"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1968,7 +2000,8 @@
           "geometry",
           "maneuvers",
           "speed_limits",
-          "speed_limit_source"
+          "speed_limit_source",
+          "uses_highways"
         ],
         "title": "IntermediateStopRouteLegResponse",
         "type": "object"
@@ -1976,6 +2009,12 @@
       "IntermediateStopRouteRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -2115,6 +2154,10 @@
             },
             "title": "Speed Limits",
             "type": "array"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2127,7 +2170,8 @@
           "geometry",
           "maneuvers",
           "speed_limits",
-          "speed_limit_source"
+          "speed_limit_source",
+          "uses_highways"
         ],
         "title": "IntermediateStopsRouteLegResponse",
         "type": "object"
@@ -2135,6 +2179,12 @@
       "IntermediateStopsRouteRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -3058,6 +3108,12 @@
       "PredictiveCandidatesApiRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -4009,6 +4065,12 @@
       "RankedCandidatesApiRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -4436,6 +4498,11 @@
       "RouteContextRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "baseline_duration_seconds": {
             "anyOf": [
               {
@@ -4640,6 +4707,10 @@
             },
             "title": "Speed Limits",
             "type": "array"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4651,7 +4722,8 @@
           "geometry",
           "maneuvers",
           "speed_limits",
-          "speed_limit_source"
+          "speed_limit_source",
+          "uses_highways"
         ],
         "title": "RouteLegResponse",
         "type": "object"
@@ -4687,6 +4759,12 @@
       "RouteWithCngItineraryRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -4836,6 +4914,10 @@
             "minItems": 1,
             "title": "Selected Stops",
             "type": "array"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4844,6 +4926,7 @@
           "duration_seconds",
           "legs",
           "provider",
+          "uses_highways",
           "navigation"
         ],
         "title": "RouteWithCngItineraryResponse",
@@ -4852,6 +4935,12 @@
       "RouteWithCngStopRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_highways": {
+            "default": true,
+            "description": "Whether motorway-class roads may be used. False applies Valhalla's hard highway exclusion and verifies the returned route.",
+            "title": "Allow Highways",
+            "type": "boolean"
+          },
           "costing": {
             "const": "auto",
             "default": "auto",
@@ -4964,6 +5053,10 @@
           },
           "selected_stop": {
             "$ref": "#/components/schemas/SelectedCngStopResponse"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4972,6 +5065,7 @@
           "duration_seconds",
           "legs",
           "provider",
+          "uses_highways",
           "navigation"
         ],
         "title": "RouteWithCngStopResponse",
@@ -5009,6 +5103,10 @@
             "const": "valhalla",
             "title": "Provider",
             "type": "string"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5017,6 +5115,7 @@
           "duration_seconds",
           "legs",
           "provider",
+          "uses_highways",
           "navigation"
         ],
         "title": "RouteWithIntermediateStopResponse",
@@ -5060,6 +5159,10 @@
             "const": "valhalla",
             "title": "Provider",
             "type": "string"
+          },
+          "uses_highways": {
+            "title": "Uses Highways",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5068,6 +5171,7 @@
           "duration_seconds",
           "legs",
           "provider",
+          "uses_highways",
           "navigation"
         ],
         "title": "RouteWithIntermediateStopsResponse",

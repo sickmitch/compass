@@ -97,6 +97,7 @@ async def evaluate_cng_detours(
             destination=leg_destination,
             costing=route_request.costing,
             departure_at=request.departure_at,
+            allow_highways=route_request.allow_highways,
         )
         matrix_calls += calls
         fallback_splits += splits
@@ -245,6 +246,7 @@ async def _matrix_cost_pairs(
     destination: Coordinate,
     costing: str,
     departure_at: datetime | None,
+    allow_highways: bool,
 ) -> tuple[
     tuple[tuple[MatrixCost | None, MatrixCost | None, MatrixCost | None], ...],
     int,
@@ -260,12 +262,14 @@ async def _matrix_cost_pairs(
             targets=station_coordinates + (destination,),
             costing=costing,
             departure_at=departure_at,
+            allow_highways=allow_highways,
         ),
         MatrixRequest(
             sources=station_coordinates,
             targets=(destination,),
             costing=costing,
             departure_at=departure_at,
+            allow_highways=allow_highways,
         ),
     )
     results = await asyncio.gather(
@@ -289,6 +293,7 @@ async def _matrix_cost_pairs(
             destination=destination,
             costing=costing,
             departure_at=departure_at,
+            allow_highways=allow_highways,
         )
         right = await _matrix_cost_pairs(
             provider,
@@ -297,6 +302,7 @@ async def _matrix_cost_pairs(
             destination=destination,
             costing=costing,
             departure_at=departure_at,
+            allow_highways=allow_highways,
         )
         return (
             left[0] + right[0],

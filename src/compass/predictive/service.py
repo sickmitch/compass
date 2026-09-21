@@ -163,6 +163,7 @@ async def evaluate_predictive_cng_candidates(
                 costing=network_request.corridor_request.route.costing,
                 batch_size=detour_policy.matrix_batch_size,
                 departure_at=network_request.departure_at,
+                allow_highways=network_request.corridor_request.route.allow_highways,
                 waypoint_route=waypoint_route,
             )
             path = _search_complete_itinerary(
@@ -557,6 +558,7 @@ async def _pairwise_candidate_costs(
     costing: str,
     batch_size: int,
     departure_at: datetime,
+    allow_highways: bool,
     waypoint_route: WaypointRoute | None = None,
 ) -> tuple[tuple[tuple[MatrixCost | None, ...], ...], _MatrixStats]:
     coordinates = tuple(
@@ -575,6 +577,7 @@ async def _pairwise_candidate_costs(
                 coordinates[target_start:target_end],
                 costing=costing,
                 departure_at=departure_at,
+                allow_highways=allow_highways,
             )
             stats += block_stats
             for relative_source, block_row in enumerate(block):
@@ -648,6 +651,7 @@ async def _matrix_block(
     *,
     costing: str,
     departure_at: datetime,
+    allow_highways: bool,
 ) -> tuple[tuple[tuple[MatrixCost | None, ...], ...], _MatrixStats]:
     try:
         result = await provider.matrix(
@@ -656,6 +660,7 @@ async def _matrix_block(
                 targets=targets,
                 costing=costing,
                 departure_at=departure_at,
+                allow_highways=allow_highways,
             )
         )
     except MatrixLocationError:
@@ -669,6 +674,7 @@ async def _matrix_block(
                 targets,
                 costing=costing,
                 departure_at=departure_at,
+                allow_highways=allow_highways,
             )
             right, right_stats = await _matrix_block(
                 provider,
@@ -676,6 +682,7 @@ async def _matrix_block(
                 targets,
                 costing=costing,
                 departure_at=departure_at,
+                allow_highways=allow_highways,
             )
             return (
                 left + right,
@@ -688,6 +695,7 @@ async def _matrix_block(
             targets[:split_at],
             costing=costing,
             departure_at=departure_at,
+            allow_highways=allow_highways,
         )
         right, right_stats = await _matrix_block(
             provider,
@@ -695,6 +703,7 @@ async def _matrix_block(
             targets[split_at:],
             costing=costing,
             departure_at=departure_at,
+            allow_highways=allow_highways,
         )
         return (
             tuple(left_row + right_row for left_row, right_row in zip(left, right, strict=True)),

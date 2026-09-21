@@ -179,6 +179,14 @@ off-route recalculation; the Valhalla adapter adds `heading` and `heading_tolera
 location and never to the destination or intermediate stops. Supplying a tolerance without a
 heading is rejected. Ordinary route creation omits both fields.
 
+Every route-producing request also accepts `allow_highways` (default `true`). When it is `false`,
+Compass sends Valhalla both the hard motorway exclusion and a zero highway preference, then rejects
+any provider response whose leg summary still reports motorway use. The same policy is propagated
+through ordinary-waypoint search, CNG candidate matrices, predictive planning and route
+recalculation. Route and route-leg responses expose `uses_highways`, derived from Valhalla's leg
+summaries, so clients can ask for an explicit confirmation only when the selected route actually
+contains a motorway.
+
 ## Route through ordinary intermediate waypoints
 
 `POST /api/v1/routes/with-intermediate-stops` accepts WGS84 departure, one to eight ordered ordinary

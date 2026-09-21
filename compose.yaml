@@ -166,6 +166,16 @@ services:
       - valhalla_data:/custom_files
     restart: "no"
 
+  valhalla-config:
+    profiles: ["routing", "traffic"]
+    image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
+    entrypoint: ["python3", "/usr/local/bin/configure-valhalla-runtime.py"]
+    command: ["--config", "/custom_files/valhalla.json"]
+    volumes:
+      - valhalla_data:/custom_files
+      - ./tools/configure-valhalla-runtime.py:/usr/local/bin/configure-valhalla-runtime.py:ro
+    restart: "no"
+
   valhalla:
     profiles: ["routing", "traffic"]
     image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
@@ -189,6 +199,9 @@ services:
       start_period: 30s
     volumes:
       - valhalla_data:/custom_files
+    depends_on:
+      valhalla-config:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   valhalla-traffic-extract:

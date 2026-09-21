@@ -258,8 +258,16 @@ class HttpRoutingRepository(
         origin: Coordinate,
         destination: Coordinate,
         originDirection: RouteOriginDirection?,
+    ): RoutePreview = previewRoute(origin, destination, originDirection, allowHighways = true)
+
+    override suspend fun previewRoute(
+        origin: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): RoutePreview = mapFailures {
-        apiClient.getRoute(origin, destination, originDirection).toRoutePreview(origin, destination)
+        apiClient.getRoute(origin, destination, originDirection, allowHighways)
+            .toRoutePreview(origin, destination, allowHighways)
     }
 
     override suspend fun routeWithIntermediateStop(
@@ -267,12 +275,23 @@ class HttpRoutingRepository(
         intermediateStop: Coordinate,
         destination: Coordinate,
         originDirection: RouteOriginDirection?,
+    ): RouteWithIntermediateStop = routeWithIntermediateStop(
+        origin, intermediateStop, destination, originDirection, allowHighways = true,
+    )
+
+    override suspend fun routeWithIntermediateStop(
+        origin: Coordinate,
+        intermediateStop: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): RouteWithIntermediateStop = mapFailures {
         val response = apiClient.getRouteWithIntermediateStop(
             origin,
             intermediateStop,
             destination,
             originDirection,
+            allowHighways,
         )
         RouteWithIntermediateStop(
             stop = response.intermediateStop,
@@ -281,6 +300,7 @@ class HttpRoutingRepository(
             legs = response.legs.mapIndexed { index, leg ->
                 leg.toRoutePreview(
                     provider = response.provider,
+                    allowHighways = allowHighways,
                     navigation = response.navigation.toLegNavigationTiming(
                         sequence = index + 1,
                         durationSeconds = leg.durationSeconds,
@@ -297,12 +317,23 @@ class HttpRoutingRepository(
         intermediateStops: List<Coordinate>,
         destination: Coordinate,
         originDirection: RouteOriginDirection?,
+    ): RouteWithIntermediateStops = routeWithIntermediateStops(
+        origin, intermediateStops, destination, originDirection, allowHighways = true,
+    )
+
+    override suspend fun routeWithIntermediateStops(
+        origin: Coordinate,
+        intermediateStops: List<Coordinate>,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): RouteWithIntermediateStops = mapFailures {
         val response = apiClient.getRouteWithIntermediateStops(
             origin,
             intermediateStops,
             destination,
             originDirection,
+            allowHighways,
         )
         RouteWithIntermediateStops(
             stops = response.intermediateStops,
@@ -311,6 +342,7 @@ class HttpRoutingRepository(
             legs = response.legs.mapIndexed { index, leg ->
                 leg.toRoutePreview(
                     provider = response.provider,
+                    allowHighways = allowHighways,
                     navigation = response.navigation.toLegNavigationTiming(
                         sequence = index + 1,
                         durationSeconds = leg.durationSeconds,
@@ -328,6 +360,18 @@ class HttpRoutingRepository(
         effectiveCngRangeKm: Double,
         maximumDetourMinutes: Double,
         departureAt: OffsetDateTime,
+    ): RankedCngStations = rankedCngStations(
+        origin, destination, effectiveCngRangeKm, maximumDetourMinutes, departureAt,
+        allowHighways = true,
+    )
+
+    override suspend fun rankedCngStations(
+        origin: Coordinate,
+        destination: Coordinate,
+        effectiveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        allowHighways: Boolean,
     ): RankedCngStations = mapFailures {
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
         require(maximumDetourMinutes >= 0) { "maximum detour must not be negative" }
@@ -337,6 +381,7 @@ class HttpRoutingRepository(
             effectiveCngRangeKm = effectiveCngRangeKm,
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt.toString(),
+            allowHighways = allowHighways,
         )
         val candidates = response.candidates.map(ApiRankedCandidate::toRankedCngStation)
         require(candidates.map { it.ranking.rank } == (1..candidates.size).toList()) {
@@ -345,7 +390,7 @@ class HttpRoutingRepository(
         RankedCngStations(
             departureAt = OffsetDateTime.parse(response.departureAt),
             maximumDetourMinutes = response.maximumDetourMinutes,
-            baseRoute = response.baseRoute.toRoutePreview(origin, destination),
+            baseRoute = response.baseRoute.toRoutePreview(origin, destination, allowHighways),
             trafficState = response.trafficState,
             candidates = candidates,
         )
@@ -358,6 +403,19 @@ class HttpRoutingRepository(
         effectiveCngRangeKm: Double,
         maximumDetourMinutes: Double,
         departureAt: OffsetDateTime,
+    ): RankedCngStations = rankedCngStationsAlongItinerary(
+        origin, destination, intermediateStops, effectiveCngRangeKm,
+        maximumDetourMinutes, departureAt, allowHighways = true,
+    )
+
+    override suspend fun rankedCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        allowHighways: Boolean,
     ): RankedCngStations = mapFailures {
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
         require(maximumDetourMinutes >= 0) { "maximum detour must not be negative" }
@@ -369,6 +427,7 @@ class HttpRoutingRepository(
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = departureAt.toString(),
             intermediateStops = intermediateStops,
+            allowHighways = allowHighways,
         )
         val candidates = response.candidates.map(ApiRankedCandidate::toRankedCngStation)
         require(candidates.map { it.ranking.rank } == (1..candidates.size).toList()) {
@@ -377,7 +436,7 @@ class HttpRoutingRepository(
         RankedCngStations(
             departureAt = OffsetDateTime.parse(response.departureAt),
             maximumDetourMinutes = response.maximumDetourMinutes,
-            baseRoute = response.baseRoute.toRoutePreview(origin, destination),
+            baseRoute = response.baseRoute.toRoutePreview(origin, destination, allowHighways),
             trafficState = response.trafficState,
             candidates = candidates,
         )
@@ -395,6 +454,26 @@ class HttpRoutingRepository(
         estimatedRemainingGasolineRangeKm: Double?,
         reserveGasolineRangeKm: Double?,
         originDirection: RouteOriginDirection?,
+    ): PredictiveCngSuggestion = predictiveCngStations(
+        origin, destination, effectiveCngRangeKm, estimatedRemainingCngRangeKm,
+        reserveCngRangeKm, maximumDetourMinutes, departureAt, excludedMimitStationIds,
+        estimatedRemainingGasolineRangeKm, reserveGasolineRangeKm, originDirection,
+        allowHighways = true,
+    )
+
+    override suspend fun predictiveCngStations(
+        origin: Coordinate,
+        destination: Coordinate,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String>,
+        estimatedRemainingGasolineRangeKm: Double?,
+        reserveGasolineRangeKm: Double?,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): PredictiveCngSuggestion = predictiveCngStationsInternal(
         origin = origin,
         destination = destination,
@@ -408,6 +487,7 @@ class HttpRoutingRepository(
         estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
         reserveGasolineRangeKm = reserveGasolineRangeKm,
         originDirection = originDirection,
+        allowHighways = allowHighways,
     )
 
     private suspend fun predictiveCngStationsInternal(
@@ -423,6 +503,7 @@ class HttpRoutingRepository(
         estimatedRemainingGasolineRangeKm: Double?,
         reserveGasolineRangeKm: Double?,
         originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): PredictiveCngSuggestion = mapFailures {
         require(intermediateStops.size <= 8) { "at most 8 intermediate stops are supported" }
         require(effectiveCngRangeKm > 0) { "effective CNG range must be positive" }
@@ -467,6 +548,7 @@ class HttpRoutingRepository(
             reserveGasolineRangeKm = reserveGasolineRangeKm,
             originDirection = originDirection,
             intermediateStops = intermediateStops,
+            allowHighways = allowHighways,
         )
         require(response.excludedMimitStationIds.toSet() == excludedMimitStationIds) {
             "server did not acknowledge the excluded MIMIT station IDs"
@@ -487,7 +569,7 @@ class HttpRoutingRepository(
             state = response.suggestionState.toPredictiveSuggestionState(),
             departureAt = OffsetDateTime.parse(response.departureAt),
             maximumDetourMinutes = response.maximumDetourMinutes,
-            baseRoute = response.baseRoute.toRoutePreview(origin, destination),
+            baseRoute = response.baseRoute.toRoutePreview(origin, destination, allowHighways),
             rangeBasis = PredictiveRangeBasis(
                 effectiveCngRangeKm = response.rangeBasis.effectiveCngRangeKm,
                 estimatedRemainingCngRangeKm = (
@@ -590,6 +672,27 @@ class HttpRoutingRepository(
         estimatedRemainingGasolineRangeKm: Double?,
         reserveGasolineRangeKm: Double?,
         originDirection: RouteOriginDirection?,
+    ): PredictiveCngSuggestion = predictiveCngStationsAlongItinerary(
+        origin, destination, intermediateStops, effectiveCngRangeKm,
+        estimatedRemainingCngRangeKm, reserveCngRangeKm, maximumDetourMinutes,
+        departureAt, excludedMimitStationIds, estimatedRemainingGasolineRangeKm,
+        reserveGasolineRangeKm, originDirection, allowHighways = true,
+    )
+
+    override suspend fun predictiveCngStationsAlongItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        intermediateStops: List<Coordinate>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        maximumDetourMinutes: Double,
+        departureAt: OffsetDateTime,
+        excludedMimitStationIds: Set<String>,
+        estimatedRemainingGasolineRangeKm: Double?,
+        reserveGasolineRangeKm: Double?,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): PredictiveCngSuggestion {
         return predictiveCngStationsInternal(
             origin = origin,
@@ -604,6 +707,7 @@ class HttpRoutingRepository(
             estimatedRemainingGasolineRangeKm = estimatedRemainingGasolineRangeKm,
             reserveGasolineRangeKm = reserveGasolineRangeKm,
             originDirection = originDirection,
+            allowHighways = allowHighways,
         )
     }
 
@@ -615,6 +719,21 @@ class HttpRoutingRepository(
         estimatedRemainingCngRangeKm: Double,
         reserveCngRangeKm: Double,
         originDirection: RouteOriginDirection?,
+    ): RouteWithCngItinerary = routeWithCngItinerary(
+        origin, destination, mimitStationIds, effectiveCngRangeKm,
+        estimatedRemainingCngRangeKm, reserveCngRangeKm, originDirection,
+        allowHighways = true,
+    )
+
+    override suspend fun routeWithCngItinerary(
+        origin: Coordinate,
+        destination: Coordinate,
+        mimitStationIds: List<String>,
+        effectiveCngRangeKm: Double,
+        estimatedRemainingCngRangeKm: Double,
+        reserveCngRangeKm: Double,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): RouteWithCngItinerary = mapFailures {
         require(mimitStationIds.isNotEmpty() && mimitStationIds.size <= 32) {
             "CNG itinerary must contain between 1 and 32 stops"
@@ -642,6 +761,7 @@ class HttpRoutingRepository(
             estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
             reserveCngRangeKm = reserveCngRangeKm,
             originDirection = originDirection,
+            allowHighways = allowHighways,
         )
         val selectedStops = response.selectedStops.map { stop ->
             SelectedCngStop(
@@ -691,6 +811,8 @@ class HttpRoutingRepository(
                         ),
                         speedLimits = leg.speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
                         speedLimitSource = leg.speedLimitSource,
+                        usesHighways = leg.usesHighways,
+                        allowsHighways = allowHighways,
                     ),
                     availableRangeAtDepartureKm = leg.availableRangeAtDepartureKm,
                     estimatedRemainingRangeAtArrivalKm = (
@@ -710,6 +832,16 @@ class HttpRoutingRepository(
         destination: Coordinate,
         mimitStationId: String,
         originDirection: RouteOriginDirection?,
+    ): RouteWithCngStop = routeWithCngStop(
+        origin, destination, mimitStationId, originDirection, allowHighways = true,
+    )
+
+    override suspend fun routeWithCngStop(
+        origin: Coordinate,
+        destination: Coordinate,
+        mimitStationId: String,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
     ): RouteWithCngStop = mapFailures {
         require(mimitStationId.matches(Regex("^[0-9]{1,32}$"))) { "invalid MIMIT station ID" }
         val response = apiClient.getRouteWithCngStop(
@@ -717,6 +849,7 @@ class HttpRoutingRepository(
             destination,
             mimitStationId,
             originDirection,
+            allowHighways,
         )
         val legs = response.legs.map { leg ->
             CngRouteLeg(
@@ -739,6 +872,8 @@ class HttpRoutingRepository(
                     ),
                     speedLimits = leg.speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
                     speedLimitSource = leg.speedLimitSource,
+                    usesHighways = leg.usesHighways,
+                    allowsHighways = allowHighways,
                 ),
             )
         }
@@ -855,6 +990,7 @@ private fun String.toDestinationKind(): DestinationKind = when (this) {
 private fun ApiRoute.toRoutePreview(
     origin: Coordinate,
     destination: Coordinate,
+    allowHighways: Boolean = true,
 ): RoutePreview = RoutePreview(
     origin = origin,
     destination = destination,
@@ -866,11 +1002,14 @@ private fun ApiRoute.toRoutePreview(
     navigation = navigation.toNavigationTiming(),
     speedLimits = speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
     speedLimitSource = speedLimitSource,
+    usesHighways = usesHighways,
+    allowsHighways = allowHighways,
 )
 
 private fun ApiRouteLeg.toRoutePreview(
     provider: String,
     navigation: NavigationTiming,
+    allowHighways: Boolean = true,
 ): RoutePreview = RoutePreview(
     origin = Coordinate(originLatitude, originLongitude),
     destination = Coordinate(destinationLatitude, destinationLongitude),
@@ -882,6 +1021,8 @@ private fun ApiRouteLeg.toRoutePreview(
     navigation = navigation,
     speedLimits = speedLimits.map(ApiRouteSpeedLimit::toRouteSpeedLimit),
     speedLimitSource = speedLimitSource,
+    usesHighways = usesHighways,
+    allowsHighways = allowHighways,
 )
 
 private fun ApiRouteSpeedLimit.toRouteSpeedLimit(): RouteSpeedLimit = RouteSpeedLimit(

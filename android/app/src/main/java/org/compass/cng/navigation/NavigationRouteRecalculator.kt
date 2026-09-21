@@ -139,6 +139,7 @@ class CompassNavigationRouteRecalculator(
                 intermediateStops = orderedStops.map(RerouteStop::location),
                 destination = route.destination,
                 originDirection = originDirection,
+                allowHighways = route.allowsHighways,
             ).toNavigationRoute(orderedStops.map(RerouteStop::metadata))
         }
         return when (remainingStops.size) {
@@ -146,6 +147,7 @@ class CompassNavigationRouteRecalculator(
                 origin = origin,
                 destination = route.destination,
                 originDirection = originDirection,
+                allowHighways = route.allowsHighways,
             ).toNavigationRoute(
                 gasolineFallback = route.gasolineFallback,
             )
@@ -159,6 +161,7 @@ class CompassNavigationRouteRecalculator(
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
                     originDirection = originDirection,
+                    allowHighways = route.allowsHighways,
                 ).toNavigationRoute(
                     maximumDetourMinutes = plan.maximumDetourMinutes,
                     excludedMimitStationIds = plan.excludedMimitStationIds,
@@ -168,6 +171,7 @@ class CompassNavigationRouteRecalculator(
                     destination = route.destination,
                     mimitStationId = remainingStops.single().mimitStationId,
                     originDirection = originDirection,
+                    allowHighways = route.allowsHighways,
                 ).toNavigationRoute()
             else -> {
                 val plan = requireNotNull(route.fuelPlan) {
@@ -182,6 +186,7 @@ class CompassNavigationRouteRecalculator(
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
                     originDirection = originDirection,
+                    allowHighways = route.allowsHighways,
                 ).toNavigationRoute(
                     maximumDetourMinutes = plan.maximumDetourMinutes,
                     excludedMimitStationIds = plan.excludedMimitStationIds,
@@ -239,12 +244,14 @@ class CompassNavigationRouteRecalculator(
             departureAt = OffsetDateTime.now(clock),
             excludedMimitStationIds = excludedIds,
             originDirection = originDirection,
+            allowHighways = route.allowsHighways,
         )
         return when (suggestion.state) {
             PredictiveSuggestionState.NOT_NEEDED -> routingRepository.previewRoute(
                 origin = origin,
                 destination = route.destination,
                 originDirection = originDirection,
+                allowHighways = route.allowsHighways,
             ).toNavigationRoute()
             PredictiveSuggestionState.SUGGESTED -> {
                 val itinerary = requireNotNull(suggestion.itinerary)
@@ -256,6 +263,7 @@ class CompassNavigationRouteRecalculator(
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
                     originDirection = originDirection,
+                    allowHighways = route.allowsHighways,
                 )
                 routed.copy(
                     selectedStops = routed.selectedStops.map { selectedStop ->
@@ -310,11 +318,13 @@ class CompassNavigationRouteRecalculator(
             maximumDetourMinutes = maximumDetourMinutes,
             departureAt = OffsetDateTime.now(clock),
             excludedMimitStationIds = excludedIds,
+            allowHighways = route.allowsHighways,
         )
         val replacement = when (suggestion.state) {
             PredictiveSuggestionState.NOT_NEEDED -> routingRepository.previewRoute(
                 origin,
                 route.destination,
+                allowHighways = route.allowsHighways,
             ).toNavigationRoute()
             PredictiveSuggestionState.SUGGESTED -> {
                 val itinerary = requireNotNull(suggestion.itinerary)
@@ -325,6 +335,7 @@ class CompassNavigationRouteRecalculator(
                     effectiveCngRangeKm = plan.effectiveCngRangeKm,
                     estimatedRemainingCngRangeKm = remainingRange,
                     reserveCngRangeKm = plan.reserveCngRangeKm,
+                    allowHighways = route.allowsHighways,
                 )
                 routed.copy(
                     selectedStops = routed.selectedStops.map { selectedStop ->
