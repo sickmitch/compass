@@ -60,6 +60,7 @@ import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RankingBreakdown
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithIntermediateStop
 import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.model.RouteSpeedLimit
@@ -270,6 +271,17 @@ class HttpRoutingRepository(
             .toRoutePreview(origin, destination, allowHighways)
     }
 
+    override suspend fun previewRoute(
+        origin: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
+        travelMode: RouteTravelMode,
+    ): RoutePreview = mapFailures {
+        apiClient.getRoute(origin, destination, originDirection, allowHighways, travelMode)
+            .toRoutePreview(origin, destination, allowHighways, travelMode)
+    }
+
     override suspend fun routeWithIntermediateStop(
         origin: Coordinate,
         intermediateStop: Coordinate,
@@ -312,6 +324,37 @@ class HttpRoutingRepository(
         )
     }
 
+    override suspend fun routeWithIntermediateStop(
+        origin: Coordinate,
+        intermediateStop: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
+        travelMode: RouteTravelMode,
+    ): RouteWithIntermediateStop = mapFailures {
+        val response = apiClient.getRouteWithIntermediateStop(
+            origin, intermediateStop, destination, originDirection, allowHighways, travelMode,
+        )
+        RouteWithIntermediateStop(
+            stop = response.intermediateStop,
+            distanceMeters = response.distanceMeters,
+            durationSeconds = response.durationSeconds,
+            legs = response.legs.mapIndexed { index, leg ->
+                leg.toRoutePreview(
+                    provider = response.provider,
+                    allowHighways = allowHighways,
+                    travelMode = travelMode,
+                    navigation = response.navigation.toLegNavigationTiming(
+                        sequence = index + 1,
+                        durationSeconds = leg.durationSeconds,
+                    ),
+                )
+            },
+            provider = response.provider,
+            navigation = response.navigation.toNavigationTiming(),
+        )
+    }
+
     override suspend fun routeWithIntermediateStops(
         origin: Coordinate,
         intermediateStops: List<Coordinate>,
@@ -343,6 +386,37 @@ class HttpRoutingRepository(
                 leg.toRoutePreview(
                     provider = response.provider,
                     allowHighways = allowHighways,
+                    navigation = response.navigation.toLegNavigationTiming(
+                        sequence = index + 1,
+                        durationSeconds = leg.durationSeconds,
+                    ),
+                )
+            },
+            provider = response.provider,
+            navigation = response.navigation.toNavigationTiming(),
+        )
+    }
+
+    override suspend fun routeWithIntermediateStops(
+        origin: Coordinate,
+        intermediateStops: List<Coordinate>,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection?,
+        allowHighways: Boolean,
+        travelMode: RouteTravelMode,
+    ): RouteWithIntermediateStops = mapFailures {
+        val response = apiClient.getRouteWithIntermediateStops(
+            origin, intermediateStops, destination, originDirection, allowHighways, travelMode,
+        )
+        RouteWithIntermediateStops(
+            stops = response.intermediateStops,
+            distanceMeters = response.distanceMeters,
+            durationSeconds = response.durationSeconds,
+            legs = response.legs.mapIndexed { index, leg ->
+                leg.toRoutePreview(
+                    provider = response.provider,
+                    allowHighways = allowHighways,
+                    travelMode = travelMode,
                     navigation = response.navigation.toLegNavigationTiming(
                         sequence = index + 1,
                         durationSeconds = leg.durationSeconds,
@@ -991,6 +1065,7 @@ private fun ApiRoute.toRoutePreview(
     origin: Coordinate,
     destination: Coordinate,
     allowHighways: Boolean = true,
+    travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
 ): RoutePreview = RoutePreview(
     origin = origin,
     destination = destination,
@@ -1004,12 +1079,14 @@ private fun ApiRoute.toRoutePreview(
     speedLimitSource = speedLimitSource,
     usesHighways = usesHighways,
     allowsHighways = allowHighways,
+    travelMode = travelMode,
 )
 
 private fun ApiRouteLeg.toRoutePreview(
     provider: String,
     navigation: NavigationTiming,
     allowHighways: Boolean = true,
+    travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
 ): RoutePreview = RoutePreview(
     origin = Coordinate(originLatitude, originLongitude),
     destination = Coordinate(destinationLatitude, destinationLongitude),
@@ -1023,6 +1100,7 @@ private fun ApiRouteLeg.toRoutePreview(
     speedLimitSource = speedLimitSource,
     usesHighways = usesHighways,
     allowsHighways = allowHighways,
+    travelMode = travelMode,
 )
 
 private fun ApiRouteSpeedLimit.toRouteSpeedLimit(): RouteSpeedLimit = RouteSpeedLimit(

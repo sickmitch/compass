@@ -3,6 +3,7 @@ package org.compass.cng.navigation
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
+import org.compass.cng.domain.model.RouteTravelMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -28,6 +29,22 @@ class NavigationCameraControllerTest {
         timing = NavigationTiming.legacy(drivingDurationSeconds = 40.0),
         provider = "fixture",
     )
+
+    @Test
+    fun walkingRouteUsesCloserFlatterCameraIndependentOfVehicleSpeed() {
+        val controller = NavigationCameraController()
+        val walkingRoute = route.copy(travelMode = RouteTravelMode.WALKING)
+        val base = NavigationState(
+            route = walkingRoute,
+            navigationPosition = position(walkingRoute.origin, speed = 1.4, bearing = 90.0),
+        )
+
+        val instruction = controller.instruction(base)
+
+        assertEquals(controller.config.pedestrianZoom, instruction.zoom, 0.001)
+        assertEquals(controller.config.pedestrianPitchDegrees, instruction.pitchDegrees, 0.001)
+        assertEquals(90.0, instruction.bearingDegrees, 0.5)
+    }
 
     @Test
     fun followTargetIsTheMatchedVehicleAndBearingLooksAlongTheRemainingRoute() {

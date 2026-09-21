@@ -4,6 +4,11 @@ import java.time.OffsetDateTime
 
 const val DEFAULT_CNG_REFUEL_DWELL_SECONDS = 20 * 60
 
+enum class RouteTravelMode(val costing: String) {
+    DRIVING("auto"),
+    WALKING("pedestrian"),
+}
+
 data class NavigationTiming(
     val routeId: String,
     val drivingDurationSeconds: Double,
@@ -89,6 +94,7 @@ data class RoutePreview(
     val speedLimitSource: String? = null,
     val usesHighways: Boolean = false,
     val allowsHighways: Boolean = true,
+    val travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
 ) {
     init {
         require(speedLimitSource == null || speedLimitSource == "valhalla_graph") {

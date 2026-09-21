@@ -12,6 +12,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.testing.predictiveResponseFixture
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.DestinationSearchContext
 import org.compass.cng.domain.model.DestinationSearchBounds
 import org.compass.cng.domain.model.AlongRouteContext
@@ -38,6 +39,23 @@ class CompassApiClientTest {
     @After
     fun tearDown() {
         server.shutdown()
+    }
+
+    @Test
+    fun postsPedestrianCostingForWalkingRoute() = runTest {
+        server.enqueue(successResponse(SUCCESS_RESPONSE))
+        val client = client()
+
+        client.getRoute(
+            origin = Coordinate(45.4642, 9.19),
+            destination = Coordinate(45.4781, 9.2271),
+            travelMode = RouteTravelMode.WALKING,
+        )
+
+        val requestJson = json.parseToJsonElement(
+            server.takeRequest().body.readUtf8(),
+        ).jsonObject
+        assertEquals("pedestrian", requestJson.getValue("costing").jsonPrimitive.content)
     }
 
     @Test

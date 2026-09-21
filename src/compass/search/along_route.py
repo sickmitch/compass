@@ -78,6 +78,7 @@ class AlongRouteContext:
     remaining_waypoints: tuple[Coordinate, ...]
     legs: tuple[AlongRouteLeg, ...]
     allow_highways: bool = True
+    costing: Literal["auto", "pedestrian"] = "auto"
     progress_shape_index: int | None = None
     insertion_leg_index: int | None = None
     baseline_duration_seconds: float | None = None
@@ -650,6 +651,7 @@ class AlongRouteSearchService:
                             waypoints=tuple(waypoints),
                             language="it-IT",
                             allow_highways=route.allow_highways,
+                            costing=route.costing,
                         )
                     )
             except (NoRouteError, RoutingUnavailableError, RoutingProviderError, ValueError):
@@ -794,6 +796,7 @@ def build_google_route_polyline(
                     context.maximum_total_added_duration_seconds
                 ),
                 "allow_highways": context.allow_highways,
+                "costing": context.costing,
                 "polyline": encoded,
             },
             separators=(",", ":"),

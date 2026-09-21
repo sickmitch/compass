@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.compass.cng.domain.model.Maneuver
+import org.compass.cng.domain.model.RouteTravelMode
 
 data class NavigationEnginePolicy(
     val offRouteMinimumDistanceMeters: Double = 20.0,
@@ -54,10 +55,35 @@ data class NavigationEnginePolicy(
 
 /** Pure client-side navigation state machine; it performs no Android or network work. */
 class NavigationEngine(
-    private val policy: NavigationEnginePolicy = NavigationEnginePolicy(),
+    policy: NavigationEnginePolicy = NavigationEnginePolicy(),
+    private val pedestrianPolicy: NavigationEnginePolicy = NavigationEnginePolicy(
+        offRouteMinimumDistanceMeters = 12.0,
+        offRouteAccuracyMultiplier = 1.2,
+        offRouteMinimumDurationMillis = 3_000L,
+        offRouteStationarySpeedMetersPerSecond = 0.3,
+        offRouteStationaryDistanceMultiplier = 2.0,
+        offRouteHeadingMismatchDegrees = 80.0,
+        offRouteHeadingMinimumSpeedMetersPerSecond = 0.8,
+        offRouteHeadingMinimumDistanceMeters = 8.0,
+        offRouteBackwardsProgressMeters = 25.0,
+        arrivalDistanceMeters = 12.0,
+        approachingIntermediateStopDistanceMeters = 100.0,
+        atIntermediateStopDistanceMeters = 15.0,
+        intermediateStopDepartureDistanceMeters = 25.0,
+        intermediateStopDepartureMinimumSpeedMetersPerSecond = 0.3,
+        minimumManeuverApproachMeters = 30.0,
+        maneuverApproachSeconds = 10.0,
+    ),
     private val locationFilter: LocationFilter = LocationFilter(),
     private val headingController: NavigationHeadingController = NavigationHeadingController(),
 ) {
+    private val drivingPolicy = policy
+    private val policy: NavigationEnginePolicy
+        get() = if (mutableState.value.route?.travelMode == RouteTravelMode.WALKING) {
+            pedestrianPolicy
+        } else {
+            drivingPolicy
+        }
     private val mutableState = MutableStateFlow(NavigationState())
     val state: StateFlow<NavigationState> = mutableState.asStateFlow()
 
@@ -256,7 +282,7 @@ class NavigationEngine(
         ) {
             return
         }
-        val filtered = locationFilter.filter(rawLocation)
+        val filtered = locationFilter.filter(rawLocation, route.travelMode)
         if (filtered == null) {
             mutableState.value = previousState.copy(
                 rawLocation = rawLocation,
@@ -808,7 +834,7 @@ class NavigationEngine(
     private fun resetTracking(route: NavigationRoute) {
         locationFilter.reset()
         headingController.reset()
-        matcher = RouteMatcher(route.geometry)
+        matcher = RouteMatcher(route.geometry, travelMode = route.travelMode)
         consecutiveOffRouteFixes = 0
         consecutiveRecoveryFixes = 0
         offRouteEpisodeStartedAtMillis = null

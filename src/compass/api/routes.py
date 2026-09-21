@@ -50,7 +50,7 @@ class CoordinateRequest(StrictModel):
 class BaseRouteRequest(StrictModel):
     origin: CoordinateRequest
     destination: CoordinateRequest
-    costing: Literal["auto"] = "auto"
+    costing: Literal["auto", "pedestrian"] = "auto"
     allow_highways: bool = Field(
         default=True,
         description=(
@@ -117,6 +117,7 @@ def route_origin_direction(request: BaseRouteRequest) -> RouteOriginDirection | 
 
 
 class CorridorCandidatesRequest(BaseRouteRequest):
+    costing: Literal["auto"] = "auto"
     effective_cng_range_km: float = Field(
         gt=0,
         le=2000,

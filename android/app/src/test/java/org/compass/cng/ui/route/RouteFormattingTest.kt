@@ -54,6 +54,10 @@ class RouteFormattingTest {
     @Test
     fun intermediateStopActionsUseCompactLabelsAndKeepCngModeSeparate() {
         val routeRows = intermediateStopActionRows(IntermediateStopsMode.ROUTE)
+        val walkingRows = intermediateStopActionRows(
+            IntermediateStopsMode.ROUTE,
+            supportsCng = false,
+        )
         val planningRows = intermediateStopActionRows(IntermediateStopsMode.CNG_PLAN)
 
         assertEquals(listOf(2, 2), routeRows.map { it.size })
@@ -65,6 +69,10 @@ class RouteFormattingTest {
         assertEquals(
             listOf("Preferiti", "Cerca", "Mappa"),
             planningRows.flatten().map(IntermediateStopAddAction::label),
+        )
+        assertEquals(
+            listOf("Preferiti", "Cerca", "Mappa"),
+            walkingRows.flatten().map(IntermediateStopAddAction::label),
         )
     }
 }

@@ -9,6 +9,7 @@ import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.domain.model.SelectedCngStop
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.withNavigationDetailsFrom
 
 sealed interface FuelStopReplacementResult {
@@ -140,6 +141,7 @@ class CompassNavigationRouteRecalculator(
                 destination = route.destination,
                 originDirection = originDirection,
                 allowHighways = route.allowsHighways,
+                travelMode = route.travelMode,
             ).toNavigationRoute(orderedStops.map(RerouteStop::metadata))
         }
         return when (remainingStops.size) {
@@ -148,6 +150,7 @@ class CompassNavigationRouteRecalculator(
                 destination = route.destination,
                 originDirection = originDirection,
                 allowHighways = route.allowsHighways,
+                travelMode = route.travelMode,
             ).toNavigationRoute(
                 gasolineFallback = route.gasolineFallback,
             )
@@ -287,7 +290,12 @@ class CompassNavigationRouteRecalculator(
         val location = rawLocation ?: return null
         val speed = location.speedMetersPerSecond ?: return null
         val bearing = location.bearingDegrees ?: return null
-        if (speed < directionPolicy.minimumSpeedMetersPerSecond || !bearing.isFinite()) return null
+        val minimumSpeed = if (route?.travelMode == RouteTravelMode.WALKING) {
+            0.8
+        } else {
+            directionPolicy.minimumSpeedMetersPerSecond
+        }
+        if (speed < minimumSpeed || !bearing.isFinite()) return null
         val normalizedBearing = ((bearing % 360.0) + 360.0) % 360.0
         return RouteOriginDirection(
             headingDegrees = normalizedBearing,

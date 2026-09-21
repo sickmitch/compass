@@ -236,6 +236,11 @@ Milan-to-Bologna preview: MapLibre road geometry and endpoints, distance, durati
 scrollable maneuver list. HTTP DTOs, domain route models and Compose state are separate. Phase 8
 deliberately stopped at that boundary; Phase 9 extends it with the CNG workflow described below.
 
+The current Android client can calculate and actively guide both automobile and pedestrian routes.
+Walking mode is selected before route calculation, supports ordinary ordered stops, persists across
+process restoration and rerouting, and intentionally hides CNG planning because CNG range and
+refuelling constraints are vehicle-only.
+
 Repository-local Android validation uses the checked-in Gradle wrapper:
 
 ```bash

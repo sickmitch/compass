@@ -98,6 +98,7 @@ class StationDetailResponse(StrictModel):
 
 
 class RouteWithCngStopRequest(BaseRouteRequest):
+    costing: Literal["auto"] = "auto"
     mimit_station_id: str = Field(pattern=r"^[0-9]{1,32}$")
 
 
@@ -135,6 +136,7 @@ class RouteWithCngStopResponse(StrictModel):
 
 
 class RouteWithCngItineraryRequest(BaseRouteRequest):
+    costing: Literal["auto"] = "auto"
     mimit_station_ids: list[str] = Field(
         min_length=1,
         max_length=MAX_CNG_ITINERARY_STOPS,

@@ -71,19 +71,20 @@ class ValhallaRoutingAdapter:
         self._client = client
 
     async def route(self, request: RouteRequest) -> BaseRoute:
+        traffic_aware = self._traffic_aware and request.costing == "auto"
         payload = _route_payload(
             (request.origin, request.destination),
             costing=request.costing,
             language=request.language,
             departure_at=request.departure_at,
-            traffic_aware=self._traffic_aware,
+            traffic_aware=traffic_aware,
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
             origin_direction=request.origin_direction,
             allow_highways=request.allow_highways,
         )
         response = await self._request("POST", "/route", json=payload)
-        if self._traffic_aware and _is_no_route_response(response):
+        if traffic_aware and _is_no_route_response(response):
             LOGGER.warning(
                 "time-dependent route found no path; retrying with Valhalla graph speeds",
                 extra={"routing_fallback": "valhalla_graph_speeds"},
@@ -106,7 +107,7 @@ class ValhallaRoutingAdapter:
             costing=request.costing,
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
-        if not self._traffic_aware:
+        if not traffic_aware:
             return route
         baseline = await self._route_baseline(payload, expected_leg_count=1)
         return replace(
@@ -120,13 +121,14 @@ class ValhallaRoutingAdapter:
         )
 
     async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute:
+        traffic_aware = self._traffic_aware and request.costing == "auto"
         locations = (request.origin, *request.waypoints, request.destination)
         payload = _route_payload(
             locations,
             costing=request.costing,
             language=request.language,
             departure_at=request.departure_at,
-            traffic_aware=self._traffic_aware,
+            traffic_aware=traffic_aware,
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
             origin_direction=request.origin_direction,
@@ -137,7 +139,7 @@ class ValhallaRoutingAdapter:
             "/route",
             json=payload,
         )
-        if self._traffic_aware and _is_no_route_response(response):
+        if traffic_aware and _is_no_route_response(response):
             LOGGER.warning(
                 "time-dependent waypoint route found no path; retrying with Valhalla graph speeds",
                 extra={"routing_fallback": "valhalla_graph_speeds"},
@@ -164,7 +166,7 @@ class ValhallaRoutingAdapter:
             costing=request.costing,
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
-        if not self._traffic_aware:
+        if not traffic_aware:
             return route
         baseline = await self._route_baseline(
             payload, expected_leg_count=len(locations) - 1
@@ -198,7 +200,7 @@ class ValhallaRoutingAdapter:
             payload,
             costing=request.costing,
             departure_at=request.departure_at,
-            traffic_aware=self._traffic_aware,
+            traffic_aware=self._traffic_aware and request.costing == "auto",
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
         )
@@ -321,7 +323,7 @@ class ValhallaRoutingAdapter:
         costing: str,
         maximum_shape_index: int,
     ) -> tuple[tuple[RouteSpeedLimit, ...], str | None]:
-        if not self._speed_limits_enabled:
+        if not self._speed_limits_enabled or costing != "auto":
             return (), None
         try:
             response = await self._request(

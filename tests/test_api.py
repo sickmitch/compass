@@ -485,6 +485,34 @@ def test_base_route_contract_is_provider_independent() -> None:
     )
 
 
+def test_base_route_accepts_and_forwards_pedestrian_costing() -> None:
+    provider = FakeRoutingProvider()
+
+    async def override_provider() -> FakeRoutingProvider:
+        return provider
+
+    async def override_settings() -> Settings:
+        return Settings(_env_file=None)
+
+    app.dependency_overrides[get_routing_provider] = override_provider
+    app.dependency_overrides[get_api_settings] = override_settings
+    try:
+        response = _post(
+            "/api/v1/routes",
+            {
+                "origin": {"latitude": 45.4642, "longitude": 9.19},
+                "destination": {"latitude": 45.4781, "longitude": 9.2271},
+                "costing": "pedestrian",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert provider.request is not None
+    assert provider.request.costing == "pedestrian"
+
+
 def test_base_route_forwards_a_valid_origin_direction() -> None:
     provider = FakeRoutingProvider()
 

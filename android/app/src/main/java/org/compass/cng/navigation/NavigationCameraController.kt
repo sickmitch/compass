@@ -1,6 +1,7 @@
 package org.compass.cng.navigation
 
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.RouteTravelMode
 
 enum class NavigationCameraMode {
     FOLLOW,
@@ -70,6 +71,9 @@ data class NavigationCameraConfig(
     val minimumFollowZoom: Double = 13.2,
     val maximumFollowZoom: Double = 18.2,
     val headingLookAheadMeters: Double = 28.0,
+    val pedestrianZoom: Double = 17.4,
+    val pedestrianPitchDegrees: Double = 35.0,
+    val pedestrianHeadingLookAheadMeters: Double = 12.0,
     val followPuckVerticalFraction: Double = 0.75,
     val freeModeAutoRecenterMillis: Long = 10_000,
     val followAnimationMillis: Int = 900,
@@ -91,6 +95,9 @@ data class NavigationCameraConfig(
         require(sparseManeuverZoomReduction >= 0.0)
         require(maximumFollowZoom > minimumFollowZoom)
         require(headingLookAheadMeters > 0.0)
+        require(pedestrianZoom in minimumFollowZoom..maximumFollowZoom)
+        require(pedestrianPitchDegrees in 0.0..60.0)
+        require(pedestrianHeadingLookAheadMeters > 0.0)
         require(followPuckVerticalFraction in 0.5..0.9)
         require(freeModeAutoRecenterMillis > 0)
         require(followAnimationMillis > 0)
@@ -138,7 +145,11 @@ class NavigationCameraController(
         val position = state.snappedLocation ?: remaining.firstOrNull() ?: route.origin
         val headingTarget = coordinateAlong(
             remaining.ifEmpty { listOf(position) },
-            config.headingLookAheadMeters,
+            if (route.travelMode == RouteTravelMode.WALKING) {
+                config.pedestrianHeadingLookAheadMeters
+            } else {
+                config.headingLookAheadMeters
+            },
         )
         val bearing = if (position != headingTarget) {
             bearingDegrees(position, headingTarget)
@@ -153,15 +164,19 @@ class NavigationCameraController(
             // anchor. A geographic look-ahead target would move the puck as zoom changes.
             target = position,
             bearingDegrees = bearing,
-            zoom = (
-                lerp(config.urbanZoom, config.motorwayZoom, speedFraction) +
-                    maneuverZoomBoost + maneuverDensityZoomAdjustment
-                ).coerceIn(config.minimumFollowZoom, config.maximumFollowZoom),
-            pitchDegrees = lerp(
-                config.urbanPitchDegrees,
-                config.motorwayPitchDegrees,
-                speedFraction,
-            ),
+            zoom = if (route.travelMode == RouteTravelMode.WALKING) {
+                (config.pedestrianZoom + maneuverZoomBoost.coerceAtMost(0.6))
+                    .coerceIn(config.minimumFollowZoom, config.maximumFollowZoom)
+            } else {
+                (lerp(config.urbanZoom, config.motorwayZoom, speedFraction) +
+                    maneuverZoomBoost + maneuverDensityZoomAdjustment)
+                    .coerceIn(config.minimumFollowZoom, config.maximumFollowZoom)
+            },
+            pitchDegrees = if (route.travelMode == RouteTravelMode.WALKING) {
+                config.pedestrianPitchDegrees
+            } else {
+                lerp(config.urbanPitchDegrees, config.motorwayPitchDegrees, speedFraction)
+            },
             animationMillis = config.followAnimationMillis,
         )
     }

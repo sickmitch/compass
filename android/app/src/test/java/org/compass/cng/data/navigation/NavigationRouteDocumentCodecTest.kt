@@ -19,6 +19,7 @@ import org.compass.cng.domain.model.OpeningValidation
 import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.RoutePreview
 import org.compass.cng.domain.model.RouteSpeedLimit
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.SelectedCngStop
 import org.compass.cng.navigation.CachedNavigationRoute
@@ -39,7 +40,10 @@ class NavigationRouteDocumentCodecTest {
 
     @Test
     fun roundTripPreservesDownloadedGeometryManeuversStationAndTiming() {
-        val route = routeWithStop().toNavigationRoute().copy(allowsHighways = false)
+        val route = routeWithStop().toNavigationRoute().copy(
+            allowsHighways = false,
+            travelMode = RouteTravelMode.WALKING,
+        )
         val cached = CachedNavigationRoute(route, 1_725_000_000_000, navigationWasActive = true)
 
         val restored = requireNotNull(codec.decode(codec.encode(cached)))
@@ -55,6 +59,7 @@ class NavigationRouteDocumentCodecTest {
         assertEquals(listOf(0, 1), restored.route.speedLimits.map { it.beginShapeIndex })
         assertEquals(listOf(1, 2), restored.route.speedLimits.map { it.endShapeIndex })
         assertFalse(restored.route.allowsHighways)
+        assertEquals(RouteTravelMode.WALKING, restored.route.travelMode)
     }
 
     @Test
@@ -149,7 +154,7 @@ class NavigationRouteDocumentCodecTest {
             navigationWasActive = true,
         )
         val legacyDocument = Json.parseToJsonElement(
-            codec.encode(cached).replace("\"schemaVersion\":3", "\"schemaVersion\":1"),
+            codec.encode(cached).replace("\"schemaVersion\":4", "\"schemaVersion\":1"),
         )
             .withoutStructuredGuidance()
             .withoutSpeedLimitContext()

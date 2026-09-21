@@ -18,6 +18,7 @@ import org.compass.cng.domain.model.OpeningState
 import org.compass.cng.domain.model.OpeningValidation
 import org.compass.cng.domain.model.PriceFreshness
 import org.compass.cng.domain.model.RouteSpeedLimit
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.navigation.CachedNavigationRoute
 import org.compass.cng.navigation.NavigationFuelPlan
 import org.compass.cng.navigation.NavigationFuelStop
@@ -95,14 +96,14 @@ internal class NavigationRouteDocumentCodec(
 
 @Serializable
 private data class StoredNavigationRouteDocument(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val cachedAtEpochMillis: Long,
     val navigationWasActive: Boolean,
     val route: StoredNavigationRoute,
     val progress: StoredNavigationProgress? = null,
 ) {
     init {
-        require(schemaVersion in 1..3) { "unsupported navigation cache schema" }
+        require(schemaVersion in 1..4) { "unsupported navigation cache schema" }
         require(cachedAtEpochMillis >= 0) { "invalid navigation cache timestamp" }
     }
 
@@ -625,6 +626,7 @@ private data class StoredNavigationRoute(
     val speedLimits: List<StoredRouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
     val allowsHighways: Boolean = true,
+    val travelMode: String = RouteTravelMode.DRIVING.name,
 ) {
     fun toDomain() = NavigationRoute(
         routeId = routeId,
@@ -645,6 +647,8 @@ private data class StoredNavigationRoute(
         speedLimits = speedLimits.map(StoredRouteSpeedLimit::toDomain),
         speedLimitSource = speedLimitSource,
         allowsHighways = allowsHighways,
+        travelMode = RouteTravelMode.entries.firstOrNull { it.name == travelMode }
+            ?: RouteTravelMode.DRIVING,
     )
 
     companion object {
@@ -662,6 +666,7 @@ private data class StoredNavigationRoute(
             value.gasolineFallback?.let(StoredGasolineFallback::fromDomain),
             value.speedLimits.map(StoredRouteSpeedLimit::fromDomain), value.speedLimitSource,
             value.allowsHighways,
+            value.travelMode.name,
         )
     }
 }

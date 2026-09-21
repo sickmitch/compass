@@ -7,6 +7,7 @@ import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.OpeningAtEta
 import org.compass.cng.domain.model.CngPrice
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteSpeedLimit
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithCngStop
@@ -124,6 +125,7 @@ data class NavigationRoute(
     val speedLimits: List<RouteSpeedLimit> = emptyList(),
     val speedLimitSource: String? = null,
     val allowsHighways: Boolean = true,
+    val travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
 ) {
     init {
         require(speedLimitSource == null || speedLimitSource == "valhalla_graph")
@@ -148,6 +150,7 @@ data class NavigationRoute(
         speedLimits = speedLimits,
         speedLimitSource = speedLimitSource,
         allowsHighways = allowsHighways,
+        travelMode = travelMode,
     )
 }
 
@@ -531,6 +534,7 @@ private fun buildNavigationRoute(
         speedLimitSource = sourceLegs.mapNotNull(RoutePreview::speedLimitSource)
             .firstOrNull(),
         allowsHighways = route.allowsHighways,
+        travelMode = route.travelMode,
     )
 }
 

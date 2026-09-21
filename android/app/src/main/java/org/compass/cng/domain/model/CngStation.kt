@@ -441,6 +441,7 @@ data class RouteWithCngStop(
         navigation = navigation,
         usesHighways = legs.any { it.route.usesHighways },
         allowsHighways = legs.all { it.route.allowsHighways },
+        travelMode = RouteTravelMode.DRIVING,
     )
 
     private companion object {
@@ -538,5 +539,6 @@ data class RouteWithCngItinerary(
         navigation = navigation,
         usesHighways = legs.any { it.route.usesHighways },
         allowsHighways = legs.all { it.route.allowsHighways },
+        travelMode = RouteTravelMode.DRIVING,
     )
 }

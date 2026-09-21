@@ -4,6 +4,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.RouteTravelMode
 
 data class LocationFilterPolicy(
     val maximumAccuracyMeters: Double = 75.0,
@@ -28,7 +29,20 @@ class LocationFilter(
         previous = null
     }
 
-    fun filter(location: NavigationLocation): NavigationLocation? {
+    fun filter(
+        location: NavigationLocation,
+        travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
+    ): NavigationLocation? {
+        val policy = if (travelMode == RouteTravelMode.WALKING) {
+            policy.copy(
+                maximumPlausibleSpeedMetersPerSecond = 15.0,
+                stationarySpeedMetersPerSecond = 0.3,
+                stationaryDeadbandMeters = 2.0,
+                minimumBearingSpeedMetersPerSecond = 0.7,
+            )
+        } else {
+            policy
+        }
         val deliveryDelay = location.receivedAtEpochMillis?.minus(location.timestampEpochMillis)
         if (deliveryDelay != null && deliveryDelay > policy.maximumDeliveryDelayMillis) return null
         if (!location.coordinate.latitude.isFinite() ||
@@ -43,7 +57,7 @@ class LocationFilter(
         }
         val last = previous
         if (last == null) {
-            return location.normalized().also { previous = it }
+            return location.normalized(policy).also { previous = it }
         }
         val elapsedSeconds = (location.timestampEpochMillis - last.timestampEpochMillis) / 1_000.0
         if (elapsedSeconds <= 0.0) return null
@@ -88,7 +102,7 @@ class LocationFilter(
         ).also { previous = it }
     }
 
-    private fun NavigationLocation.normalized() = copy(
+    private fun NavigationLocation.normalized(policy: LocationFilterPolicy) = copy(
         speedMetersPerSecond = speedMetersPerSecond?.takeIf { it.isFinite() && it >= 0.0 },
         bearingDegrees = bearingDegrees
             ?.takeIf {

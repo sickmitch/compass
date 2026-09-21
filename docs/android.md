@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.29` (`versionCode=75`).
+Android version is `0.28.30` (`versionCode=76`).
 
 The global Options screen persists a system/light/dark theme choice, the default voice-guidance
 state and whether new route calculations may use motorways. It reuses the existing private
@@ -335,6 +335,12 @@ applies only to the current route and its later reroutes, without changing the s
 Android `0.28.29` (`versionCode=75`) shows a non-dismissible animated progress dialog while the
 route selected from the motorway confirmation is being recalculated without motorways. The dialog
 remains visible until the replacement route or an explicit error is available.
+
+Android `0.28.30` (`versionCode=76`) adds first-class pedestrian routing and guidance. The trip
+creator selects **Auto** or **A piedi** before calculating; walking routes use Valhalla pedestrian
+costing, keep ordinary intermediate stops and exclude CNG planning controls. Active guidance keeps
+the selected mode through cache restore and reroutes, and applies walking-specific GPS filtering,
+off-route thresholds, camera framing and shorter voice-announcement distances.
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

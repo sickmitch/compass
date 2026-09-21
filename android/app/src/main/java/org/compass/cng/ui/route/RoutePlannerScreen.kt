@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.AddLocationAlt
 import androidx.compose.material.icons.rounded.Check
@@ -119,6 +120,7 @@ import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.vehicle.VehicleProfile
 import org.compass.cng.domain.vehicle.VehicleProfiles
@@ -358,6 +360,7 @@ fun RoutePlannerScreen(
                 )
                 visibleStage == PlannerStage.CONFIGURE_ROUTE -> ConfigureRouteContent(
                     route = baseRoute,
+                    travelMode = state.routeTravelMode,
                     originLatitudeInput = state.originLatitudeInput,
                     originLongitudeInput = state.originLongitudeInput,
                     destinationLatitudeInput = state.destinationLatitudeInput,
@@ -377,6 +380,7 @@ fun RoutePlannerScreen(
                     onFavorites = viewModel::openFavoritePlaces,
                     onCoordinates = viewModel::openMapPointPicker,
                     onUseCurrentLocation = onUseCurrentLocation,
+                    onTravelModeChanged = viewModel::updateRouteTravelMode,
                     onApply = viewModel::applyRouteInputs,
                 )
                 visibleStage == PlannerStage.FAVORITE_PLACES -> FavoritePlacesContent(
@@ -1231,25 +1235,36 @@ private fun PreviewContent(
                         Text("Aggiungi tappe", maxLines = 2)
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CompassOutlinedButton(
-                        onClick = onExtendedPlanning,
-                        modifier = Modifier.weight(1f).height(62.dp),
+                if (route.travelMode == RouteTravelMode.DRIVING) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Icon(Icons.Rounded.Tune, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Piano CNG")
+                        CompassOutlinedButton(
+                            onClick = onExtendedPlanning,
+                            modifier = Modifier.weight(1f).height(62.dp),
+                        ) {
+                            Icon(Icons.Rounded.Tune, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Piano CNG")
+                        }
+                        CompassButton(
+                            onClick = onStartNavigation,
+                            modifier = Modifier.weight(1f).height(62.dp),
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.AltRoute, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Percorso diretto", maxLines = 2)
+                        }
                     }
+                } else {
                     CompassButton(
                         onClick = onStartNavigation,
-                        modifier = Modifier.weight(1f).height(62.dp),
+                        modifier = Modifier.fillMaxWidth().height(62.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.AltRoute, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Percorso diretto", maxLines = 2)
+                        Text("Avvia navigazione a piedi")
                     }
                 }
         }
@@ -1595,7 +1610,10 @@ private fun IntermediateStopsContent(
                     visible = editingStop != null || stops.isEmpty() || addControlsExpanded,
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        intermediateStopActionRows(mode).forEach { actions ->
+                        intermediateStopActionRows(
+                            mode = mode,
+                            supportsCng = route.travelMode == RouteTravelMode.DRIVING,
+                        ).forEach { actions ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1753,14 +1771,25 @@ private fun NavigationPreviewContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         SummaryValue("Distanza", formatDistance(route.totalDistanceMeters))
-                        SummaryValue("Guida", formatDuration(route.drivingDurationSeconds))
+                        SummaryValue(
+                            if (route.travelMode == RouteTravelMode.WALKING) "Cammino" else "Guida",
+                            formatDuration(route.drivingDurationSeconds),
+                        )
                         SummaryValue("Totale", formatDuration(route.totalTripDurationSeconds))
                     }
-                    Text(
-                        trafficTimingText(route.timing),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (route.travelMode == RouteTravelMode.DRIVING) {
+                        Text(
+                            trafficTimingText(route.timing),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text(
+                            "Percorso pedonale",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     if (
                         route.fuelStops.isNotEmpty() &&
                         state.routeSource == NavigationRouteSource.CACHE
@@ -1792,7 +1821,7 @@ private fun NavigationPreviewContent(
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
-                    if (!route.timing.trafficAware) {
+                    if (route.travelMode == RouteTravelMode.DRIVING && !route.timing.trafficAware) {
                         Text(
                             "Traffico live non disponibile: l’ETA usa i tempi di percorrenza correnti del routing.",
                             style = MaterialTheme.typography.bodySmall,
@@ -2283,6 +2312,7 @@ private fun gpsStatusLabel(status: GpsStatus): String = when (status) {
 @Composable
 private fun ConfigureRouteContent(
     route: RoutePreview?,
+    travelMode: RouteTravelMode,
     originLatitudeInput: String,
     originLongitudeInput: String,
     destinationLatitudeInput: String,
@@ -2302,6 +2332,7 @@ private fun ConfigureRouteContent(
     onFavorites: (RouteEndpoint) -> Unit,
     onCoordinates: (RouteEndpoint) -> Unit,
     onUseCurrentLocation: (RouteEndpoint) -> Unit,
+    onTravelModeChanged: (RouteTravelMode) -> Unit,
     onApply: () -> Unit,
 ) {
     val originReady = originLatitudeInput.isNotBlank() &&
@@ -2330,6 +2361,54 @@ private fun ConfigureRouteContent(
             ),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Modalità di viaggio", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (travelMode == RouteTravelMode.DRIVING) {
+                            CompassButton(
+                                onClick = { },
+                                modifier = Modifier.weight(1f).height(54.dp),
+                            ) {
+                                Icon(Icons.Rounded.Navigation, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Auto")
+                            }
+                        } else {
+                            CompassOutlinedButton(
+                                onClick = { onTravelModeChanged(RouteTravelMode.DRIVING) },
+                                modifier = Modifier.weight(1f).height(54.dp),
+                            ) {
+                                Icon(Icons.Rounded.Navigation, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Auto")
+                            }
+                        }
+                        if (travelMode == RouteTravelMode.WALKING) {
+                            CompassButton(
+                                onClick = { },
+                                modifier = Modifier.weight(1f).height(54.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("A piedi")
+                            }
+                        } else {
+                            CompassOutlinedButton(
+                                onClick = { onTravelModeChanged(RouteTravelMode.WALKING) },
+                                modifier = Modifier.weight(1f).height(54.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("A piedi")
+                            }
+                        }
+                    }
+                }
+            }
             item {
                 RouteEndpointSelector(
                     title = "Partenza",
@@ -4007,10 +4086,14 @@ private fun RouteSummary(route: RoutePreview, modifier: Modifier = Modifier) {
         ) {
             SummaryValue(label = "Distanza", value = formatDistance(route.distanceMeters))
             SummaryValue(label = "Durata", value = formatDuration(route.durationSeconds))
-            SummaryValue(
-                label = "Traffico",
-                value = if (route.navigation.trafficAware) "Live" else "Non live",
-            )
+            if (route.travelMode == RouteTravelMode.WALKING) {
+                SummaryValue(label = "Modalità", value = "A piedi")
+            } else {
+                SummaryValue(
+                    label = "Traffico",
+                    value = if (route.navigation.trafficAware) "Live" else "Non live",
+                )
+            }
         }
     }
 }
@@ -4203,8 +4286,9 @@ internal enum class IntermediateStopAddAction(val label: String) {
 
 internal fun intermediateStopActionRows(
     mode: IntermediateStopsMode,
+    supportsCng: Boolean = true,
 ): List<List<IntermediateStopAddAction>> = when (mode) {
-    IntermediateStopsMode.ROUTE -> listOf(
+    IntermediateStopsMode.ROUTE -> if (supportsCng) listOf(
         listOf(
             IntermediateStopAddAction.FAVORITES,
             IntermediateStopAddAction.SEARCH,
@@ -4213,6 +4297,9 @@ internal fun intermediateStopActionRows(
             IntermediateStopAddAction.MAP,
             IntermediateStopAddAction.CNG,
         ),
+    ) else listOf(
+        listOf(IntermediateStopAddAction.FAVORITES, IntermediateStopAddAction.SEARCH),
+        listOf(IntermediateStopAddAction.MAP),
     )
     IntermediateStopsMode.CNG_PLAN -> listOf(
         listOf(

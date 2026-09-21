@@ -360,8 +360,11 @@
             "type": "boolean"
           },
           "costing": {
-            "const": "auto",
             "default": "auto",
+            "enum": [
+              "auto",
+              "pedestrian"
+            ],
             "title": "Costing",
             "type": "string"
           },
@@ -2016,8 +2019,11 @@
             "type": "boolean"
           },
           "costing": {
-            "const": "auto",
             "default": "auto",
+            "enum": [
+              "auto",
+              "pedestrian"
+            ],
             "title": "Costing",
             "type": "string"
           },
@@ -2186,8 +2192,11 @@
             "type": "boolean"
           },
           "costing": {
-            "const": "auto",
             "default": "auto",
+            "enum": [
+              "auto",
+              "pedestrian"
+            ],
             "title": "Costing",
             "type": "string"
           },
@@ -4514,6 +4523,15 @@
               }
             ],
             "title": "Baseline Duration Seconds"
+          },
+          "costing": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "pedestrian"
+            ],
+            "title": "Costing",
+            "type": "string"
           },
           "current_duration_seconds": {
             "anyOf": [

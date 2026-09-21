@@ -187,6 +187,11 @@ recalculation. Route and route-leg responses expose `uses_highways`, derived fro
 summaries, so clients can ask for an explicit confirmation only when the selected route actually
 contains a motorway.
 
+Base routes and ordinary intermediate-waypoint routes accept `costing="auto"` (default) or
+`costing="pedestrian"`. Pedestrian requests do not use live automotive traffic, motorway policy or
+graph speed-limit enrichment. CNG corridor, candidate, selected-station and predictive-planning
+operations remain strictly `auto`: fuel-range and road-detour semantics do not apply to walking.
+
 ## Route through ordinary intermediate waypoints
 
 `POST /api/v1/routes/with-intermediate-stops` accepts WGS84 departure, one to eight ordered ordinary

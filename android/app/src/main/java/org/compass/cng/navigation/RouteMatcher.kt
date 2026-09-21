@@ -3,6 +3,7 @@ package org.compass.cng.navigation
 import kotlin.math.cos
 import kotlin.math.sqrt
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.RouteTravelMode
 
 data class RouteMatch(
     val snappedCoordinate: Coordinate,
@@ -29,7 +30,10 @@ data class RouteMatcherPolicy(
 class RouteMatcher(
     routeGeometry: List<Coordinate>,
     private val policy: RouteMatcherPolicy = RouteMatcherPolicy(),
+    travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
 ) {
+    private val headingMinimumSpeedMetersPerSecond =
+        if (travelMode == RouteTravelMode.WALKING) 0.7 else policy.headingMinimumSpeedMetersPerSecond
     private val geometry = routeGeometry.toList()
     private val cumulativeDistances = DoubleArray(geometry.size)
     private var previousMatch: RouteMatch? = null
@@ -62,7 +66,7 @@ class RouteMatcher(
             var score = candidate.distanceFromRouteMeters
             val speed = location.speedMetersPerSecond ?: 0.0
             val heading = location.bearingDegrees
-            if (speed >= policy.headingMinimumSpeedMetersPerSecond && heading != null) {
+            if (speed >= headingMinimumSpeedMetersPerSecond && heading != null) {
                 score += bearingDifference(heading, candidate.segmentBearingDegrees) / 180.0 *
                     policy.maximumHeadingPenaltyMeters
             }

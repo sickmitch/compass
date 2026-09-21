@@ -116,6 +116,7 @@ data class AlongRouteContext(
     val remainingWaypoints: List<Coordinate>,
     val legs: List<AlongRouteLeg>,
     val allowHighways: Boolean = true,
+    val travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
     val progressShapeIndex: Int? = null,
     val insertionLegIndex: Int? = null,
     val baselineDurationSeconds: Double? = null,

@@ -40,6 +40,7 @@ import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithIntermediateStop
@@ -145,6 +146,7 @@ data class RoutePlannerUiState(
     val operation: PlannerOperation? = null,
     val activeOrigin: Coordinate = DEFAULT_MAP_CENTER,
     val activeDestination: Coordinate = DEFAULT_ROUTE_DESTINATION,
+    val routeTravelMode: RouteTravelMode = RouteTravelMode.DRIVING,
     val originLatitudeInput: String = "",
     val originLongitudeInput: String = "",
     val destinationLatitudeInput: String = "",
@@ -298,6 +300,7 @@ class RoutePlannerViewModel(
                 operation = null,
                 activeOrigin = activeRoute.origin,
                 activeDestination = activeRoute.destination,
+                routeTravelMode = activeRoute.travelMode,
                 originLatitudeInput = activeRoute.origin.latitude.toCoordinateInput(),
                 originLongitudeInput = activeRoute.origin.longitude.toCoordinateInput(),
                 destinationLatitudeInput = activeRoute.destination.latitude.toCoordinateInput(),
@@ -387,6 +390,33 @@ class RoutePlannerViewModel(
                 message = null,
             )
         }
+    }
+
+    fun updateRouteTravelMode(mode: RouteTravelMode) {
+        val state = mutableUiState.value
+        if (state.isBusy || state.routeTravelMode == mode) return
+        navigationSession.clear()
+        mutableUiState.value = state.copy(
+            routeTravelMode = mode,
+            baseRoute = null,
+            intermediateStopEnabled = false,
+            intermediateStopRoute = null,
+            plannedIntermediateStops = emptyList(),
+            intermediateStopsRoute = null,
+            pendingIntermediateStopsRoute = null,
+            pendingIntermediateStopRoute = null,
+            pendingIntermediateStopCoordinate = null,
+            editingIntermediateStopId = null,
+            rankedStations = null,
+            predictiveSuggestion = null,
+            workflowMode = null,
+            pendingStation = null,
+            selectedRoute = null,
+            selectedItineraryRoute = null,
+            routeInputsDirty = true,
+            highwayConfirmationPromptVisible = false,
+            message = null,
+        )
     }
 
     fun openFavoritePlaces(endpoint: RouteEndpoint) {
@@ -557,6 +587,7 @@ class RoutePlannerViewModel(
                             intermediateStops = state.plannedIntermediateStops.map { it.location },
                             destination = state.intermediateStopsRoute.asRoutePreview().destination,
                             allowHighways = false,
+                            travelMode = state.routeTravelMode,
                         )
                         if (state.stage == PlannerStage.NAVIGATION_PREVIEW) {
                             navigationSession.preview(
@@ -578,6 +609,7 @@ class RoutePlannerViewModel(
                             intermediateStop = state.intermediateStopRoute.stop,
                             destination = preview.destination,
                             allowHighways = false,
+                            travelMode = state.routeTravelMode,
                         )
                         if (state.stage == PlannerStage.NAVIGATION_PREVIEW) {
                             navigationSession.preview(route.toNavigationRoute())
@@ -594,6 +626,7 @@ class RoutePlannerViewModel(
                             origin = state.baseRoute.origin,
                             destination = state.baseRoute.destination,
                             allowHighways = false,
+                            travelMode = state.routeTravelMode,
                         )
                         if (state.stage == PlannerStage.NAVIGATION_PREVIEW) {
                             navigationSession.preview(route.toNavigationRoute())
@@ -628,7 +661,10 @@ class RoutePlannerViewModel(
 
     private fun showHighwayConfirmationIfNeeded(route: RoutePreview?) {
         val state = mutableUiState.value
-        if (state.highwaysEnabled && route?.allowsHighways == true && route.usesHighways) {
+        if (
+            route?.travelMode == RouteTravelMode.DRIVING &&
+            state.highwaysEnabled && route.allowsHighways && route.usesHighways
+        ) {
             mutableUiState.value = state.copy(highwayConfirmationPromptVisible = true)
         }
     }
@@ -1385,6 +1421,7 @@ class RoutePlannerViewModel(
                     intermediateStops = proposedStops.map(PlannedIntermediateStop::location),
                     destination = directRoute.destination,
                     allowHighways = state.highwaysEnabled,
+                    travelMode = state.routeTravelMode,
                 )
                 val extraDurationSeconds =
                     (candidateRoute.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
@@ -1844,6 +1881,7 @@ class RoutePlannerViewModel(
                     origin = currentOrigin,
                     destination = activeRoute.destination,
                     allowHighways = state.highwaysEnabled,
+                    travelMode = activeRoute.travelMode,
                 )
                 val viaRoute = if (futureStops.isEmpty()) {
                     null
@@ -1853,6 +1891,7 @@ class RoutePlannerViewModel(
                         intermediateStops = futureStops.map(PlannedIntermediateStop::location),
                         destination = activeRoute.destination,
                         allowHighways = state.highwaysEnabled,
+                        travelMode = activeRoute.travelMode,
                     )
                 }
                 mutableUiState.value = mutableUiState.value.copy(
@@ -1921,6 +1960,7 @@ class RoutePlannerViewModel(
         if (
             state.stage != PlannerStage.INTERMEDIATE_STOPS ||
             state.intermediateStopsMode != IntermediateStopsMode.ROUTE ||
+            state.routeTravelMode != RouteTravelMode.DRIVING ||
             state.baseRoute == null || state.isBusy
         ) return
         if (
@@ -1981,6 +2021,7 @@ class RoutePlannerViewModel(
                     intermediateStops = stops.map(PlannedIntermediateStop::location),
                     destination = directRoute.destination,
                     allowHighways = mutableUiState.value.highwaysEnabled,
+                    travelMode = directRoute.travelMode,
                 )
                 if (mutableUiState.value.plannedIntermediateStops.map { it.id } != stops.map { it.id }) {
                     return@launch
@@ -2041,6 +2082,7 @@ class RoutePlannerViewModel(
                         directRoute.origin,
                         directRoute.destination,
                         allowHighways = state.highwaysEnabled,
+                        travelMode = directRoute.travelMode,
                     )
                     navigationSession.preview(refreshedDirectRoute.toNavigationRoute())
                     mutableUiState.value = mutableUiState.value.copy(
@@ -2059,6 +2101,7 @@ class RoutePlannerViewModel(
                         intermediateStops = remaining.map(PlannedIntermediateStop::location),
                         destination = directRoute.destination,
                         allowHighways = state.highwaysEnabled,
+                        travelMode = directRoute.travelMode,
                     )
                     navigationSession.preview(route.toNavigationRoute(remaining.toNavigationStops()))
                     mutableUiState.value = mutableUiState.value.copy(
@@ -2132,6 +2175,7 @@ class RoutePlannerViewModel(
                     },
                     destination = directRoute.destination,
                     allowHighways = state.highwaysEnabled,
+                    travelMode = directRoute.travelMode,
                 )
                 if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN) {
                     mutableUiState.value = mutableUiState.value.copy(
@@ -2264,6 +2308,7 @@ class RoutePlannerViewModel(
     }
 
     fun openPredictiveRange() {
+        if (mutableUiState.value.routeTravelMode != RouteTravelMode.DRIVING) return
         if (
             mutableUiState.value.baseRoute != null &&
             !mutableUiState.value.routeInputsDirty &&
@@ -2549,6 +2594,7 @@ class RoutePlannerViewModel(
 
     fun searchCngStations() {
         val state = mutableUiState.value
+        if (state.routeTravelMode != RouteTravelMode.DRIVING) return
         val rangeKm = state.effectiveRangeKmInput.parseDecimal()
         val detourMinutes = state.maximumDetourMinutesInput.parseDecimal()
         val validationMessage = when {
@@ -3482,6 +3528,7 @@ class RoutePlannerViewModel(
     ) {
         requestJob?.cancel()
         navigationSession.clear()
+        val travelMode = mutableUiState.value.routeTravelMode
         val maximumIntermediateAddedMinutes = mutableUiState.value
             .intermediateStopMaximumAddedMinutesInput.parseDecimal()
         eventLogger(
@@ -3534,6 +3581,7 @@ class RoutePlannerViewModel(
                     origin,
                     destination,
                     allowHighways = mutableUiState.value.highwaysEnabled,
+                    travelMode = travelMode,
                 )
                 val viaRoute = intermediateStop?.let { stop ->
                     val maximumAddedMinutes = maximumIntermediateAddedMinutes
@@ -3550,6 +3598,7 @@ class RoutePlannerViewModel(
                         stop,
                         destination,
                         allowHighways = mutableUiState.value.highwaysEnabled,
+                        travelMode = travelMode,
                     ).also {
                         val extraDurationSeconds =
                             (it.durationSeconds - directRoute.durationSeconds).coerceAtLeast(0.0)
@@ -3817,6 +3866,7 @@ private fun RoutePlannerUiState.alongRouteContext(): AlongRouteContext? {
         remainingWaypoints = multiLeg?.stops ?: emptyList(),
         legs = encodedLegs,
         allowHighways = activeLegs.all { it.allowsHighways },
+        travelMode = direct.travelMode,
         baselineDurationSeconds = direct.durationSeconds,
         currentDurationSeconds = multiLeg?.durationSeconds ?: direct.durationSeconds,
         maximumTotalAddedDurationSeconds = maximumAddedMinutes * 60.0,

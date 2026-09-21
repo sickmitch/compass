@@ -97,7 +97,9 @@ POST /api/v1/routes ─> strict A/B request ─> RoutingProvider
 Geofabrik Italy/regional PBF ─> one-shot tile build ─> named volume ─> Valhalla service
 ```
 
-The public base-route operation supports exactly two coordinates and automobile costing. The
+The public base-route operation supports exactly two coordinates with automobile or pedestrian
+costing. Ordinary waypoint routes support the same modes; every CNG operation remains automobile
+only. The
 provider adapter converts Valhalla kilometres to metres and validates the response before creating
 domain objects. No source station model is consulted in this phase.
 

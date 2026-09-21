@@ -2,6 +2,7 @@ package org.compass.cng.navigation
 
 import java.util.Locale
 import kotlin.math.roundToInt
+import org.compass.cng.domain.model.RouteTravelMode
 
 enum class AnnouncementStage {
     INITIAL,
@@ -122,7 +123,7 @@ class ManeuverController(
         }.takeIf { it >= 0 } ?: return null
         val distance = state.distanceToNextManeuverMeters ?: return null
         val maneuverId = "${route.routeId}:maneuver:$maneuverIndex"
-        val thresholds = maneuverThresholds()
+        val thresholds = maneuverThresholds(route.travelMode)
         if (maneuverId != activeManeuverId) {
             activeManeuverId = maneuverId
             previousManeuverDistanceMeters = distance
@@ -180,7 +181,7 @@ class ManeuverController(
         spoken.clear()
     }
 
-    private fun maneuverThresholds(): List<ManeuverThreshold> = listOf(
+    private fun maneuverThresholds(travelMode: RouteTravelMode): List<ManeuverThreshold> = listOf(
         ManeuverThreshold(policy.fiveHundredMeters, AnnouncementStage.FIVE_HUNDRED_METERS),
         ManeuverThreshold(
             policy.twoHundredFiftyMeters,
@@ -189,7 +190,12 @@ class ManeuverController(
         ManeuverThreshold(policy.oneHundredMeters, AnnouncementStage.ONE_HUNDRED_METERS),
         ManeuverThreshold(policy.fiftyMeters, AnnouncementStage.FIFTY_METERS),
         ManeuverThreshold(policy.immediateMeters, AnnouncementStage.NOW),
-    )
+    ).filterNot { threshold ->
+        travelMode == RouteTravelMode.WALKING && threshold.stage in setOf(
+            AnnouncementStage.FIVE_HUNDRED_METERS,
+            AnnouncementStage.TWO_HUNDRED_FIFTY_METERS,
+        )
+    }
 
     private fun emitOnce(announcement: VoiceAnnouncement): VoiceAnnouncement? =
         announcement.takeIf { spoken.add(it.id) }

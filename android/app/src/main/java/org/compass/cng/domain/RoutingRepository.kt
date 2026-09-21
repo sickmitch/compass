@@ -12,6 +12,7 @@ import org.compass.cng.domain.model.PlaceSearchResults
 import org.compass.cng.domain.model.PredictiveCngSuggestion
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithIntermediateStop
 import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.model.asMultiple
@@ -69,6 +70,16 @@ interface RoutingRepository {
         allowHighways: Boolean,
     ): RoutePreview = previewRoute(origin, destination, originDirection)
 
+    suspend fun previewRoute(
+        origin: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+        travelMode: RouteTravelMode,
+    ): RoutePreview = previewRoute(origin, destination, originDirection, allowHighways).copy(
+        travelMode = travelMode,
+    )
+
     suspend fun routeWithIntermediateStop(
         origin: Coordinate,
         intermediateStop: Coordinate,
@@ -87,6 +98,19 @@ interface RoutingRepository {
     ): RouteWithIntermediateStop = routeWithIntermediateStop(
         origin, intermediateStop, destination, originDirection,
     )
+
+    suspend fun routeWithIntermediateStop(
+        origin: Coordinate,
+        intermediateStop: Coordinate,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+        travelMode: RouteTravelMode,
+    ): RouteWithIntermediateStop = routeWithIntermediateStop(
+        origin, intermediateStop, destination, originDirection, allowHighways,
+    ).let { route ->
+        route.copy(legs = route.legs.map { it.copy(travelMode = travelMode) })
+    }
 
     suspend fun routeWithIntermediateStops(
         origin: Coordinate,
@@ -115,6 +139,19 @@ interface RoutingRepository {
     ): RouteWithIntermediateStops = routeWithIntermediateStops(
         origin, intermediateStops, destination, originDirection,
     )
+
+    suspend fun routeWithIntermediateStops(
+        origin: Coordinate,
+        intermediateStops: List<Coordinate>,
+        destination: Coordinate,
+        originDirection: RouteOriginDirection? = null,
+        allowHighways: Boolean,
+        travelMode: RouteTravelMode,
+    ): RouteWithIntermediateStops = routeWithIntermediateStops(
+        origin, intermediateStops, destination, originDirection, allowHighways,
+    ).let { route ->
+        route.copy(legs = route.legs.map { it.copy(travelMode = travelMode) })
+    }
 
     suspend fun rankedCngStations(
         origin: Coordinate,

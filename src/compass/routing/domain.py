@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
+
+RouteCosting = Literal["auto", "pedestrian"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,13 +27,15 @@ class RouteOriginDirection:
 class RouteRequest:
     origin: Coordinate
     destination: Coordinate
-    costing: str = "auto"
+    costing: RouteCosting = "auto"
     language: str = "it-IT"
     departure_at: datetime | None = None
     origin_direction: RouteOriginDirection | None = None
     allow_highways: bool = True
 
     def __post_init__(self) -> None:
+        if self.costing not in {"auto", "pedestrian"}:
+            raise ValueError("unsupported route costing")
         if self.departure_at is not None and (
             self.departure_at.tzinfo is None or self.departure_at.utcoffset() is None
         ):
@@ -43,13 +47,15 @@ class WaypointRouteRequest:
     origin: Coordinate
     destination: Coordinate
     waypoints: tuple[Coordinate, ...]
-    costing: str = "auto"
+    costing: RouteCosting = "auto"
     language: str = "it-IT"
     departure_at: datetime | None = None
     origin_direction: RouteOriginDirection | None = None
     allow_highways: bool = True
 
     def __post_init__(self) -> None:
+        if self.costing not in {"auto", "pedestrian"}:
+            raise ValueError("unsupported route costing")
         if not self.waypoints:
             raise ValueError("waypoint route must contain at least one waypoint")
         if self.departure_at is not None and (
@@ -144,11 +150,13 @@ class WaypointRoute:
 class MatrixRequest:
     sources: tuple[Coordinate, ...]
     targets: tuple[Coordinate, ...]
-    costing: str = "auto"
+    costing: RouteCosting = "auto"
     departure_at: datetime | None = None
     allow_highways: bool = True
 
     def __post_init__(self) -> None:
+        if self.costing not in {"auto", "pedestrian"}:
+            raise ValueError("unsupported route costing")
         if not self.sources:
             raise ValueError("matrix sources must not be empty")
         if not self.targets:

@@ -20,6 +20,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.compass.cng.domain.RouteOriginDirection
 import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DEFAULT_CNG_REFUEL_DWELL_SECONDS
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.server.ServerConnection
 
 class CompassApiClient(
@@ -190,11 +191,12 @@ class CompassApiClient(
         destination: Coordinate,
         originDirection: RouteOriginDirection? = null,
         allowHighways: Boolean = true,
+        travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
     ): ApiRoute {
         val payload = RouteRequestDto(
             origin = origin.toDto(),
             destination = destination.toDto(),
-            costing = "auto",
+            costing = travelMode.costing,
             language = "it-IT",
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
@@ -224,12 +226,13 @@ class CompassApiClient(
         destination: Coordinate,
         originDirection: RouteOriginDirection? = null,
         allowHighways: Boolean = true,
+        travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
     ): ApiRouteWithIntermediateStop {
         val payload = RouteWithIntermediateStopRequestDto(
             origin = origin.toDto(),
             intermediateStop = intermediateStop.toDto(),
             destination = destination.toDto(),
-            costing = "auto",
+            costing = travelMode.costing,
             language = "it-IT",
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
@@ -252,13 +255,14 @@ class CompassApiClient(
         destination: Coordinate,
         originDirection: RouteOriginDirection? = null,
         allowHighways: Boolean = true,
+        travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
     ): ApiRouteWithIntermediateStops {
         require(intermediateStops.size in 1..8) { "between one and eight stops are required" }
         val payload = RouteWithIntermediateStopsRequestDto(
             origin = origin.toDto(),
             intermediateStops = intermediateStops.map(Coordinate::toDto),
             destination = destination.toDto(),
-            costing = "auto",
+            costing = travelMode.costing,
             language = "it-IT",
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
@@ -728,6 +732,7 @@ private data class AlongRouteContextDto(
     @SerialName("remaining_waypoints") val remainingWaypoints: List<CoordinateDto>,
     val legs: List<AlongRouteLegDto>,
     @SerialName("allow_highways") val allowHighways: Boolean,
+    val costing: String,
     @SerialName("progress_shape_index") val progressShapeIndex: Int?,
     @SerialName("insertion_leg_index") val insertionLegIndex: Int?,
     @SerialName("baseline_duration_seconds") val baselineDurationSeconds: Double?,
@@ -750,6 +755,7 @@ private fun org.compass.cng.domain.model.AlongRouteContext.toDto() = AlongRouteC
     remainingWaypoints = remainingWaypoints.map(Coordinate::toDto),
     legs = legs.map { AlongRouteLegDto(it.encodedPolyline6, precision = 6) },
     allowHighways = allowHighways,
+    costing = travelMode.costing,
     progressShapeIndex = progressShapeIndex,
     insertionLegIndex = insertionLegIndex,
     baselineDurationSeconds = baselineDurationSeconds,

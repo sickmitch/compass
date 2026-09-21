@@ -14,6 +14,7 @@ import org.compass.cng.navigation.NavigationFuelStopLifecycle
 import org.compass.cng.navigation.NavigationFuelStopProgress
 import org.compass.cng.navigation.NavigationRouteSource
 import org.compass.cng.navigation.NavigationState
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.navigation.OffRouteStatus
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.navigation.RouteUpdateFailure
@@ -137,7 +138,9 @@ internal fun NavigationState.toDrivingUiModel(
             NAVIGATION_CLOCK_FORMATTER.format(it.atZone(displayZone))
         } ?: "—",
         progress = routeProgressFraction.coerceIn(0.0, 1.0).toFloat(),
-        currentSpeedLimitKph = currentSpeedLimitKph,
+        currentSpeedLimitKph = currentSpeedLimitKph.takeIf {
+            activeRoute.travelMode == RouteTravelMode.DRIVING
+        },
         nextCngStop = nextFuelStop?.toCngUiModel(
             activeRoute,
             routeSource,
