@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 
-RouteCosting = Literal["auto", "pedestrian"]
+RouteCosting = Literal["auto", "pedestrian", "bicycle"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +34,7 @@ class RouteRequest:
     allow_highways: bool = True
 
     def __post_init__(self) -> None:
-        if self.costing not in {"auto", "pedestrian"}:
+        if self.costing not in {"auto", "pedestrian", "bicycle"}:
             raise ValueError("unsupported route costing")
         if self.departure_at is not None and (
             self.departure_at.tzinfo is None or self.departure_at.utcoffset() is None
@@ -54,7 +54,7 @@ class WaypointRouteRequest:
     allow_highways: bool = True
 
     def __post_init__(self) -> None:
-        if self.costing not in {"auto", "pedestrian"}:
+        if self.costing not in {"auto", "pedestrian", "bicycle"}:
             raise ValueError("unsupported route costing")
         if not self.waypoints:
             raise ValueError("waypoint route must contain at least one waypoint")
@@ -155,7 +155,7 @@ class MatrixRequest:
     allow_highways: bool = True
 
     def __post_init__(self) -> None:
-        if self.costing not in {"auto", "pedestrian"}:
+        if self.costing not in {"auto", "pedestrian", "bicycle"}:
             raise ValueError("unsupported route costing")
         if not self.sources:
             raise ValueError("matrix sources must not be empty")

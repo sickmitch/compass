@@ -1,5 +1,7 @@
 package org.compass.cng.navigation
 
+import org.compass.cng.domain.model.RouteTravelMode
+
 data class RouteUpdatePolicy(
     val trafficRefreshIntervalMillis: Long = 5 * 60 * 1_000L,
     val failedAttemptBackoffMillis: Long = 60_000L,
@@ -63,7 +65,9 @@ class RouteUpdateController(
         }
         if (state.offRouteStatus != OffRouteStatus.ON_ROUTE) return null
         val lastSuccess = lastSuccessfulUpdateAtMillis ?: nowEpochMillis
-        if (nowEpochMillis - lastSuccess >= policy.trafficRefreshIntervalMillis) {
+        if (state.route.travelMode == RouteTravelMode.DRIVING &&
+            nowEpochMillis - lastSuccess >= policy.trafficRefreshIntervalMillis
+        ) {
             return RouteUpdateReason.TRAFFIC_REFRESH
         }
         return null

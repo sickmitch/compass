@@ -188,9 +188,15 @@ summaries, so clients can ask for an explicit confirmation only when the selecte
 contains a motorway.
 
 Base routes and ordinary intermediate-waypoint routes accept `costing="auto"` (default) or
-`costing="pedestrian"`. Pedestrian requests do not use live automotive traffic, motorway policy or
+`costing="pedestrian"` or `costing="bicycle"`. Walking/cycling requests do not use live automotive
+traffic, motorway policy or
 graph speed-limit enrichment. CNG corridor, candidate, selected-station and predictive-planning
-operations remain strictly `auto`: fuel-range and road-detour semantics do not apply to walking.
+operations remain strictly `auto`: fuel-range semantics do not apply to walking or cycling.
+The selected costing is also accepted in along-route search context and used to verify stop detours;
+it participates in the route fingerprint so search results cannot be reused across travel modes.
+Cycling uses the existing Valhalla bicycle profile (default hybrid/city bicycle); distance, duration
+and maneuvers come from its graph, not from rescaling a driving route. The compatibility fields
+named `driving_duration_seconds` denote travel duration for the requested mode.
 
 ## Route through ordinary intermediate waypoints
 
@@ -198,8 +204,8 @@ operations remain strictly `auto`: fuel-range and road-detour semantics do not a
 waypoints and destination. It asks the existing Valhalla adapter for one waypoint route and returns
 one sequenced leg more than the stop count. The outer kinds are `origin_to_intermediate_stop` and
 `intermediate_stop_to_destination`; inner legs are `intermediate_stop_to_intermediate_stop`.
-Navigation timing has `refueling_stop_count=0` and no added dwell. Traffic refresh uses the same
-waypoint-route path as other Compass routes. The singular endpoint remains for older clients.
+Navigation timing has `refueling_stop_count=0` and no added dwell. Automotive traffic refresh is
+performed only for `auto`, including on waypoint routes. The singular endpoint remains for older clients.
 
 ```json
 {

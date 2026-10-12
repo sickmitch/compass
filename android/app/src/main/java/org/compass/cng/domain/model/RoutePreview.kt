@@ -7,6 +7,7 @@ const val DEFAULT_CNG_REFUEL_DWELL_SECONDS = 20 * 60
 enum class RouteTravelMode(val costing: String) {
     DRIVING("auto"),
     WALKING("pedestrian"),
+    CYCLING("bicycle"),
 }
 
 data class NavigationTiming(

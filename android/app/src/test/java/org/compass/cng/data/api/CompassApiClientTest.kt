@@ -59,6 +59,29 @@ class CompassApiClientTest {
     }
 
     @Test
+    fun postsBicycleCostingForDirectAndWaypointRoutes() = runTest {
+        val client = client()
+        val origin = Coordinate(45.0, 9.0)
+        val destination = Coordinate(45.2, 9.4)
+        val stop = Coordinate(45.1, 9.2)
+        server.enqueue(successResponse(SUCCESS_RESPONSE))
+        client.getRoute(origin, destination, travelMode = RouteTravelMode.CYCLING)
+        server.enqueue(successResponse(INTERMEDIATE_STOP_RESPONSE))
+        client.getRouteWithIntermediateStop(
+            origin, stop, destination, travelMode = RouteTravelMode.CYCLING,
+        )
+        server.enqueue(successResponse(INTERMEDIATE_STOPS_RESPONSE))
+        client.getRouteWithIntermediateStops(
+            origin, listOf(stop, Coordinate(45.15, 9.3)), destination,
+            travelMode = RouteTravelMode.CYCLING,
+        )
+        repeat(3) {
+            val body = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+            assertEquals("bicycle", body.getValue("costing").jsonPrimitive.content)
+        }
+    }
+
+    @Test
     fun loadsBackendAndTrafficDiagnosticsWithoutExposingCredentials() = runTest {
         server.enqueue(
             successResponse(
@@ -381,6 +404,7 @@ class CompassApiClientTest {
                 route = AlongRouteContext(
                     routeId = "selected-route",
                     routeRevision = 4,
+                    travelMode = RouteTravelMode.CYCLING,
                     origin = Coordinate(45.0, 10.0),
                     finalDestination = Coordinate(45.2, 10.2),
                     remainingWaypoints = emptyList(),
@@ -399,6 +423,7 @@ class CompassApiClientTest {
         val route = body.getValue("route").jsonObject
         assertEquals("selected-route", route.getValue("route_id").jsonPrimitive.content)
         assertFalse(route.getValue("allow_highways").jsonPrimitive.content.toBoolean())
+        assertEquals("bicycle", route.getValue("costing").jsonPrimitive.content)
         assertEquals(
             "6",
             route.getValue("legs").jsonArray.single().jsonObject

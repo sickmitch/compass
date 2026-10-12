@@ -32,8 +32,11 @@ class RouteMatcher(
     private val policy: RouteMatcherPolicy = RouteMatcherPolicy(),
     travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
 ) {
-    private val headingMinimumSpeedMetersPerSecond =
-        if (travelMode == RouteTravelMode.WALKING) 0.7 else policy.headingMinimumSpeedMetersPerSecond
+    private val headingMinimumSpeedMetersPerSecond = when (travelMode) {
+        RouteTravelMode.WALKING -> 0.7
+        RouteTravelMode.CYCLING -> 1.5
+        RouteTravelMode.DRIVING -> policy.headingMinimumSpeedMetersPerSecond
+    }
     private val geometry = routeGeometry.toList()
     private val cumulativeDistances = DoubleArray(geometry.size)
     private var previousMatch: RouteMatch? = null

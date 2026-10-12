@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.30` (`versionCode=76`).
+Android version is `0.28.32` (`versionCode=78`).
 
 The global Options screen persists a system/light/dark theme choice, the default voice-guidance
 state and whether new route calculations may use motorways. It reuses the existing private
@@ -341,6 +341,20 @@ creator selects **Auto** or **A piedi** before calculating; walking routes use V
 costing, keep ordinary intermediate stops and exclude CNG planning controls. Active guidance keeps
 the selected mode through cache restore and reroutes, and applies walking-specific GPS filtering,
 off-route thresholds, camera framing and shorter voice-announcement distances.
+
+Android `0.28.31` (`versionCode=77`) compacts the trip-creation controls into a fixed, non-scrolling
+viewport and reduces their internal vertical padding. Active navigation adds map-anchored callouts
+for the next maneuver and the next pending ordinary/CNG stop; the maneuver callout identifies turns,
+roundabouts and arrival points at their routed shape coordinate.
+
+Android `0.28.32` (`versionCode=78`) adds **Bici** alongside Auto and A piedi in the same compact
+selector. Bicycle routes use dedicated `bicycle` costing for initial calculation, ordered stops,
+along-route detours and reroutes; saved navigation preserves the mode. Cycling has GPS/off-route
+thresholds, a speed-adaptive 45-degree camera and countdown announcements at 250/100/50/10 m.
+The summary labels cycling duration as **Pedalata**. CNG and automotive traffic/speed-limit UI remain
+automobile-only, and walking/cycling no longer trigger periodic traffic-refresh route queries.
+No new preference or server variable is needed. Rebuild the existing API container before testing
+the APK; see [the single cycling live gate](phases/android-0.28.32-cycling-navigation-gate.md).
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

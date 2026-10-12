@@ -63,6 +63,23 @@ class NavigationCameraControllerTest {
     }
 
     @Test
+    fun cyclingCameraWidensAtCyclingSpeedsAndKeepsPuckAnchor() {
+        val controller = NavigationCameraController()
+        val state = NavigationState(
+            route = route.copy(travelMode = RouteTravelMode.CYCLING),
+            navigationPosition = position(route.origin, bearing = 90.0),
+        )
+        val slow = controller.instruction(state.withSpeed(2.0))
+        val cruising = controller.instruction(state.withSpeed(8.0))
+        assertEquals(controller.config.cyclingSlowZoom, slow.zoom, 0.001)
+        assertEquals(controller.config.cyclingCruisingZoom, cruising.zoom, 0.001)
+        assertEquals(controller.config.cyclingPitchDegrees, cruising.pitchDegrees, 0.001)
+        assertEquals(slow.target, cruising.target)
+        assertEquals(route.origin, cruising.target)
+        assertEquals(90.0, cruising.bearingDegrees, 0.5)
+    }
+
+    @Test
     fun speedContinuouslyWidensViewWithoutMovingTheVehicleAnchor() {
         val controller = NavigationCameraController()
         val base = NavigationState(

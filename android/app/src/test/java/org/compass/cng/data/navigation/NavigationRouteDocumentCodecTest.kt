@@ -39,6 +39,18 @@ class NavigationRouteDocumentCodecTest {
     private val codec = NavigationRouteDocumentCodec()
 
     @Test
+    fun bicycleModeAndOrdinaryStopsSurviveSavedNavigationRoundTrip() {
+        val route = leg(Coordinate(45.0, 9.0), Coordinate(45.1, 9.1), "Prosegui in bici")
+            .copy(travelMode = RouteTravelMode.CYCLING)
+            .toNavigationRoute()
+            .copy(intermediateStops = listOf(
+                NavigationIntermediateStop(1, Coordinate(45.05, 9.05), "Parco"),
+            ))
+        val cached = CachedNavigationRoute(route, 1_725_000_000_000, navigationWasActive = true)
+        assertEquals(cached, codec.decode(codec.encode(cached)))
+    }
+
+    @Test
     fun roundTripPreservesDownloadedGeometryManeuversStationAndTiming() {
         val route = routeWithStop().toNavigationRoute().copy(
             allowsHighways = false,

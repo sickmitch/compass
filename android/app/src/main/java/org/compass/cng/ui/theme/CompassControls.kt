@@ -22,6 +22,7 @@ fun CompassButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     colors: ButtonColors = ButtonDefaults.buttonColors(),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
     Button(
@@ -30,7 +31,7 @@ fun CompassButton(
         enabled = enabled,
         shape = MaterialTheme.shapes.extraLarge,
         colors = colors,
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+        contentPadding = contentPadding,
         content = content,
     )
 }
@@ -41,6 +42,7 @@ fun CompassOutlinedButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     colors: ButtonColors = ButtonDefaults.outlinedButtonColors(),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
     OutlinedButton(
@@ -49,7 +51,7 @@ fun CompassOutlinedButton(
         enabled = enabled,
         shape = MaterialTheme.shapes.extraLarge,
         colors = colors,
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+        contentPadding = contentPadding,
         content = content,
     )
 }

@@ -74,6 +74,12 @@ data class NavigationCameraConfig(
     val pedestrianZoom: Double = 17.4,
     val pedestrianPitchDegrees: Double = 35.0,
     val pedestrianHeadingLookAheadMeters: Double = 12.0,
+    val cyclingSlowZoom: Double = 17.2,
+    val cyclingCruisingZoom: Double = 16.3,
+    val cyclingSlowSpeedMetersPerSecond: Double = 2.0,
+    val cyclingCruisingSpeedMetersPerSecond: Double = 8.0,
+    val cyclingPitchDegrees: Double = 45.0,
+    val cyclingHeadingLookAheadMeters: Double = 20.0,
     val followPuckVerticalFraction: Double = 0.75,
     val freeModeAutoRecenterMillis: Long = 10_000,
     val followAnimationMillis: Int = 900,
@@ -98,6 +104,12 @@ data class NavigationCameraConfig(
         require(pedestrianZoom in minimumFollowZoom..maximumFollowZoom)
         require(pedestrianPitchDegrees in 0.0..60.0)
         require(pedestrianHeadingLookAheadMeters > 0.0)
+        require(cyclingSlowZoom in minimumFollowZoom..maximumFollowZoom)
+        require(cyclingCruisingZoom in minimumFollowZoom..cyclingSlowZoom)
+        require(cyclingSlowSpeedMetersPerSecond >= 0.0)
+        require(cyclingCruisingSpeedMetersPerSecond > cyclingSlowSpeedMetersPerSecond)
+        require(cyclingPitchDegrees in 0.0..60.0)
+        require(cyclingHeadingLookAheadMeters > 0.0)
         require(followPuckVerticalFraction in 0.5..0.9)
         require(freeModeAutoRecenterMillis > 0)
         require(followAnimationMillis > 0)
@@ -145,10 +157,10 @@ class NavigationCameraController(
         val position = state.snappedLocation ?: remaining.firstOrNull() ?: route.origin
         val headingTarget = coordinateAlong(
             remaining.ifEmpty { listOf(position) },
-            if (route.travelMode == RouteTravelMode.WALKING) {
-                config.pedestrianHeadingLookAheadMeters
-            } else {
-                config.headingLookAheadMeters
+            when (route.travelMode) {
+                RouteTravelMode.WALKING -> config.pedestrianHeadingLookAheadMeters
+                RouteTravelMode.CYCLING -> config.cyclingHeadingLookAheadMeters
+                RouteTravelMode.DRIVING -> config.headingLookAheadMeters
             },
         )
         val bearing = if (position != headingTarget) {
@@ -164,18 +176,27 @@ class NavigationCameraController(
             // anchor. A geographic look-ahead target would move the puck as zoom changes.
             target = position,
             bearingDegrees = bearing,
-            zoom = if (route.travelMode == RouteTravelMode.WALKING) {
-                (config.pedestrianZoom + maneuverZoomBoost.coerceAtMost(0.6))
-                    .coerceIn(config.minimumFollowZoom, config.maximumFollowZoom)
-            } else {
-                (lerp(config.urbanZoom, config.motorwayZoom, speedFraction) +
-                    maneuverZoomBoost + maneuverDensityZoomAdjustment)
-                    .coerceIn(config.minimumFollowZoom, config.maximumFollowZoom)
-            },
-            pitchDegrees = if (route.travelMode == RouteTravelMode.WALKING) {
-                config.pedestrianPitchDegrees
-            } else {
-                lerp(config.urbanPitchDegrees, config.motorwayPitchDegrees, speedFraction)
+            zoom = when (route.travelMode) {
+                RouteTravelMode.WALKING ->
+                    config.pedestrianZoom + maneuverZoomBoost.coerceAtMost(0.6)
+                RouteTravelMode.CYCLING -> {
+                    val cyclingSpeedFraction = (
+                        (speed - config.cyclingSlowSpeedMetersPerSecond) /
+                            (config.cyclingCruisingSpeedMetersPerSecond -
+                                config.cyclingSlowSpeedMetersPerSecond)
+                        ).coerceIn(0.0, 1.0)
+                    lerp(config.cyclingSlowZoom, config.cyclingCruisingZoom, cyclingSpeedFraction) +
+                        maneuverZoomBoost.coerceAtMost(0.8)
+                }
+                RouteTravelMode.DRIVING ->
+                    lerp(config.urbanZoom, config.motorwayZoom, speedFraction) +
+                        maneuverZoomBoost + maneuverDensityZoomAdjustment
+            }.coerceIn(config.minimumFollowZoom, config.maximumFollowZoom),
+            pitchDegrees = when (route.travelMode) {
+                RouteTravelMode.WALKING -> config.pedestrianPitchDegrees
+                RouteTravelMode.CYCLING -> config.cyclingPitchDegrees
+                RouteTravelMode.DRIVING ->
+                    lerp(config.urbanPitchDegrees, config.motorwayPitchDegrees, speedFraction)
             },
             animationMillis = config.followAnimationMillis,
         )

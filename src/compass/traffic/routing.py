@@ -22,7 +22,7 @@ async def refresh_base_route_traffic(
     refresher: TrafficRouteRefresher,
     current_departure_tolerance_seconds: float,
 ) -> BaseRoute:
-    if not _is_current_departure(
+    if request.costing != "auto" or not _is_current_departure(
         request.departure_at,
         tolerance_seconds=current_departure_tolerance_seconds,
     ):
@@ -57,7 +57,7 @@ async def refresh_waypoint_route_traffic(
     refresher: TrafficRouteRefresher,
     current_departure_tolerance_seconds: float,
 ) -> WaypointRoute:
-    if not _is_current_departure(
+    if request.costing != "auto" or not _is_current_departure(
         request.departure_at,
         tolerance_seconds=current_departure_tolerance_seconds,
     ):

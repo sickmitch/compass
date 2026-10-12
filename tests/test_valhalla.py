@@ -128,7 +128,8 @@ def test_route_translates_request_and_normalizes_response() -> None:
     assert route.maneuvers[1].roundabout_exit_count == 2
 
 
-def test_pedestrian_route_uses_pedestrian_costing_without_automotive_enrichment() -> None:
+@pytest.mark.parametrize("costing", ["pedestrian", "bicycle"])
+def test_active_travel_costing_without_automotive_enrichment(costing) -> None:
     fixture = json.loads(FIXTURE.read_text())
     payloads: list[dict[str, object]] = []
 
@@ -137,17 +138,20 @@ def test_pedestrian_route_uses_pedestrian_costing_without_automotive_enrichment(
         payloads.append(json.loads(request.content))
         return httpx.Response(200, json=fixture)
 
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
+    adapter, client = _speed_limit_adapter(httpx.MockTransport(handler))
+    adapter._traffic_aware = True
     try:
         route = asyncio.run(adapter.route(RouteRequest(
             origin=Coordinate(latitude=45.4642, longitude=9.1900),
             destination=Coordinate(latitude=45.4781, longitude=9.2271),
-            costing="pedestrian",
+            costing=costing,
+            allow_highways=False,
         )))
     finally:
         asyncio.run(client.aclose())
 
-    assert payloads[0]["costing"] == "pedestrian"
+    assert payloads[0]["costing"] == costing
+    assert len(payloads) == 1
     assert "costing_options" not in payloads[0]
     assert "date_time" not in payloads[0]
     assert route.traffic_aware is False

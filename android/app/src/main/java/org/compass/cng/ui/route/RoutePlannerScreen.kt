@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
+import androidx.compose.material.icons.automirrored.rounded.DirectionsBike
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.AddLocationAlt
 import androidx.compose.material.icons.rounded.Check
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1262,9 +1264,9 @@ private fun PreviewContent(
                         onClick = onStartNavigation,
                         modifier = Modifier.fillMaxWidth().height(62.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null)
+                        Icon(route.travelMode.icon, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Avvia navigazione a piedi")
+                        Text("Avvia navigazione ${route.travelMode.navigationLabel}")
                     }
                 }
         }
@@ -1772,7 +1774,11 @@ private fun NavigationPreviewContent(
                     ) {
                         SummaryValue("Distanza", formatDistance(route.totalDistanceMeters))
                         SummaryValue(
-                            if (route.travelMode == RouteTravelMode.WALKING) "Cammino" else "Guida",
+                            when (route.travelMode) {
+                                RouteTravelMode.DRIVING -> "Guida"
+                                RouteTravelMode.WALKING -> "Cammino"
+                                RouteTravelMode.CYCLING -> "Pedalata"
+                            },
                             formatDuration(route.drivingDurationSeconds),
                         )
                         SummaryValue("Totale", formatDuration(route.totalTripDurationSeconds))
@@ -1785,7 +1791,7 @@ private fun NavigationPreviewContent(
                         )
                     } else {
                         Text(
-                            "Percorso pedonale",
+                            "Percorso ${route.travelMode.navigationLabel}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -2353,13 +2359,14 @@ private fun ConfigureRouteContent(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = false,
             contentPadding = PaddingValues(
                 start = 24.dp,
-                top = 16.dp,
+                top = 4.dp,
                 end = 24.dp,
-                bottom = 112.dp,
+                bottom = 84.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2368,42 +2375,26 @@ private fun ConfigureRouteContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        if (travelMode == RouteTravelMode.DRIVING) {
-                            CompassButton(
-                                onClick = { },
-                                modifier = Modifier.weight(1f).height(54.dp),
-                            ) {
-                                Icon(Icons.Rounded.Navigation, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Auto")
+                        RouteTravelMode.entries.forEach { mode ->
+                            val content: @Composable RowScope.() -> Unit = {
+                                Icon(mode.icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(mode.label, maxLines = 1)
                             }
-                        } else {
-                            CompassOutlinedButton(
-                                onClick = { onTravelModeChanged(RouteTravelMode.DRIVING) },
-                                modifier = Modifier.weight(1f).height(54.dp),
-                            ) {
-                                Icon(Icons.Rounded.Navigation, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Auto")
-                            }
-                        }
-                        if (travelMode == RouteTravelMode.WALKING) {
-                            CompassButton(
-                                onClick = { },
-                                modifier = Modifier.weight(1f).height(54.dp),
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("A piedi")
-                            }
-                        } else {
-                            CompassOutlinedButton(
-                                onClick = { onTravelModeChanged(RouteTravelMode.WALKING) },
-                                modifier = Modifier.weight(1f).height(54.dp),
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("A piedi")
+                            if (travelMode == mode) {
+                                CompassButton(
+                                    onClick = { },
+                                    modifier = Modifier.weight(1f).height(56.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    content = content,
+                                )
+                            } else {
+                                CompassOutlinedButton(
+                                    onClick = { onTravelModeChanged(mode) },
+                                    modifier = Modifier.weight(1f).height(56.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    content = content,
+                                )
                             }
                         }
                     }
@@ -2456,7 +2447,8 @@ private fun ConfigureRouteContent(
                 enabled = endpointsReady && !isCalculating,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                contentPadding = TRIP_COMPACT_BUTTON_PADDING,
             ) {
                 if (isCalculating) {
                     CircularProgressIndicator(
@@ -2494,7 +2486,7 @@ private fun RouteEndpointSelector(
     onCoordinates: (RouteEndpoint) -> Unit,
     onUseCurrentLocation: (RouteEndpoint) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -2505,13 +2497,13 @@ private fun RouteEndpointSelector(
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
                 Box(
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(40.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(titleIcon, contentDescription = null)
                 }
             }
-            Text(title, style = MaterialTheme.typography.headlineSmall)
+            Text(title, style = MaterialTheme.typography.titleLarge)
         }
         if (
             displayName != "Non selezionata" &&
@@ -2521,6 +2513,8 @@ private fun RouteEndpointSelector(
                 displayName,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (selectedMethod == RouteLocationMethod.SEARCH && attributions.isNotEmpty()) {
                 Text(
@@ -2581,6 +2575,7 @@ private fun RouteEndpointSelector(
                                 containerColor = MaterialTheme.compassSemanticColors.successContainer,
                                 contentColor = MaterialTheme.compassSemanticColors.onSuccessContainer,
                             ),
+                            contentPadding = TRIP_COMPACT_BUTTON_PADDING,
                         ) {
                             Icon(icon, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -2600,6 +2595,7 @@ private fun RouteEndpointSelector(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(TRIP_LOCATION_OPTION_HEIGHT),
+                            contentPadding = TRIP_COMPACT_BUTTON_PADDING,
                         ) {
                             Icon(icon, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -2646,6 +2642,7 @@ private fun CurrentLocationChoiceButton(
                 containerColor = containerColor,
                 contentColor = contentColor,
             ),
+            contentPadding = TRIP_COMPACT_BUTTON_PADDING,
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -2679,6 +2676,7 @@ private fun CurrentLocationChoiceButton(
         CompassOutlinedButton(
             onClick = onClick,
             modifier = modifier,
+            contentPadding = TRIP_COMPACT_BUTTON_PADDING,
         ) {
             Icon(Icons.Rounded.MyLocation, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
@@ -4075,6 +4073,27 @@ private fun PredictiveStatusContent(
     }
 }
 
+private val RouteTravelMode.label: String
+    get() = when (this) {
+        RouteTravelMode.DRIVING -> "Auto"
+        RouteTravelMode.WALKING -> "A piedi"
+        RouteTravelMode.CYCLING -> "Bici"
+    }
+
+private val RouteTravelMode.navigationLabel: String
+    get() = when (this) {
+        RouteTravelMode.DRIVING -> "in auto"
+        RouteTravelMode.WALKING -> "a piedi"
+        RouteTravelMode.CYCLING -> "in bici"
+    }
+
+private val RouteTravelMode.icon: ImageVector
+    get() = when (this) {
+        RouteTravelMode.DRIVING -> Icons.Rounded.Navigation
+        RouteTravelMode.WALKING -> Icons.AutoMirrored.Rounded.DirectionsWalk
+        RouteTravelMode.CYCLING -> Icons.AutoMirrored.Rounded.DirectionsBike
+    }
+
 @Composable
 private fun RouteSummary(route: RoutePreview, modifier: Modifier = Modifier) {
     Card(modifier = modifier) {
@@ -4086,8 +4105,8 @@ private fun RouteSummary(route: RoutePreview, modifier: Modifier = Modifier) {
         ) {
             SummaryValue(label = "Distanza", value = formatDistance(route.distanceMeters))
             SummaryValue(label = "Durata", value = formatDuration(route.durationSeconds))
-            if (route.travelMode == RouteTravelMode.WALKING) {
-                SummaryValue(label = "Modalità", value = "A piedi")
+            if (route.travelMode != RouteTravelMode.DRIVING) {
+                SummaryValue(label = "Modalità", value = route.travelMode.label)
             } else {
                 SummaryValue(
                     label = "Traffico",
@@ -4387,5 +4406,6 @@ private fun predictiveStatusCopy(state: PredictiveSuggestionState): Pair<String,
 
 private fun String.filterPhoneCharacters(): String = filter { it.isDigit() || it == '+' }
 
-private val TRIP_LOCATION_OPTION_HEIGHT = 80.dp
+private val TRIP_LOCATION_OPTION_HEIGHT = 56.dp
+private val TRIP_COMPACT_BUTTON_PADDING = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
 private const val CNG_CANDIDATE_UI_LOG_TAG = "CompassCngCandidates"

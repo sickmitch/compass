@@ -74,15 +74,33 @@ class NavigationEngine(
         minimumManeuverApproachMeters = 30.0,
         maneuverApproachSeconds = 10.0,
     ),
+    private val cyclingPolicy: NavigationEnginePolicy = NavigationEnginePolicy(
+        offRouteMinimumDistanceMeters = 15.0,
+        offRouteAccuracyMultiplier = 1.3,
+        offRouteMinimumDurationMillis = 3_000L,
+        offRouteStationarySpeedMetersPerSecond = 0.5,
+        offRouteStationaryDistanceMultiplier = 2.5,
+        offRouteHeadingMismatchDegrees = 75.0,
+        offRouteHeadingMinimumSpeedMetersPerSecond = 1.5,
+        offRouteHeadingMinimumDistanceMeters = 8.0,
+        offRouteBackwardsProgressMeters = 40.0,
+        arrivalDistanceMeters = 15.0,
+        approachingIntermediateStopDistanceMeters = 200.0,
+        atIntermediateStopDistanceMeters = 20.0,
+        intermediateStopDepartureDistanceMeters = 35.0,
+        intermediateStopDepartureMinimumSpeedMetersPerSecond = 0.7,
+        minimumManeuverApproachMeters = 50.0,
+        maneuverApproachSeconds = 10.0,
+    ),
     private val locationFilter: LocationFilter = LocationFilter(),
     private val headingController: NavigationHeadingController = NavigationHeadingController(),
 ) {
     private val drivingPolicy = policy
     private val policy: NavigationEnginePolicy
-        get() = if (mutableState.value.route?.travelMode == RouteTravelMode.WALKING) {
-            pedestrianPolicy
-        } else {
-            drivingPolicy
+        get() = when (mutableState.value.route?.travelMode) {
+            RouteTravelMode.WALKING -> pedestrianPolicy
+            RouteTravelMode.CYCLING -> cyclingPolicy
+            else -> drivingPolicy
         }
     private val mutableState = MutableStateFlow(NavigationState())
     val state: StateFlow<NavigationState> = mutableState.asStateFlow()

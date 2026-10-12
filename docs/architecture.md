@@ -97,9 +97,14 @@ POST /api/v1/routes ─> strict A/B request ─> RoutingProvider
 Geofabrik Italy/regional PBF ─> one-shot tile build ─> named volume ─> Valhalla service
 ```
 
-The public base-route operation supports exactly two coordinates with automobile or pedestrian
+The public base-route operation supports exactly two coordinates with automobile, pedestrian or bicycle
 costing. Ordinary waypoint routes support the same modes; every CNG operation remains automobile
-only. The
+only. Mode propagates through search detour verification, route identity, Android persisted sessions,
+and direct/waypoint rerouting. Non-automotive routes skip traffic overlay refresh and speed-limit
+enrichment. Bicycle access, geometry and estimated travel duration are delegated to Valhalla's
+`bicycle` costing with its hybrid/city defaults; this is not a car route with a reduced speed.
+See the [Valhalla bicycle costing reference](https://valhalla.github.io/valhalla/api/route/api-reference/#bicycle-costing-options).
+No additional routing service, migration or Docker configuration is required. The existing
 provider adapter converts Valhalla kilometres to metres and validates the response before creating
 domain objects. No source station model is consulted in this phase.
 

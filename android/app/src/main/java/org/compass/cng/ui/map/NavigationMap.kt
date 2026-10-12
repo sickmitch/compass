@@ -1,6 +1,12 @@
 package org.compass.cng.ui.map
 
 import android.graphics.PointF
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -14,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import org.compass.cng.R
 import org.compass.cng.navigation.NavigationState
+import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraController
 import org.compass.cng.navigation.NavigationCameraMode
@@ -40,6 +47,7 @@ import org.maplibre.android.style.expressions.Expression.zoom
 import org.maplibre.android.style.layers.Property.LINE_CAP_ROUND
 import org.maplibre.android.style.layers.Property.LINE_JOIN_ROUND
 import org.maplibre.android.style.layers.Property.ICON_ANCHOR_CENTER
+import org.maplibre.android.style.layers.Property.ICON_ANCHOR_BOTTOM
 import org.maplibre.android.style.layers.Property.ICON_PITCH_ALIGNMENT_MAP
 import org.maplibre.android.style.layers.Property.ICON_PITCH_ALIGNMENT_VIEWPORT
 import org.maplibre.android.style.layers.Property.ICON_ROTATION_ALIGNMENT_MAP
@@ -329,6 +337,38 @@ fun NavigationMap(
                         textIgnorePlacement(true),
                     ),
                 )
+                updateNavigationCallout(
+                    style = style,
+                    sourceId = MANEUVER_CALLOUT_SOURCE,
+                    imageId = MANEUVER_CALLOUT_IMAGE,
+                    callout = state.nextManeuverCallout(),
+                    density = density,
+                    appearance = appearance,
+                )
+                style.addLayer(
+                    SymbolLayer(MANEUVER_CALLOUT_LAYER, MANEUVER_CALLOUT_SOURCE).withProperties(
+                        iconImage(MANEUVER_CALLOUT_IMAGE),
+                        iconAnchor(ICON_ANCHOR_BOTTOM),
+                        iconAllowOverlap(true),
+                        iconIgnorePlacement(true),
+                    ),
+                )
+                updateNavigationCallout(
+                    style = style,
+                    sourceId = STOP_CALLOUT_SOURCE,
+                    imageId = STOP_CALLOUT_IMAGE,
+                    callout = state.nextStopCallout(),
+                    density = density,
+                    appearance = appearance,
+                )
+                style.addLayer(
+                    SymbolLayer(STOP_CALLOUT_LAYER, STOP_CALLOUT_SOURCE).withProperties(
+                        iconImage(STOP_CALLOUT_IMAGE),
+                        iconAnchor(ICON_ANCHOR_BOTTOM),
+                        iconAllowOverlap(true),
+                        iconIgnorePlacement(true),
+                    ),
+                )
                 Log.i(
                     NAVIGATION_MAP_LOG_TAG,
                     "map_symbols vehicle=arrow cng=badge intermediate_stop=badge " +
@@ -376,6 +416,8 @@ fun NavigationMap(
         state.navigationPosition,
         state.currentManeuver,
         state.nextManeuver,
+        state.nextFuelStop,
+        state.nextIntermediateStop,
         state.distanceToNextManeuverMeters,
         bottomObstructionPixels,
     ) {
@@ -441,6 +483,35 @@ fun NavigationMap(
                     bottomObstructionPixels = bottomObstructionPixels,
                 )
             }
+        }
+    }
+
+    LaunchedEffect(
+        mapView,
+        appearance,
+        route.routeId,
+        state.currentManeuver,
+        state.nextFuelStop,
+        state.nextIntermediateStop,
+    ) {
+        mapView.getMapAsync { map ->
+            val style = map.style ?: return@getMapAsync
+            updateNavigationCallout(
+                style = style,
+                sourceId = MANEUVER_CALLOUT_SOURCE,
+                imageId = MANEUVER_CALLOUT_IMAGE,
+                callout = state.nextManeuverCallout(),
+                density = density,
+                appearance = appearance,
+            )
+            updateNavigationCallout(
+                style = style,
+                sourceId = STOP_CALLOUT_SOURCE,
+                imageId = STOP_CALLOUT_IMAGE,
+                callout = state.nextStopCallout(),
+                density = density,
+                appearance = appearance,
+            )
         }
     }
 }
@@ -654,6 +725,181 @@ private fun lineFeature(points: List<Point>): Feature {
     return Feature.fromGeometry(LineString.fromLngLats(safePoints))
 }
 
+internal enum class NavigationCalloutKind {
+    MANEUVER,
+    CNG_STOP,
+    INTERMEDIATE_STOP,
+}
+
+internal data class NavigationMapCallout(
+    val coordinate: Coordinate,
+    val label: String,
+    val symbol: String,
+    val kind: NavigationCalloutKind,
+)
+
+internal fun NavigationState.nextManeuverCallout(): NavigationMapCallout? {
+    val route = route ?: return null
+    val maneuver = currentManeuver ?: return null
+    val coordinate = route.geometry.getOrNull(maneuver.beginShapeIndex) ?: return null
+    val label = maneuver.streetNames.firstOrNull()
+        ?: maneuver.instruction.trim().trimEnd('.')
+    return NavigationMapCallout(
+        coordinate = coordinate,
+        label = compactCalloutLabel(label),
+        symbol = maneuverMapSymbol(maneuver.type),
+        kind = NavigationCalloutKind.MANEUVER,
+    )
+}
+
+internal fun NavigationState.nextStopCallout(): NavigationMapCallout? {
+    val fuel = nextFuelStop?.stop
+    val intermediate = nextIntermediateStop?.stop
+    return when {
+        fuel == null && intermediate == null -> null
+        fuel != null && (intermediate == null || fuel.sequence < intermediate.sequence) -> {
+            NavigationMapCallout(
+                coordinate = fuel.location,
+                label = compactCalloutLabel(fuel.name ?: "Sosta CNG"),
+                symbol = "CNG",
+                kind = NavigationCalloutKind.CNG_STOP,
+            )
+        }
+        else -> requireNotNull(intermediate).let { stop ->
+            NavigationMapCallout(
+                coordinate = stop.location,
+                label = compactCalloutLabel(stop.mapLabel),
+                symbol = "T",
+                kind = NavigationCalloutKind.INTERMEDIATE_STOP,
+            )
+        }
+    }
+}
+
+internal fun maneuverMapSymbol(type: Int): String = when (type) {
+    9, 10, 11, 18, 20, 23 -> "↱"
+    14, 15, 16, 19, 21, 24 -> "↰"
+    12 -> "↻"
+    13 -> "↺"
+    26, 27 -> "○"
+    4, 5, 6 -> "◆"
+    else -> "↑"
+}
+
+internal fun compactCalloutLabel(value: String, maximumCharacters: Int = 28): String {
+    val normalized = value.replace(Regex("\\s+"), " ").trim().ifEmpty { "Prossimo punto" }
+    return if (normalized.length <= maximumCharacters) {
+        normalized
+    } else {
+        normalized.take(maximumCharacters - 1).trimEnd() + "…"
+    }
+}
+
+private fun updateNavigationCallout(
+    style: Style,
+    sourceId: String,
+    imageId: String,
+    callout: NavigationMapCallout?,
+    density: Float,
+    appearance: CompassMapAppearance,
+) {
+    val featureCollection = FeatureCollection.fromFeatures(
+        callout?.let { callout ->
+            arrayOf(Feature.fromGeometry(point(callout.coordinate)))
+        } ?: emptyArray(),
+    )
+    val source = style.getSourceAs<GeoJsonSource>(sourceId)
+    if (source == null) {
+        style.addSource(GeoJsonSource(sourceId, featureCollection))
+    } else {
+        source.setGeoJson(featureCollection)
+    }
+    if (callout != null) {
+        style.addImage(
+            imageId,
+            navigationCalloutBitmap(callout, density, appearance),
+        )
+    }
+}
+
+private fun navigationCalloutBitmap(
+    callout: NavigationMapCallout,
+    density: Float,
+    appearance: CompassMapAppearance,
+): Bitmap {
+    val scale = density.coerceAtLeast(1f)
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = if (appearance.theme == CompassMapTheme.NIGHT) 0xFFF4FFF8.toInt() else 0xFF10251A.toInt()
+        textSize = 14f * scale
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    val symbolPaint = Paint(textPaint).apply {
+        color = appearance.palette.markerText
+        textSize = if (callout.symbol.length > 1) 9f * scale else 18f * scale
+        textAlign = Paint.Align.CENTER
+    }
+    val horizontalPadding = 12f * scale
+    val symbolDiameter = 30f * scale
+    val gap = 8f * scale
+    val bodyHeight = 42f * scale
+    val tailHeight = 8f * scale
+    val labelWidth = textPaint.measureText(callout.label)
+    val width = horizontalPadding * 2 + symbolDiameter + gap + labelWidth
+    val bitmap = Bitmap.createBitmap(
+        width.toInt().coerceAtLeast(1),
+        (bodyHeight + tailHeight).toInt().coerceAtLeast(1),
+        Bitmap.Config.ARGB_8888,
+    )
+    val canvas = Canvas(bitmap)
+    val background = if (appearance.theme == CompassMapTheme.NIGHT) {
+        0xE6121C17.toInt()
+    } else {
+        0xF2FFFFFF.toInt()
+    }
+    val accent = when (callout.kind) {
+        NavigationCalloutKind.MANEUVER -> NAVIGATION_REMAINING_ROUTE_COLOR
+        NavigationCalloutKind.CNG_STOP -> appearance.palette.cng
+        NavigationCalloutKind.INTERMEDIATE_STOP -> appearance.palette.selectedCng
+    }
+    val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = background }
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = accent
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * scale
+    }
+    val body = RectF(0f, 0f, width, bodyHeight)
+    canvas.drawRoundRect(body, 12f * scale, 12f * scale, backgroundPaint)
+    canvas.drawRoundRect(body, 12f * scale, 12f * scale, strokePaint)
+    val tailCenter = width / 2f
+    val tail = Path().apply {
+        moveTo(tailCenter - 7f * scale, bodyHeight - 1f)
+        lineTo(tailCenter, bodyHeight + tailHeight)
+        lineTo(tailCenter + 7f * scale, bodyHeight - 1f)
+        close()
+    }
+    canvas.drawPath(tail, backgroundPaint)
+    canvas.drawCircle(
+        horizontalPadding + symbolDiameter / 2f,
+        bodyHeight / 2f,
+        symbolDiameter / 2f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accent },
+    )
+    val textBaseline = bodyHeight / 2f - (textPaint.ascent() + textPaint.descent()) / 2f
+    canvas.drawText(
+        callout.symbol,
+        horizontalPadding + symbolDiameter / 2f,
+        bodyHeight / 2f - (symbolPaint.ascent() + symbolPaint.descent()) / 2f,
+        symbolPaint,
+    )
+    canvas.drawText(
+        callout.label,
+        horizontalPadding + symbolDiameter + gap,
+        textBaseline,
+        textPaint,
+    )
+    return bitmap
+}
+
 private const val REMAINING_SOURCE = "navigation-remaining-source"
 private const val REMAINING_LAYER = "navigation-remaining-layer"
 private const val REMAINING_DIRECTION_LAYER = "navigation-remaining-direction-layer"
@@ -670,6 +916,12 @@ private const val FUEL_STOPS_TEXT_LAYER = "navigation-fuel-stops-text-layer"
 private const val INTERMEDIATE_STOPS_SOURCE = "navigation-intermediate-stops-source"
 private const val INTERMEDIATE_STOPS_LAYER = "navigation-intermediate-stops-layer"
 private const val INTERMEDIATE_STOPS_TEXT_LAYER = "navigation-intermediate-stops-text-layer"
+private const val MANEUVER_CALLOUT_SOURCE = "navigation-maneuver-callout-source"
+private const val MANEUVER_CALLOUT_LAYER = "navigation-maneuver-callout-layer"
+private const val MANEUVER_CALLOUT_IMAGE = "navigation-maneuver-callout-image"
+private const val STOP_CALLOUT_SOURCE = "navigation-stop-callout-source"
+private const val STOP_CALLOUT_LAYER = "navigation-stop-callout-layer"
+private const val STOP_CALLOUT_IMAGE = "navigation-stop-callout-image"
 private const val NAVIGATION_MAP_LOG_TAG = "CompassNavigationUi"
 internal const val NAVIGATION_PUCK_ICON_SCALE = 1.10f
 internal const val NAVIGATION_PUCK_MIN_ICON_SCALE = NAVIGATION_PUCK_ICON_SCALE * 0.5f

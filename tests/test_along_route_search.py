@@ -284,10 +284,14 @@ def test_specific_query_uses_global_text_search_without_silent_global_fallback()
     assert "searchAlongRouteParameters" not in payload
 
 
-def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_time() -> None:
+@pytest.mark.parametrize("costing", ["auto", "pedestrian", "bicycle"])
+def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_time(
+    costing,
+) -> None:
     route = replace(
         _route(),
         allow_highways=False,
+        costing=costing,
         baseline_duration_seconds=100.0,
         current_duration_seconds=130.0,
         maximum_total_added_duration_seconds=50.0,
@@ -362,6 +366,17 @@ def test_generic_candidates_are_filtered_by_total_budget_and_sorted_by_marginal_
     assert all(item.within_time_budget for item in response.results)
     assert all(request.waypoints[0] == route.remaining_waypoints[0] for request in routing.requests)
     assert all(request.allow_highways is False for request in routing.requests)
+    assert all(request.costing == costing for request in routing.requests)
+
+
+def test_route_search_fingerprint_is_mode_specific() -> None:
+    fingerprints = {
+        build_google_route_polyline(
+            replace(_route(), costing=costing), max_points=100, max_encoded_chars=10_000
+        )[1]
+        for costing in ("auto", "pedestrian", "bicycle")
+    }
+    assert len(fingerprints) == 3
 
 
 def test_candidate_uses_nearest_leg_and_existing_stop_is_not_suggested_again() -> None:

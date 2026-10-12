@@ -52,6 +52,7 @@ import org.compass.cng.domain.model.RankedCngStation
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RankingBreakdown
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithIntermediateStop
@@ -82,6 +83,32 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
+    @Test
+    fun changingToBicycleRecalculatesWithSameEndpointsAndBlocksCngActions() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository)
+        runCurrent()
+        val original = requireNotNull(viewModel.uiState.value.baseRoute)
+        viewModel.openRouteConfiguration()
+        viewModel.updateRouteTravelMode(RouteTravelMode.CYCLING)
+        assertNull(viewModel.uiState.value.baseRoute)
+        assertTrue(viewModel.uiState.value.routeInputsDirty)
+        viewModel.applyRouteInputs()
+        runCurrent()
+        val cycling = requireNotNull(viewModel.uiState.value.baseRoute)
+        assertEquals(RouteTravelMode.CYCLING, cycling.travelMode)
+        assertEquals(original.origin, cycling.origin)
+        assertEquals(original.destination, cycling.destination)
+        assertFalse(viewModel.uiState.value.highwayConfirmationPromptVisible)
+        viewModel.openPredictiveRange()
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        viewModel.addIntermediateStop()
+        viewModel.addCngIntermediateStop()
+        assertEquals(PlannerStage.INTERMEDIATE_STOPS, viewModel.uiState.value.stage)
+        assertEquals(0, repository.candidateCalls)
+        assertEquals(0, repository.predictiveCalls)
+    }
+
     @Test
     fun backFromTripCustomizationReturnsToEndpointConfiguration() = runTest {
         val viewModel = RoutePlannerViewModel(

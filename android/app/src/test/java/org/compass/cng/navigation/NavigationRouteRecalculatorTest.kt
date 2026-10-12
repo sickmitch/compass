@@ -16,6 +16,7 @@ import org.compass.cng.domain.model.PredictiveRangeBasis
 import org.compass.cng.domain.model.PredictiveSuggestionState
 import org.compass.cng.domain.model.RankedCngStations
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.model.RouteWithCngItinerary
 import org.compass.cng.domain.model.RouteWithCngStop
 import org.compass.cng.domain.model.RouteWithIntermediateStop
@@ -27,6 +28,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NavigationRouteRecalculatorTest {
+    @Test
+    fun bicycleRerouteKeepsCostingAndUsesHeadingAtCyclingSpeeds() = runTest {
+        val repository = RecordingRepository()
+        val route = repository.route(Coordinate(45.0, 9.0), Coordinate(44.0, 11.0))
+            .copy(travelMode = RouteTravelMode.CYCLING).toNavigationRoute()
+        val raw = Coordinate(45.01, 9.01)
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            rawLocation = NavigationLocation(raw, 5.0, 2.0, 90.0, 1_000),
+            navigationPosition = position(route.origin),
+        )
+        val recalculated = CompassNavigationRouteRecalculator(repository)
+            .recalculate(state, RouteUpdateReason.OFF_ROUTE)
+        assertEquals(RouteTravelMode.CYCLING, repository.lastTravelMode)
+        assertEquals(RouteTravelMode.CYCLING, recalculated.travelMode)
+        assertEquals(raw, repository.lastOrigin)
+        assertEquals(route.destination, recalculated.destination)
+        assertEquals(RouteOriginDirection(90.0, 45), repository.lastOriginDirection)
+    }
+
     @Test
     fun reroutePreservesOneOffHighwayExclusion() = runTest {
         val repository = RecordingRepository()
@@ -484,7 +506,20 @@ class NavigationRouteRecalculatorTest {
         var lastIntermediateStops: List<Coordinate>? = null
         var lastOriginDirection: RouteOriginDirection? = null
         var lastAllowHighways: Boolean? = null
+        var lastTravelMode: RouteTravelMode? = null
         var failNextItinerary: Boolean = false
+
+        override suspend fun previewRoute(
+            origin: Coordinate,
+            destination: Coordinate,
+            originDirection: RouteOriginDirection?,
+            allowHighways: Boolean,
+            travelMode: RouteTravelMode,
+        ): RoutePreview {
+            lastTravelMode = travelMode
+            return previewRoute(origin, destination, originDirection, allowHighways)
+                .copy(travelMode = travelMode)
+        }
 
         override suspend fun previewRoute(
             origin: Coordinate,

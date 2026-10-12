@@ -78,7 +78,7 @@ class AlongRouteContext:
     remaining_waypoints: tuple[Coordinate, ...]
     legs: tuple[AlongRouteLeg, ...]
     allow_highways: bool = True
-    costing: Literal["auto", "pedestrian"] = "auto"
+    costing: Literal["auto", "pedestrian", "bicycle"] = "auto"
     progress_shape_index: int | None = None
     insertion_leg_index: int | None = None
     baseline_duration_seconds: float | None = None

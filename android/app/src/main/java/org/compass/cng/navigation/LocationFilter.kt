@@ -33,15 +33,20 @@ class LocationFilter(
         location: NavigationLocation,
         travelMode: RouteTravelMode = RouteTravelMode.DRIVING,
     ): NavigationLocation? {
-        val policy = if (travelMode == RouteTravelMode.WALKING) {
-            policy.copy(
+        val policy = when (travelMode) {
+            RouteTravelMode.WALKING -> policy.copy(
                 maximumPlausibleSpeedMetersPerSecond = 15.0,
                 stationarySpeedMetersPerSecond = 0.3,
                 stationaryDeadbandMeters = 2.0,
                 minimumBearingSpeedMetersPerSecond = 0.7,
             )
-        } else {
-            policy
+            RouteTravelMode.CYCLING -> policy.copy(
+                maximumPlausibleSpeedMetersPerSecond = 30.0,
+                stationarySpeedMetersPerSecond = 0.5,
+                stationaryDeadbandMeters = 2.0,
+                minimumBearingSpeedMetersPerSecond = 1.5,
+            )
+            RouteTravelMode.DRIVING -> policy
         }
         val deliveryDelay = location.receivedAtEpochMillis?.minus(location.timestampEpochMillis)
         if (deliveryDelay != null && deliveryDelay > policy.maximumDeliveryDelayMillis) return null

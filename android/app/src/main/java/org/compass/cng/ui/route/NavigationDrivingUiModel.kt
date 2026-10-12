@@ -181,9 +181,11 @@ internal fun NavigationState.toDrivingUiModel(
                     ),
                 )
             }
-            if (connectivity == NavigationConnectivity.ONLINE) {
+            if (activeRoute.travelMode == RouteTravelMode.DRIVING &&
+                connectivity == NavigationConnectivity.ONLINE
+            ) {
                 add(trafficStatusUiModel(activeRoute.timing, displayZone))
-            } else {
+            } else if (activeRoute.travelMode == RouteTravelMode.DRIVING) {
                 add(
                     NavigationStatusUiModel(
                         "Traffico non aggiornabile: durata ed ETA continuano dalla rotta locale.",
@@ -198,7 +200,7 @@ internal fun NavigationState.toDrivingUiModel(
                             NavigationConnectivity.OFFLINE ->
                                 "Rete assente: guida locale attiva sulla rotta scaricata."
                             NavigationConnectivity.RECOVERING ->
-                                "Connessione ripristinata: aggiorno traffico e percorso in sicurezza…"
+                                "Connessione ripristinata: aggiorno il percorso…"
                             NavigationConnectivity.REROUTING_UNAVAILABLE ->
                                 "Compass non raggiungibile: guida locale attiva, ricalcolo non disponibile."
                             NavigationConnectivity.ONLINE -> error("handled above")

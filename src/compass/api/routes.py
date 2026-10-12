@@ -50,7 +50,7 @@ class CoordinateRequest(StrictModel):
 class BaseRouteRequest(StrictModel):
     origin: CoordinateRequest
     destination: CoordinateRequest
-    costing: Literal["auto", "pedestrian"] = "auto"
+    costing: Literal["auto", "pedestrian", "bicycle"] = "auto"
     allow_highways: bool = Field(
         default=True,
         description=(

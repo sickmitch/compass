@@ -290,10 +290,10 @@ class CompassNavigationRouteRecalculator(
         val location = rawLocation ?: return null
         val speed = location.speedMetersPerSecond ?: return null
         val bearing = location.bearingDegrees ?: return null
-        val minimumSpeed = if (route?.travelMode == RouteTravelMode.WALKING) {
-            0.8
-        } else {
-            directionPolicy.minimumSpeedMetersPerSecond
+        val minimumSpeed = when (route?.travelMode) {
+            RouteTravelMode.WALKING -> 0.8
+            RouteTravelMode.CYCLING -> 1.5
+            else -> directionPolicy.minimumSpeedMetersPerSecond
         }
         if (speed < minimumSpeed || !bearing.isFinite()) return null
         val normalizedBearing = ((bearing % 360.0) + 360.0) % 360.0

@@ -485,7 +485,8 @@ def test_base_route_contract_is_provider_independent() -> None:
     )
 
 
-def test_base_route_accepts_and_forwards_pedestrian_costing() -> None:
+@pytest.mark.parametrize("costing", ["pedestrian", "bicycle"])
+def test_base_route_accepts_and_forwards_active_travel_costing(costing) -> None:
     provider = FakeRoutingProvider()
 
     async def override_provider() -> FakeRoutingProvider:
@@ -502,7 +503,7 @@ def test_base_route_accepts_and_forwards_pedestrian_costing() -> None:
             {
                 "origin": {"latitude": 45.4642, "longitude": 9.19},
                 "destination": {"latitude": 45.4781, "longitude": 9.2271},
-                "costing": "pedestrian",
+                "costing": costing,
             },
         )
     finally:
@@ -510,7 +511,7 @@ def test_base_route_accepts_and_forwards_pedestrian_costing() -> None:
 
     assert response.status_code == 200
     assert provider.request is not None
-    assert provider.request.costing == "pedestrian"
+    assert provider.request.costing == costing
 
 
 def test_base_route_forwards_a_valid_origin_direction() -> None:

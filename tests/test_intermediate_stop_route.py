@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 
 import httpx
+import pytest
 
 from compass.api.main import app
 from compass.config import get_api_settings, get_settings
@@ -68,7 +69,8 @@ class _MultipleWaypointProvider(_WaypointProvider):
         )
 
 
-def test_intermediate_stop_route_has_two_legs_and_no_dwell() -> None:
+@pytest.mark.parametrize("costing", ["auto", "pedestrian", "bicycle"])
+def test_intermediate_stop_route_has_two_legs_and_no_dwell(costing) -> None:
     provider = _WaypointProvider()
 
     async def override_provider() -> _WaypointProvider:
@@ -94,6 +96,7 @@ def test_intermediate_stop_route_has_two_legs_and_no_dwell() -> None:
                 json={
                     "origin": {"latitude": 45.0, "longitude": 10.0},
                     "intermediate_stop": {"latitude": 45.2, "longitude": 10.3},
+                    "costing": costing,
                     "destination": {"latitude": 45.4, "longitude": 10.6},
                     "departure_at": "2026-09-09T10:00:00+02:00",
                 },
@@ -114,12 +117,14 @@ def test_intermediate_stop_route_has_two_legs_and_no_dwell() -> None:
     assert body["navigation"]["total_refueling_dwell_seconds"] == 0
     assert provider.request is not None
     assert provider.request.waypoints == (Coordinate(45.2, 10.3),)
+    assert provider.request.costing == costing
     assert provider.request.departure_at == datetime.fromisoformat(
         "2026-09-09T10:00:00+02:00"
     )
 
 
-def test_multiple_intermediate_stops_preserve_order_and_have_no_dwell() -> None:
+@pytest.mark.parametrize("costing", ["auto", "pedestrian", "bicycle"])
+def test_multiple_intermediate_stops_preserve_order_and_have_no_dwell(costing) -> None:
     provider = _MultipleWaypointProvider()
 
     async def override_provider() -> _MultipleWaypointProvider:
@@ -151,6 +156,7 @@ def test_multiple_intermediate_stops_preserve_order_and_have_no_dwell() -> None:
                 json={
                     "origin": {"latitude": 45.0, "longitude": 10.0},
                     "intermediate_stops": stops,
+                    "costing": costing,
                     "destination": {"latitude": 45.7, "longitude": 10.8},
                 },
             )
@@ -176,3 +182,4 @@ def test_multiple_intermediate_stops_preserve_order_and_have_no_dwell() -> None:
     assert provider.request.waypoints == tuple(
         Coordinate(stop["latitude"], stop["longitude"]) for stop in stops
     )
+    assert provider.request.costing == costing

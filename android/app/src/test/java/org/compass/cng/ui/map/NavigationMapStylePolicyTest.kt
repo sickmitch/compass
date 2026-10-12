@@ -1,6 +1,7 @@
 package org.compass.cng.ui.map
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.maplibre.android.style.expressions.Expression.eq
@@ -44,5 +45,22 @@ class NavigationMapStylePolicyTest {
         assertTrue(expression.contains("traffic_signals"))
         assertFalse(expression.contains("library"))
         assertFalse(expression.contains("bus_stop"))
+    }
+
+    @Test
+    fun mapCalloutSymbolsDistinguishTurnsRoundaboutsAndDestinations() {
+        assertEquals("↱", maneuverMapSymbol(10))
+        assertEquals("↰", maneuverMapSymbol(15))
+        assertEquals("○", maneuverMapSymbol(26))
+        assertEquals("◆", maneuverMapSymbol(4))
+        assertEquals("↑", maneuverMapSymbol(8))
+    }
+
+    @Test
+    fun mapCalloutLabelsAreSingleLineAndBounded() {
+        assertEquals("Via Roma", compactCalloutLabel("  Via   Roma  "))
+        assertEquals("Una strada particolarmente…", compactCalloutLabel(
+            "Una strada particolarmente lunga e poco leggibile",
+        ))
     }
 }

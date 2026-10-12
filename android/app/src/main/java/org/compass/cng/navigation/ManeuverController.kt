@@ -191,10 +191,12 @@ class ManeuverController(
         ManeuverThreshold(policy.fiftyMeters, AnnouncementStage.FIFTY_METERS),
         ManeuverThreshold(policy.immediateMeters, AnnouncementStage.NOW),
     ).filterNot { threshold ->
-        travelMode == RouteTravelMode.WALKING && threshold.stage in setOf(
+        (travelMode == RouteTravelMode.CYCLING &&
+            threshold.stage == AnnouncementStage.FIVE_HUNDRED_METERS) ||
+        (travelMode == RouteTravelMode.WALKING && threshold.stage in setOf(
             AnnouncementStage.FIVE_HUNDRED_METERS,
             AnnouncementStage.TWO_HUNDRED_FIFTY_METERS,
-        )
+        ))
     }
 
     private fun emitOnce(announcement: VoiceAnnouncement): VoiceAnnouncement? =

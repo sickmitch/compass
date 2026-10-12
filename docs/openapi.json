@@ -363,7 +363,8 @@
             "default": "auto",
             "enum": [
               "auto",
-              "pedestrian"
+              "pedestrian",
+              "bicycle"
             ],
             "title": "Costing",
             "type": "string"
@@ -2022,7 +2023,8 @@
             "default": "auto",
             "enum": [
               "auto",
-              "pedestrian"
+              "pedestrian",
+              "bicycle"
             ],
             "title": "Costing",
             "type": "string"
@@ -2195,7 +2197,8 @@
             "default": "auto",
             "enum": [
               "auto",
-              "pedestrian"
+              "pedestrian",
+              "bicycle"
             ],
             "title": "Costing",
             "type": "string"
@@ -4528,7 +4531,8 @@
             "default": "auto",
             "enum": [
               "auto",
-              "pedestrian"
+              "pedestrian",
+              "bicycle"
             ],
             "title": "Costing",
             "type": "string"

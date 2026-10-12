@@ -1,12 +1,28 @@
 package org.compass.cng.navigation
 
 import org.compass.cng.domain.model.Coordinate
+import org.compass.cng.domain.model.RouteTravelMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NavigationLocationPipelineTest {
+    @Test
+    fun cyclingFilterKeepsSlowMovingHeadingAndRejectsImplausibleJumps() {
+        val filter = LocationFilter()
+        val first = location(Coordinate(45.0, 9.0), speed = 1.8, timestamp = 1_000)
+        assertEquals(90.0, filter.filter(first, RouteTravelMode.CYCLING)?.bearingDegrees)
+        assertNull(filter.filter(
+            location(Coordinate(45.0, 9.001), speed = 4.0, timestamp = 2_000),
+            RouteTravelMode.CYCLING,
+        ))
+        assertTrue(filter.filter(
+            location(Coordinate(45.0, 9.00005), speed = 4.0, timestamp = 2_000),
+            RouteTravelMode.CYCLING,
+        ) != null)
+    }
+
     @Test
     fun stationaryNoiseKeepsPositionAndDoesNotAdoptUnstableGpsBearing() {
         val filter = LocationFilter()

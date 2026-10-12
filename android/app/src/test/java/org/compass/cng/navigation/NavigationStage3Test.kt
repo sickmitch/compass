@@ -5,6 +5,7 @@ import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.NavigationTiming
 import org.compass.cng.domain.model.RoutePreview
+import org.compass.cng.domain.model.RouteTravelMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -12,6 +13,43 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NavigationStage3Test {
+    @Test
+    fun cyclingCountdownStartsAt250MetersAndDoesNotRepeat() {
+        val route = route("cycling-voice").copy(travelMode = RouteTravelMode.CYCLING)
+        val controller = ManeuverController()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING,
+            route = route,
+            currentManeuver = route.maneuvers.first(),
+            navigationPosition = position(route.origin, speed = 4.0),
+        )
+        assertEquals(AnnouncementStage.INITIAL,
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 650.0))?.stage)
+        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 499.0)))
+        assertEquals(AnnouncementStage.TWO_HUNDRED_FIFTY_METERS,
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 249.0))?.stage)
+        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 240.0)))
+        assertEquals(AnnouncementStage.ONE_HUNDRED_METERS,
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 99.0))?.stage)
+    }
+
+    @Test
+    fun activeTravelSkipsTrafficRefreshButStillReroutesAfterDeviation() {
+        listOf(RouteTravelMode.WALKING, RouteTravelMode.CYCLING).forEach { mode ->
+            val controller = RouteUpdateController()
+            val route = route("active-travel-update").copy(travelMode = mode)
+            val state = NavigationState(
+                phase = NavigationPhase.NAVIGATING,
+                route = route,
+                navigationPosition = position(route.origin),
+            )
+            controller.navigationStarted(1_000)
+            assertNull(controller.nextUpdate(state, 301_000))
+            assertEquals(RouteUpdateReason.OFF_ROUTE,
+                controller.nextUpdate(state.copy(offRouteStatus = OffRouteStatus.OFF_ROUTE), 302_000))
+        }
+    }
+
     @Test
     fun voiceGuidanceCanBeDisabledAndReenabledDuringNavigation() {
         val engine = NavigationEngine()
