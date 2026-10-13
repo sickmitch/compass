@@ -60,6 +60,9 @@ class NavigationSession(
             force = hadActiveFuelStop != (current.activeFuelStopVisit != null) ||
                 hadActiveIntermediateStop != (current.activeIntermediateStopVisit != null),
         )
+        if (hadActiveFuelStop && current.activeFuelStopVisit == null) {
+            eventLogger("navigation CNG refuelling completed by GPS departure; guidance_resumed=true")
+        }
         if (!hadActiveIntermediateStop && current.activeIntermediateStopVisit != null) {
             eventLogger("navigation intermediate stop reached; guidance_paused=true dwell_seconds=0")
         }

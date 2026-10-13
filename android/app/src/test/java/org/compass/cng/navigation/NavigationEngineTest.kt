@@ -13,6 +13,64 @@ import org.junit.Test
 
 class NavigationEngineTest {
     @Test
+    fun fuelStopAutomaticallyCompletesAfterTwoAccurateFixesBeyond50Meters() {
+        val engine = engineAtFuelStop()
+        val before = engine.state.value.routeProgressFraction
+        engine.updateLocation(fix(45.0, 9.0030, 12_000, 90.0), Instant.ofEpochMilli(12_000))
+        assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+        engine.updateLocation(fix(45.0, 9.0032, 13_000, 90.0), Instant.ofEpochMilli(13_000))
+        val resumed = engine.state.value
+        assertEquals(null, resumed.activeFuelStopVisit)
+        assertEquals("departure-test", resumed.lastCompletedFuelStop?.mimitStationId)
+        assertEquals(NavigationFuelStopLifecycle.COMPLETED, resumed.fuelStopProgress.single().lifecycle)
+        assertTrue(resumed.phase != NavigationPhase.AT_FUEL_STOP)
+        assertTrue(resumed.routeProgressFraction > before)
+        assertEquals(resumed.drivingDurationRemainingSeconds, resumed.totalDurationRemainingSeconds)
+        assertEquals(false, engine.completeFuelStop(14_000))
+    }
+
+    @Test
+    fun fuelStopDepartureRejectsDriftPoorAccuracyAndInterruptedEvidence() {
+        val engine = engineAtFuelStop()
+        val fixes = listOf(
+            fix(45.0, 9.0025, 10_000, 90.0), // less than 50 m
+            fix(45.0, 9.0025, 11_000, 90.0),
+            fix(45.0, 9.0030, 12_000, 90.0), // only one reliable distant fix
+            fix(45.0, 9.0032, 13_000, 90.0).copy(accuracyMeters = 50.0),
+            fix(45.0, 9.0032, 14_000, 90.0),
+            fix(45.0, 9.0032, 15_000, 90.0).copy(accuracyMeters = 120.0),
+            fix(45.0, 9.0032, 16_000, 90.0),
+        )
+        fixes.forEach { location ->
+            engine.updateLocation(location, Instant.ofEpochMilli(location.timestampEpochMillis))
+            assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
+            assertEquals(null, engine.state.value.lastCompletedFuelStop)
+        }
+    }
+
+    private fun engineAtFuelStop(): NavigationEngine {
+        val base = route()
+        val stop = NavigationFuelStop(
+            sequence = 1, mimitStationId = "departure-test", name = "Stazione",
+            municipality = null, province = null, location = Coordinate(45.0, 9.002),
+            expectedArrivalAt = null, dwellTimeSeconds = 1_200,
+        )
+        return testEngine().apply {
+            preview(base.copy(
+                fuelStops = listOf(stop),
+                totalTripDurationSeconds = base.drivingDurationSeconds + 1_200,
+                timing = base.timing.copy(
+                    refuelingStopCount = 1, totalRefuelingDwellSeconds = 1_200.0,
+                    totalTripDurationSeconds = base.drivingDurationSeconds + 1_200,
+                ),
+            ))
+            start()
+            updateLocation(fix(45.0, 9.002, 2_000, 90.0), Instant.ofEpochMilli(2_000))
+            assertEquals(NavigationPhase.AT_FUEL_STOP, state.value.phase)
+        }
+    }
+
+    @Test
     fun filtersBadFixesAndSmoothsGpsNoise() {
         val filter = LocationFilter()
         val first = fix(latitude = 45.0, longitude = 9.0, timeMillis = 1_000)
@@ -269,7 +327,7 @@ class NavigationEngineTest {
     }
 
     @Test
-    fun fuelStopVisitBlocksProgressCountsDownDwellAndResumesOnlyAfterConfirmation() {
+    fun fuelStopVisitKeepsDwellAfterOneDistantFixAndCanBeCompletedManually() {
         val base = route()
         val fuelStop = NavigationFuelStop(
             sequence = 1,
@@ -367,7 +425,7 @@ class NavigationEngineTest {
     }
 
     @Test
-    fun refuellingDelayPushesFinalEtaAfterPlannedDwellUntilOperatorConfirms() {
+    fun refuellingDelayPushesFinalEtaWhileStillAtStation() {
         val base = route()
         val stop = NavigationFuelStop(
             sequence = 1,

@@ -483,15 +483,22 @@ internal fun ActiveNavigationScreen(
                     ),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                MapIconControlButton(
-                    testTag = "navigation_options",
-                    contentDescription = "Opzioni",
-                    onClick = onOpenOptions,
+                Surface(
                     modifier = Modifier.padding(
                         bottom = navigationLeftControlBottomPadding(showTripSummary),
-                    ),
+                    ).testTag("navigation_arrival_time"),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                    contentColor = MaterialTheme.colorScheme.primary,
                 ) {
-                    Icon(Icons.Rounded.Settings, contentDescription = null)
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(ui.arrivalTime, style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text("Arrivo", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 MapModeControls(
@@ -526,6 +533,7 @@ internal fun ActiveNavigationScreen(
                     onForceRouteUpdate = onRequestRouteUpdate,
                     onRemoveNextStop = onRemoveNextStop,
                     onAddStop = onAddStop,
+                    onOpenOptions = onOpenOptions,
                     onStopNavigation = {
                         confirmStopNavigation = true
                         Log.i(
@@ -691,7 +699,7 @@ private fun CngGuidanceCard(
                         fontWeight = FontWeight.Bold,
                     )
                 }
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f, fill = false)) {
                     Text(
                         text = stop.name,
                         style = MaterialTheme.typography.titleSmall,
@@ -1092,6 +1100,7 @@ private fun MapModeControls(
     onRemoveNextStop: () -> Unit,
     onAddStop: () -> Unit,
     onStopNavigation: () -> Unit,
+    onOpenOptions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val policy = cameraMode.mapControlPolicy()
@@ -1140,19 +1149,12 @@ private fun MapModeControls(
             }
         }
         if (policy.showRecenter) {
-            Surface(
-                shape = CircleShape,
-                tonalElevation = 6.dp,
-                color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+            MapIconControlButton(
+                testTag = "navigation_recenter",
+                contentDescription = "Ricentra sulla posizione attuale",
+                onClick = onRecenter,
             ) {
-                CompassTextButton(
-                    onClick = onRecenter,
-                    modifier = Modifier.testTag("navigation_recenter"),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                ) { Text("Ricentra") }
+                Icon(Icons.Rounded.MyLocation, contentDescription = null)
             }
         }
         Column(
@@ -1209,6 +1211,16 @@ private fun MapModeControls(
                         },
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = null)
+                    }
+                    MapIconControlButton(
+                        testTag = "navigation_options",
+                        contentDescription = "Opzioni",
+                        onClick = {
+                            actionsExpanded = false
+                            onOpenOptions()
+                        },
+                    ) {
+                        Icon(Icons.Rounded.Settings, contentDescription = null)
                     }
                 }
             }

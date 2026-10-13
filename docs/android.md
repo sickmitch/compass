@@ -88,7 +88,7 @@ planned CNG waypoints and range policy. A process restart restores an explicitly
 result sets only after a network/server failure. The active screen distinguishes local cached-route
 guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
 ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.32` (`versionCode=78`).
+Android version is `0.28.33` (`versionCode=79`).
 
 The global Options screen persists a system/light/dark theme choice, the default voice-guidance
 state and whether new route calculations may use motorways. It reuses the existing private
@@ -355,6 +355,16 @@ The summary labels cycling duration as **Pedalata**. CNG and automotive traffic/
 automobile-only, and walking/cycling no longer trigger periodic traffic-refresh route queries.
 No new preference or server variable is needed. Rebuild the existing API container before testing
 the APK; see [the single cycling live gate](phases/android-0.28.32-cycling-navigation-gate.md).
+
+Android `0.28.33` (`versionCode=79`) centers compact pending-CNG cards at their content width,
+replaces the left settings control with destination ETA and moves settings into the chevron menu.
+Overview recentering uses the same neutral icon control as its neighbors. Map callouts use one
+inset, antialiased outline including the pointer, avoiding clipped strokes and pointer seams.
+An active refuelling visit automatically completes after two consecutive accepted GPS fixes whose
+distance from the station exceeds 50 m plus reported accuracy (accuracy must be at most 25 m).
+Rejected/uncertain/nearby fixes reset this evidence. Completion updates progress on the same fix,
+removes remaining dwell and immediately checkpoints the resumed session; manual completion remains.
+See [the navigation polish live gate](phases/android-0.28.33-navigation-polish-gate.md).
 
 Android `0.27.2` (`versionCode=44`) fixes cancellation of an uncommitted ordinary-stop draft.
 Opening **Aggiungi tappe** no longer marks the itinerary as containing a stop; leaving map search,

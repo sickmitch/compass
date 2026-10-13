@@ -867,17 +867,29 @@ private fun navigationCalloutBitmap(
         style = Paint.Style.STROKE
         strokeWidth = 2f * scale
     }
-    val body = RectF(0f, 0f, width, bodyHeight)
-    canvas.drawRoundRect(body, 12f * scale, 12f * scale, backgroundPaint)
-    canvas.drawRoundRect(body, 12f * scale, 12f * scale, strokePaint)
+    // Keep the entire stroke inside the bitmap and draw one continuous silhouette.
+    val inset = strokePaint.strokeWidth / 2f + scale
+    val body = RectF(inset, inset, width - inset, bodyHeight)
     val tailCenter = width / 2f
-    val tail = Path().apply {
-        moveTo(tailCenter - 7f * scale, bodyHeight - 1f)
-        lineTo(tailCenter, bodyHeight + tailHeight)
-        lineTo(tailCenter + 7f * scale, bodyHeight - 1f)
+    val radius = 12f * scale
+    val outline = Path().apply {
+        moveTo(body.left + radius, body.top)
+        lineTo(body.right - radius, body.top)
+        quadTo(body.right, body.top, body.right, body.top + radius)
+        lineTo(body.right, body.bottom - radius)
+        quadTo(body.right, body.bottom, body.right - radius, body.bottom)
+        lineTo(tailCenter + 7f * scale, body.bottom)
+        lineTo(tailCenter, body.bottom + tailHeight - inset)
+        lineTo(tailCenter - 7f * scale, body.bottom)
+        lineTo(body.left + radius, body.bottom)
+        quadTo(body.left, body.bottom, body.left, body.bottom - radius)
+        lineTo(body.left, body.top + radius)
+        quadTo(body.left, body.top, body.left + radius, body.top)
         close()
     }
-    canvas.drawPath(tail, backgroundPaint)
+    strokePaint.strokeJoin = Paint.Join.ROUND
+    canvas.drawPath(outline, backgroundPaint)
+    canvas.drawPath(outline, strokePaint)
     canvas.drawCircle(
         horizontalPadding + symbolDiameter / 2f,
         bodyHeight / 2f,
