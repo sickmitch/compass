@@ -1,6 +1,7 @@
 package org.compass.cng.data.api
 
 import java.io.IOException
+import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -198,6 +199,7 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = travelMode.costing,
             language = "it-IT",
+            departureAt = OffsetDateTime.now().toString(),
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
             allowHighways = allowHighways,
@@ -234,6 +236,7 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = travelMode.costing,
             language = "it-IT",
+            departureAt = OffsetDateTime.now().toString(),
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
             allowHighways = allowHighways,
@@ -264,6 +267,7 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = travelMode.costing,
             language = "it-IT",
+            departureAt = OffsetDateTime.now().toString(),
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
             allowHighways = allowHighways,
@@ -319,6 +323,7 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = "auto",
             language = "it-IT",
+            departureAt = OffsetDateTime.now().toString(),
             mimitStationId = mimitStationId,
             originHeadingDegrees = originDirection?.headingDegrees,
             originHeadingToleranceDegrees = originDirection?.headingToleranceDegrees,
@@ -386,6 +391,7 @@ class CompassApiClient(
             destination = destination.toDto(),
             costing = "auto",
             language = "it-IT",
+            departureAt = OffsetDateTime.now().toString(),
             mimitStationIds = mimitStationIds,
             effectiveCngRangeKm = effectiveCngRangeKm,
             estimatedRemainingCngRangeKm = estimatedRemainingCngRangeKm,
@@ -897,6 +903,7 @@ private data class RouteRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("departure_at") val departureAt: String,
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
@@ -910,6 +917,7 @@ private data class RouteWithIntermediateStopRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("departure_at") val departureAt: String,
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
@@ -923,6 +931,7 @@ private data class RouteWithIntermediateStopsRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("departure_at") val departureAt: String,
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
     val originHeadingToleranceDegrees: Int? = null,
@@ -975,6 +984,7 @@ private data class RouteWithCngStopRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("departure_at") val departureAt: String,
     @SerialName("mimit_station_id") val mimitStationId: String,
     @SerialName("origin_heading_degrees") val originHeadingDegrees: Double? = null,
     @SerialName("origin_heading_tolerance_degrees")
@@ -988,6 +998,7 @@ private data class RouteWithCngItineraryRequestDto(
     val destination: CoordinateDto,
     val costing: String,
     val language: String,
+    @SerialName("departure_at") val departureAt: String,
     @SerialName("mimit_station_ids") val mimitStationIds: List<String>,
     @SerialName("effective_cng_range_km") val effectiveCngRangeKm: Double,
     @SerialName("estimated_remaining_cng_range_km")

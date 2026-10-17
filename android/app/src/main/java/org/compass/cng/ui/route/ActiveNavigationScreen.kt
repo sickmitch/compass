@@ -467,11 +467,10 @@ internal fun ActiveNavigationScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = if (showTripSummary) {
-                    Alignment.CenterVertically
-                } else {
-                    Alignment.Bottom
-                },
+                // Keep every control on one bottom baseline while the trip
+                // summary is open; centering against the action stack makes
+                // the ETA pill and the map controls visibly drift apart.
+                verticalAlignment = Alignment.Bottom,
             ) {
                 VoiceGuidanceToggle(
                     enabled = state.voiceGuidanceEnabled,
@@ -1431,32 +1430,17 @@ private fun TripPanelActionLabel(label: String, pointsUp: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Text(label)
-        val color = androidx.compose.material3.LocalContentColor.current
-        Canvas(
+        Icon(
+            imageVector = if (pointsUp) {
+                Icons.Rounded.KeyboardArrowUp
+            } else {
+                Icons.Rounded.KeyboardArrowDown
+            },
+            contentDescription = null,
             modifier = Modifier
-                .size(14.dp)
+                .size(18.dp)
                 .clearAndSetSemantics {},
-        ) {
-            val upperY = size.height * 0.34f
-            val lowerY = size.height * 0.66f
-            val centerY = if (pointsUp) upperY else lowerY
-            val outerY = if (pointsUp) lowerY else upperY
-            val strokeWidth = 1.8.dp.toPx()
-            drawLine(
-                color = color,
-                start = androidx.compose.ui.geometry.Offset(size.width * 0.16f, outerY),
-                end = androidx.compose.ui.geometry.Offset(size.width * 0.5f, centerY),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = androidx.compose.ui.geometry.Offset(size.width * 0.5f, centerY),
-                end = androidx.compose.ui.geometry.Offset(size.width * 0.84f, outerY),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-        }
+        )
     }
 }
 
