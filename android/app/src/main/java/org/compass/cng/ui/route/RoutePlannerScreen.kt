@@ -9,11 +9,9 @@ import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.automirrored.rounded.DirectionsBike
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.AddLocationAlt
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.LocalGasStation
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
@@ -110,11 +108,7 @@ import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DestinationKind
 import org.compass.cng.domain.model.DestinationSuggestion
 import org.compass.cng.domain.model.ResolvedDestination
-import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.OpeningState
-import org.compass.cng.domain.model.PlaceKind
-import org.compass.cng.domain.model.PlaceSearchResult
-import org.compass.cng.domain.model.PlaceSearchSource
 import org.compass.cng.domain.model.PredictiveCngStation
 import org.compass.cng.domain.model.PredictiveCngSuggestion
 import org.compass.cng.domain.model.PredictiveItineraryStop
@@ -127,17 +121,9 @@ import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.vehicle.VehicleProfile
 import org.compass.cng.domain.vehicle.VehicleProfiles
 import org.compass.cng.navigation.NavigationRoute
-import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.NavigationPhase
-import org.compass.cng.navigation.NavigationConnectivity
 import org.compass.cng.navigation.NavigationRouteSource
 import org.compass.cng.navigation.NavigationState
-import org.compass.cng.navigation.GpsStatus
-import org.compass.cng.navigation.OffRouteStatus
-import org.compass.cng.navigation.ReroutingStatus
-import org.compass.cng.navigation.RouteUpdateFailure
-import org.compass.cng.navigation.RouteUpdateReason
-import org.compass.cng.ui.map.NavigationMap
 import org.compass.cng.ui.map.RouteMap
 import org.compass.cng.ui.map.RoutePointPickerMap
 import org.compass.cng.ui.theme.CompassButton
@@ -2025,297 +2011,6 @@ private fun NavigationPreviewContent(
 }
 
 @Composable
-private fun ActiveNavigationContent(
-    state: NavigationState,
-    onRequestRouteUpdate: () -> Unit,
-    onSimulateOffRoute: () -> Unit,
-    onReplaceUnavailableFuelStop: () -> Unit,
-    onStopNavigation: () -> Unit,
-) {
-    requireNotNull(state.route)
-    var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
-    var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
-    if (confirmFuelStopReplacement) {
-        val fuelStop = state.nextFuelStop?.stop
-        AlertDialog(
-            onDismissRequest = { confirmFuelStopReplacement = false },
-            title = { Text("Sostituire la tappa CNG?") },
-            text = {
-                Text(
-                    "Compass escluderà ${fuelStop?.name ?: "la stazione selezionata"} e " +
-                        "cercherà un itinerario completo compatibile con autonomia e riserva. " +
-                        "Se non esiste, manterrà la rotta corrente.",
-                )
-            },
-            confirmButton = {
-                CompassTextButton(
-                    onClick = {
-                        confirmFuelStopReplacement = false
-                        onReplaceUnavailableFuelStop()
-                    },
-                ) {
-                    Text("Cerca alternativa")
-                }
-            },
-            dismissButton = {
-                CompassTextButton(onClick = { confirmFuelStopReplacement = false }) {
-                    Text("Annulla")
-                }
-            },
-        )
-    }
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.62f),
-        ) {
-            NavigationMap(
-                state = state,
-                cameraMode = cameraMode,
-                modifier = Modifier.fillMaxSize(),
-            )
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                    .align(Alignment.TopCenter),
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        state.currentManeuver?.instruction ?: "Prosegui sul percorso",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    state.distanceToNextManeuverMeters?.let {
-                        Text("Tra ${formatDistance(it)}")
-                    }
-                    state.currentRoadName?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (cameraMode == NavigationCameraMode.OVERVIEW) {
-                    CompassButton(onClick = { cameraMode = NavigationCameraMode.OVERVIEW }) {
-                        Text("Panoramica")
-                    }
-                } else {
-                    CompassOutlinedButton(onClick = { cameraMode = NavigationCameraMode.OVERVIEW }) {
-                        Text("Panoramica")
-                    }
-                }
-                if (cameraMode == NavigationCameraMode.FOLLOW) {
-                    CompassButton(onClick = { cameraMode = NavigationCameraMode.FOLLOW }) {
-                        Text("Ricentra")
-                    }
-                } else {
-                    CompassOutlinedButton(onClick = { cameraMode = NavigationCameraMode.FOLLOW }) {
-                        Text("Ricentra")
-                    }
-                }
-            }
-        }
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                LinearProgressIndicator(
-                    progress = { state.routeProgressFraction.toFloat() },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    SummaryValue(
-                        "Rimanenti",
-                        state.distanceRemainingMeters?.let(::formatDistance) ?: "—",
-                    )
-                    SummaryValue(
-                        "Durata",
-                        state.totalDurationRemainingSeconds?.let(::formatDuration) ?: "—",
-                    )
-                    SummaryValue(
-                        "Arrivo",
-                        state.estimatedArrivalAt?.let {
-                            ACTIVE_NAVIGATION_TIME_FORMATTER.format(it)
-                        } ?: "—",
-                    )
-                }
-                Text(
-                    text = gpsStatusLabel(state.gpsStatus),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (state.gpsStatus == GpsStatus.ACTIVE) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-                if (state.routeSource == NavigationRouteSource.CACHE) {
-                    Text(
-                        "Navigazione disponibile sulla rotta salvata nel dispositivo.",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    if (state.connectivity == NavigationConnectivity.ONLINE) {
-                        trafficTimingText(state.route.timing)
-                    } else {
-                        "Traffico non aggiornabile · ETA calcolata sulla rotta locale"
-                    },
-                    color = if (state.route.timing.trafficAware) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (state.connectivity != NavigationConnectivity.ONLINE) {
-                    Text(
-                        when (state.connectivity) {
-                            NavigationConnectivity.OFFLINE ->
-                                "Rete assente: guida locale attiva sulla rotta scaricata."
-                            NavigationConnectivity.RECOVERING ->
-                                "Connessione ripristinata: aggiornamento sicuro in corso."
-                            NavigationConnectivity.REROUTING_UNAVAILABLE ->
-                                "Compass non raggiungibile: guida locale attiva, ricalcolo non disponibile."
-                            NavigationConnectivity.ONLINE -> error("handled above")
-                        },
-                        color = MaterialTheme.compassSemanticColors.onWarningContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if ((state.routeSource == NavigationRouteSource.CACHE ||
-                        state.connectivity != NavigationConnectivity.ONLINE) &&
-                    state.route.fuelStops.isNotEmpty()
-                ) {
-                    Text(
-                        "Dati CNG in cache: prezzi e orari non sono presentati come aggiornati.",
-                        color = MaterialTheme.compassSemanticColors.onWarningContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                state.route.gasolineFallback?.let { fallback ->
-                    Text(
-                        "Fallback benzina attivo · uso stimato fino a " +
-                            formatKilometers(fallback.requiredGasolineRangeKm),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                if (state.offRouteStatus != OffRouteStatus.ON_ROUTE) {
-                    Text(
-                        if (state.offRouteStatus == OffRouteStatus.OFF_ROUTE) {
-                            "Fuori percorso confermato. Ricalcolo tramite Compass…"
-                        } else {
-                            "Verifica posizione rispetto al percorso…"
-                        },
-                        color = MaterialTheme.compassSemanticColors.onWarningContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                when (state.reroutingStatus) {
-                    ReroutingStatus.IN_PROGRESS -> Text(
-                        if (state.routeUpdateReason == RouteUpdateReason.FUEL_STOP_UNAVAILABLE) {
-                            "Cerco una tappa CNG alternativa sicura…"
-                        } else {
-                            "Aggiornamento del percorso in corso…"
-                        },
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    ReroutingStatus.FAILED -> Text(
-                        when (state.routeUpdateFailure) {
-                            RouteUpdateFailure.NO_SAFE_FUEL_ALTERNATIVE ->
-                                "Nessuna alternativa CNG sicura: mantengo la tappa corrente."
-                            RouteUpdateFailure.FUEL_RANGE_PLAN_REQUIRED ->
-                                "Per sostituire questa tappa serve un piano autonomia predittivo."
-                            RouteUpdateFailure.NETWORK_OR_SERVER,
-                            null,
-                            -> "Ricalcolo non disponibile: continuo sulla rotta scaricata."
-                        },
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    ReroutingStatus.IDLE -> Unit
-                }
-                state.lastSpokenInstruction?.let {
-                    Text(
-                        "Voce: $it",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                state.nextFuelStop?.let { fuel ->
-                    Text(
-                        "Prossimo rifornimento: ${fuel.stop.name ?: "MIMIT ${fuel.stop.mimitStationId}"} · " +
-                            formatDistance(fuel.distanceRemainingMeters),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    CompassOutlinedButton(
-                        onClick = { confirmFuelStopReplacement = true },
-                        enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Salta / sostituisci tappa CNG")
-                    }
-                }
-                if (BuildConfig.DEBUG) {
-                    CompassOutlinedButton(
-                        onClick = onRequestRouteUpdate,
-                        enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Ricalcola percorso (debug)")
-                    }
-                    CompassOutlinedButton(
-                        onClick = onSimulateOffRoute,
-                        enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Simula deviazione (debug)")
-                    }
-                }
-                CompassOutlinedButton(
-                    onClick = onStopNavigation,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Termina navigazione")
-                }
-            }
-        }
-    }
-}
-
-private fun gpsStatusLabel(status: GpsStatus): String = when (status) {
-    GpsStatus.UNAVAILABLE -> "GPS non disponibile"
-    GpsStatus.ACQUIRING -> "Ricerca del segnale GPS…"
-    GpsStatus.ACTIVE -> "GPS attivo · posizione agganciata al percorso"
-    GpsStatus.LOST -> "Segnale GPS temporaneamente perso"
-}
-
-@Composable
 private fun ConfigureRouteContent(
     route: RoutePreview?,
     travelMode: RouteTravelMode,
@@ -3472,53 +3167,6 @@ private fun CompactPlanField(
 }
 
 @Composable
-private fun VehicleProfileChoiceButton(
-    profile: VehicleProfile,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    if (selected) {
-        CompassButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(profile.name, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "CNG ${formatKilometers(profile.effectiveCngRangeKm)} · " +
-                        "riserva ${formatKilometers(profile.cngReserveKm)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    } else {
-        CompassOutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(profile.name, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "CNG ${formatKilometers(profile.effectiveCngRangeKm)} · " +
-                        "riserva ${formatKilometers(profile.cngReserveKm)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun VehicleCustomValuesChoiceButton(
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    if (selected) {
-        CompassButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text("Nessun profilo · valori personalizzati")
-        }
-    } else {
-        CompassOutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text("Nessun profilo · valori personalizzati")
-        }
-    }
-}
-
-@Composable
 private fun ConfigureCngContent(
     route: RoutePreview,
     rangeInput: String,
@@ -4130,31 +3778,6 @@ private fun SummaryValue(label: String, value: String) {
 }
 
 @Composable
-private fun ManeuverRow(number: Int, maneuver: Maneuver) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            number.toString(),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(maneuver.instruction, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(
-                "${formatDistance(maneuver.distanceMeters)} · ${formatDuration(maneuver.durationSeconds)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
 private fun RankingBadge(rank: Int) {
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
@@ -4341,10 +3964,6 @@ private fun formatKilometers(kilometers: Double): String = String.format(
     kilometers,
 )
 
-private fun formatCacheTime(epochMillis: Long): String = DateTimeFormatter.ofPattern("dd/MM HH:mm")
-    .withZone(ZoneId.systemDefault())
-    .format(java.time.Instant.ofEpochMilli(epochMillis))
-
 private fun formatSignedKilometers(kilometers: Double): String = String.format(
     Locale.ITALY,
     "%+.1f km",
@@ -4353,10 +3972,6 @@ private fun formatSignedKilometers(kilometers: Double): String = String.format(
 
 private fun formatTime(value: OffsetDateTime): String = DateTimeFormatter.ofPattern("HH:mm")
     .format(value.atZoneSameInstant(ZoneId.systemDefault()))
-
-private val ACTIVE_NAVIGATION_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter
-    .ofPattern("HH:mm")
-    .withZone(ZoneId.systemDefault())
 
 private fun formatDateTime(value: OffsetDateTime): String =
     DateTimeFormatter.ofPattern("dd/MM HH:mm")

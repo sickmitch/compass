@@ -43,14 +43,13 @@ def test_phase12_installer_builds_replaces_and_cold_launches() -> None:
     assert "ANDROID 0.22.1 INSTALLED" in content
 
 
-def test_phase12_visit_is_engine_owned_and_requires_explicit_completion() -> None:
+def test_phase12_visit_is_engine_owned_and_keeps_manual_completion() -> None:
     engine = ENGINE.read_text()
     service = SERVICE.read_text()
 
     assert "activeFuelStopVisit" in engine
     assert "remainingFuelDwellSeconds" in engine
     assert "fun completeFuelStop" in engine
-    assert "GPS proximity alone never resumes navigation" in engine
     assert "ACTION_COMPLETE_FUEL_STOP" in service
     assert "demo replay paused for CNG refuelling" in service
 

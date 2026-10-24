@@ -95,6 +95,12 @@ automatic vehicle tank telemetry or automatic inference that a station is unexpe
 
 Python 3.12+ and Docker with Compose are required.
 
+Fixture-based Python tests ignore the operator's `.env` and inherited application settings;
+tests explicitly opt into authentication, traffic or provider configuration when needed.
+Use `.venv/bin/pytest -m 'not integration'` for validation without an isolated PostGIS database.
+The cleanup scope and device acceptance checklist are documented in
+[the 0.28.38 cleanup gate](docs/phases/android-0.28.38-cleanup-gate.md).
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'

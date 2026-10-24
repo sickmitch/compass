@@ -1154,7 +1154,3 @@ def _point_to_segment_distance_meters(
     closest_x = start_x + projection * segment_x
     closest_y = start_y + projection * segment_y
     return sqrt(closest_x * closest_x + closest_y * closest_y)
-
-
-def _path_length(coordinates: list[Coordinate]) -> float:
-    return sum(_distance_meters(a, b) for a, b in zip(coordinates, coordinates[1:], strict=False))

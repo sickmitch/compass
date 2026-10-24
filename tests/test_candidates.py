@@ -13,6 +13,7 @@ from compass.candidates.domain import (
 )
 from compass.candidates.geometry import (
     decode_polyline6,
+    encode_polyline5,
     encode_polyline6,
     route_linestring_wkt,
     waypoint_route_as_base_route,
@@ -134,6 +135,23 @@ def test_polyline6_encoder_preserves_coordinate_order_and_precision() -> None:
     )
 
     assert decode_polyline6(encode_polyline6(coordinates), max_points=10) == coordinates
+
+
+def test_polyline5_encoder_preserves_e5_wire_format() -> None:
+    coordinates = (
+        Coordinate(latitude=38.5, longitude=-120.2),
+        Coordinate(latitude=40.7, longitude=-120.95),
+        Coordinate(latitude=43.252, longitude=-126.453),
+    )
+
+    assert encode_polyline5(coordinates) == "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+
+
+@pytest.mark.parametrize("encoder", [encode_polyline5, encode_polyline6])
+@pytest.mark.parametrize("coordinates", [(), (Coordinate(45.0, 11.0),)])
+def test_polyline_encoders_require_two_coordinates(encoder, coordinates) -> None:
+    with pytest.raises(ValueError, match="at least two coordinates"):
+        encoder(coordinates)
 
 
 def test_waypoint_route_joins_legs_through_selected_stop() -> None:

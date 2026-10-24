@@ -55,7 +55,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -92,7 +91,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import org.compass.cng.BuildConfig
-import org.compass.cng.navigation.GpsStatus
 import org.compass.cng.navigation.NavigationCameraConfig
 import org.compass.cng.navigation.NavigationCameraMode
 import org.compass.cng.navigation.mapControlPolicy
@@ -1272,70 +1270,6 @@ private fun MapIconControlButton(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             content()
         }
-    }
-}
-
-@Composable
-private fun OrientationGlyph(northUp: Boolean) {
-    if (northUp) {
-        Text(
-            text = "N",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Black,
-        )
-        return
-    }
-    val color = LocalContentColor.current
-    Canvas(modifier = Modifier.size(24.dp)) {
-        val tip = Offset(size.width / 2f, size.height * 0.18f)
-        drawLine(
-            color,
-            Offset(size.width / 2f, size.height * 0.82f),
-            tip,
-            3.dp.toPx(),
-            StrokeCap.Round,
-        )
-        drawLine(
-            color,
-            tip,
-            Offset(size.width * 0.28f, size.height * 0.42f),
-            3.dp.toPx(),
-            StrokeCap.Round,
-        )
-        drawLine(
-            color,
-            tip,
-            Offset(size.width * 0.72f, size.height * 0.42f),
-            3.dp.toPx(),
-            StrokeCap.Round,
-        )
-    }
-}
-
-@Composable
-private fun RouteOverviewGlyph() {
-    val color = LocalContentColor.current
-    Canvas(modifier = Modifier.size(25.dp)) {
-        val start = Offset(size.width * 0.20f, size.height * 0.78f)
-        val bend = Offset(size.width * 0.43f, size.height * 0.42f)
-        val end = Offset(size.width * 0.80f, size.height * 0.20f)
-        drawLine(color, start, bend, 3.dp.toPx(), StrokeCap.Round)
-        drawLine(color, bend, end, 3.dp.toPx(), StrokeCap.Round)
-        drawCircle(color, 3.5.dp.toPx(), start)
-        drawCircle(color, 3.5.dp.toPx(), end)
-    }
-}
-
-@Composable
-private fun StopNavigationGlyph() {
-    val color = LocalContentColor.current
-    Canvas(modifier = Modifier.size(24.dp)) {
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(size.width * 0.22f, size.height * 0.22f),
-            size = androidx.compose.ui.geometry.Size(size.width * 0.56f, size.height * 0.56f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
-        )
     }
 }
 

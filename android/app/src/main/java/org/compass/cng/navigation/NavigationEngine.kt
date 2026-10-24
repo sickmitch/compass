@@ -4,7 +4,6 @@ import java.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.compass.cng.domain.model.Maneuver
 import org.compass.cng.domain.model.RouteTravelMode
 
 data class NavigationEnginePolicy(

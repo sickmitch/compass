@@ -47,29 +47,23 @@ def encode_polyline5(coordinates: tuple[Coordinate, ...]) -> str:
     """Encode validated WGS84 coordinates using Google's E5 polyline format."""
     if len(coordinates) < 2:
         raise ValueError("A Google route polyline requires at least two coordinates")
-    encoded: list[str] = []
-    previous_latitude = 0
-    previous_longitude = 0
-    for coordinate in coordinates:
-        latitude = round(coordinate.latitude * 100_000)
-        longitude = round(coordinate.longitude * 100_000)
-        encoded.append(_encode_value(latitude - previous_latitude))
-        encoded.append(_encode_value(longitude - previous_longitude))
-        previous_latitude = latitude
-        previous_longitude = longitude
-    return "".join(encoded)
+    return _encode_polyline(coordinates, precision=100_000)
 
 
 def encode_polyline6(coordinates: tuple[Coordinate, ...]) -> str:
     """Encode validated WGS84 coordinates using Valhalla's E6 format."""
     if len(coordinates) < 2:
         raise ValueError("A Valhalla route polyline requires at least two coordinates")
+    return _encode_polyline(coordinates, precision=1_000_000)
+
+
+def _encode_polyline(coordinates: tuple[Coordinate, ...], *, precision: int) -> str:
     encoded: list[str] = []
     previous_latitude = 0
     previous_longitude = 0
     for coordinate in coordinates:
-        latitude = round(coordinate.latitude * 1_000_000)
-        longitude = round(coordinate.longitude * 1_000_000)
+        latitude = round(coordinate.latitude * precision)
+        longitude = round(coordinate.longitude * precision)
         encoded.append(_encode_value(latitude - previous_latitude))
         encoded.append(_encode_value(longitude - previous_longitude))
         previous_latitude = latitude
