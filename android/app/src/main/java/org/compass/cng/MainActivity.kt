@@ -12,6 +12,8 @@ import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
+import android.app.PictureInPictureParams
+import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -31,6 +33,7 @@ import org.compass.cng.navigation.NavigationForegroundService
 import org.compass.cng.navigation.FollowLocationPolicy
 import org.compass.cng.navigation.FollowLocationStabilizer
 import org.compass.cng.navigation.NavigationLocation
+import org.compass.cng.navigation.NavigationPhase
 import org.compass.cng.ui.route.PlannerStage
 import org.compass.cng.ui.route.RoutePlannerScreen
 import org.compass.cng.ui.route.RoutePlannerViewModel
@@ -258,6 +261,22 @@ class MainActivity : ComponentActivity() {
             startFollowLocationUpdates()
         }
     }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isActiveNavigation()) {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build(),
+            )
+        }
+    }
+
+    private fun isActiveNavigation(): Boolean =
+        routePlannerViewModel.uiState.value.stage == PlannerStage.NAVIGATION_PREVIEW &&
+            routePlannerViewModel.navigationState.value.phase != NavigationPhase.ROUTE_PREVIEW &&
+            routePlannerViewModel.navigationState.value.phase != NavigationPhase.IDLE
 
     override fun onStop() {
         stopFollowLocationUpdates()

@@ -26,12 +26,15 @@ data class NavigationEnginePolicy(
     val atFuelStopDistanceMeters: Double = 30.0,
     val approachingIntermediateStopDistanceMeters: Double = 500.0,
     val atIntermediateStopDistanceMeters: Double = 30.0,
-    val intermediateStopDepartureDistanceMeters: Double = 60.0,
-    val intermediateStopDepartureConsecutiveFixes: Int = 2,
+    val intermediateStopDepartureDistanceMeters: Double = 50.0,
+    val intermediateStopDepartureConsecutiveFixes: Int = 1,
+    val intermediateStopDepartureCheckIntervalMillis: Long = 10_000L,
+    val intermediateStopDepartureMaximumAccuracyMeters: Double = 25.0,
     val fuelStopDepartureDistanceMeters: Double = 50.0,
     val fuelStopDepartureMaximumAccuracyMeters: Double = 25.0,
-    val fuelStopDepartureConsecutiveFixes: Int = 2,
-    val intermediateStopDepartureMinimumSpeedMetersPerSecond: Double = 1.0,
+    val fuelStopDepartureConsecutiveFixes: Int = 1,
+    val fuelStopDepartureCheckIntervalMillis: Long = 10_000L,
+    val intermediateStopDepartureMinimumSpeedMetersPerSecond: Double = 0.0,
     val minimumManeuverApproachMeters: Double = 80.0,
     val maneuverApproachSeconds: Double = 8.0,
 ) {
@@ -52,9 +55,12 @@ data class NavigationEnginePolicy(
         require(atIntermediateStopDistanceMeters > 0.0)
         require(intermediateStopDepartureDistanceMeters > atIntermediateStopDistanceMeters)
         require(intermediateStopDepartureConsecutiveFixes > 0)
+        require(intermediateStopDepartureCheckIntervalMillis > 0L)
+        require(intermediateStopDepartureMaximumAccuracyMeters > 0.0)
         require(fuelStopDepartureDistanceMeters > 0.0)
         require(fuelStopDepartureMaximumAccuracyMeters > 0.0)
         require(fuelStopDepartureConsecutiveFixes > 0)
+        require(fuelStopDepartureCheckIntervalMillis > 0L)
         require(intermediateStopDepartureMinimumSpeedMetersPerSecond >= 0.0)
     }
 }
@@ -75,8 +81,6 @@ class NavigationEngine(
         arrivalDistanceMeters = 12.0,
         approachingIntermediateStopDistanceMeters = 100.0,
         atIntermediateStopDistanceMeters = 15.0,
-        intermediateStopDepartureDistanceMeters = 25.0,
-        intermediateStopDepartureMinimumSpeedMetersPerSecond = 0.3,
         minimumManeuverApproachMeters = 30.0,
         maneuverApproachSeconds = 10.0,
     ),
@@ -93,8 +97,6 @@ class NavigationEngine(
         arrivalDistanceMeters = 15.0,
         approachingIntermediateStopDistanceMeters = 200.0,
         atIntermediateStopDistanceMeters = 20.0,
-        intermediateStopDepartureDistanceMeters = 35.0,
-        intermediateStopDepartureMinimumSpeedMetersPerSecond = 0.7,
         minimumManeuverApproachMeters = 50.0,
         maneuverApproachSeconds = 10.0,
     ),
@@ -123,7 +125,9 @@ class NavigationEngine(
     private val completedFuelStopSequences = mutableSetOf<Int>()
     private val completedIntermediateStopSequences = mutableSetOf<Int>()
     private var consecutiveIntermediateDepartureFixes = 0
+    private var lastIntermediateStopDepartureCheckAtEpochMillis: Long? = null
     private var consecutiveFuelDepartureFixes = 0
+    private var lastFuelStopDepartureCheckAtEpochMillis: Long? = null
     private var lastReliableDistanceAlongGeometryMeters: Double? = null
     private var phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
 
@@ -282,6 +286,7 @@ class NavigationEngine(
     }
 
     fun clear() {
+        lastIntermediateStopDepartureCheckAtEpochMillis = null
         consecutiveFuelDepartureFixes = 0
         locationFilter.reset()
         matcher = null
@@ -294,6 +299,7 @@ class NavigationEngine(
         intermediateStopDistances = emptyList()
         completedFuelStopSequences.clear()
         completedIntermediateStopSequences.clear()
+        lastFuelStopDepartureCheckAtEpochMillis = null
         consecutiveIntermediateDepartureFixes = 0
         lastReliableDistanceAlongGeometryMeters = null
         phaseBehindRouteUpdate = NavigationPhase.NAVIGATING
@@ -320,12 +326,27 @@ class NavigationEngine(
         if (previousState.activeFuelStopVisit != null) {
             val visit = requireNotNull(previousState.activeFuelStopVisit)
             // Use accepted GPS, not the puck pinned to the station while refuelling.
-            // Two accurate fixes beyond 50 m plus their uncertainty reject parking drift.
-            val hasDeparted = rawLocation.accuracyMeters <=
-                policy.fuelStopDepartureMaximumAccuracyMeters &&
-                distanceMeters(rawLocation.coordinate, visit.stop.location) -
-                rawLocation.accuracyMeters > policy.fuelStopDepartureDistanceMeters
-            consecutiveFuelDepartureFixes = if (hasDeparted) consecutiveFuelDepartureFixes + 1 else 0
+            // Check departure at a deliberate cadence so parked GPS jitter does not
+            // complete the stop, while a real departure resumes promptly.
+            val nowEpochMillis = now.toEpochMilli()
+            val shouldCheckDeparture = lastFuelStopDepartureCheckAtEpochMillis == null ||
+                nowEpochMillis - requireNotNull(lastFuelStopDepartureCheckAtEpochMillis) >=
+                policy.fuelStopDepartureCheckIntervalMillis
+            val hasDeparted = if (shouldCheckDeparture) {
+                lastFuelStopDepartureCheckAtEpochMillis = nowEpochMillis
+                rawLocation.accuracyMeters <= policy.fuelStopDepartureMaximumAccuracyMeters &&
+                    distanceMeters(rawLocation.coordinate, visit.stop.location) >
+                    policy.fuelStopDepartureDistanceMeters
+            } else {
+                false
+            }
+            consecutiveFuelDepartureFixes = if (hasDeparted) {
+                consecutiveFuelDepartureFixes + 1
+            } else if (shouldCheckDeparture) {
+                0
+            } else {
+                consecutiveFuelDepartureFixes
+            }
             lastAcceptedFixAtMillis = filtered.timestampEpochMillis
             mutableState.value = refuellingStateAt(
                 state = previousState.copy(
@@ -344,18 +365,27 @@ class NavigationEngine(
         if (previousState.activeIntermediateStopVisit != null) {
             lastAcceptedFixAtMillis = filtered.timestampEpochMillis
             val visit = requireNotNull(previousState.activeIntermediateStopVisit)
-            val departureThreshold = maxOf(
-                policy.intermediateStopDepartureDistanceMeters,
-                filtered.accuracyMeters * 2.0,
-            )
-            val hasDeparted = distanceMeters(filtered.coordinate, visit.stop.location) >
-                departureThreshold &&
-                (filtered.speedMetersPerSecond ?: 0.0) >=
-                policy.intermediateStopDepartureMinimumSpeedMetersPerSecond
+            val nowEpochMillis = now.toEpochMilli()
+            val lastCheck = lastIntermediateStopDepartureCheckAtEpochMillis
+                ?: visit.arrivedAtEpochMillis
+            val shouldCheckDeparture = nowEpochMillis - lastCheck >=
+                policy.intermediateStopDepartureCheckIntervalMillis
+            val hasDeparted = if (shouldCheckDeparture) {
+                lastIntermediateStopDepartureCheckAtEpochMillis = nowEpochMillis
+                rawLocation.accuracyMeters <= policy.intermediateStopDepartureMaximumAccuracyMeters &&
+                    distanceMeters(rawLocation.coordinate, visit.stop.location) >
+                    policy.intermediateStopDepartureDistanceMeters &&
+                    (rawLocation.speedMetersPerSecond ?: 0.0) >=
+                    policy.intermediateStopDepartureMinimumSpeedMetersPerSecond
+            } else {
+                false
+            }
             consecutiveIntermediateDepartureFixes = if (hasDeparted) {
                 consecutiveIntermediateDepartureFixes + 1
-            } else {
+            } else if (shouldCheckDeparture) {
                 0
+            } else {
+                consecutiveIntermediateDepartureFixes
             }
             if (
                 consecutiveIntermediateDepartureFixes >=
@@ -365,6 +395,7 @@ class NavigationEngine(
                     completionMode = NavigationIntermediateStopCompletionMode.GPS_DEPARTURE,
                     nowEpochMillis = now.toEpochMilli(),
                 )
+                previousState = mutableState.value
             } else {
                 mutableState.value = previousState.copy(
                     phase = NavigationPhase.AT_INTERMEDIATE_STOP,
@@ -373,8 +404,8 @@ class NavigationEngine(
                     offRouteStatus = OffRouteStatus.ON_ROUTE,
                     offRouteDurationMillis = 0L,
                 )
+                return
             }
-            return
         }
         val routeMatcher = requireNotNull(matcher)
         val match = routeMatcher.match(filtered)
@@ -468,6 +499,9 @@ class NavigationEngine(
                 remainingDwellSeconds = stop.dwellTimeSeconds.toDouble(),
             )
         }
+        if (activeVisit != null && previousState.activeFuelStopVisit == null) {
+            lastFuelStopDepartureCheckAtEpochMillis = now.toEpochMilli()
+        }
         val reachedIntermediateStop = if (
             offRouteStatus == OffRouteStatus.ON_ROUTE && activeVisit == null
         ) {
@@ -476,6 +510,7 @@ class NavigationEngine(
             null
         }
         val activeIntermediateVisit = reachedIntermediateStop?.let { (stop, _) ->
+            lastIntermediateStopDepartureCheckAtEpochMillis = now.toEpochMilli()
             NavigationIntermediateStopVisit(stop, now.toEpochMilli())
         }
         val authoritativeDistanceAlong = reachedFuelStop?.second
@@ -758,6 +793,7 @@ class NavigationEngine(
         val visit = current.activeFuelStopVisit ?: return false
         val route = current.route ?: return false
         consecutiveFuelDepartureFixes = 0
+        lastFuelStopDepartureCheckAtEpochMillis = null
         completedFuelStopSequences += visit.stop.sequence
         val routeMatcher = requireNotNull(matcher)
         val distanceAlong = lastReliableDistanceAlongGeometryMeters ?: 0.0
@@ -809,6 +845,7 @@ class NavigationEngine(
         val route = current.route ?: return false
         completedIntermediateStopSequences += visit.stop.sequence
         consecutiveIntermediateDepartureFixes = 0
+        lastIntermediateStopDepartureCheckAtEpochMillis = null
         val routeMatcher = requireNotNull(matcher)
         val distanceAlong = lastReliableDistanceAlongGeometryMeters ?: 0.0
         val progress = intermediateStopProgressAt(
@@ -870,7 +907,9 @@ class NavigationEngine(
     }
 
     private fun resetTracking(route: NavigationRoute) {
+        lastIntermediateStopDepartureCheckAtEpochMillis = null
         consecutiveFuelDepartureFixes = 0
+        lastFuelStopDepartureCheckAtEpochMillis = null
         locationFilter.reset()
         headingController.reset()
         matcher = RouteMatcher(route.geometry, travelMode = route.travelMode)

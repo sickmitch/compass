@@ -74,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -238,6 +239,17 @@ internal fun ActiveNavigationScreen(
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
     val ui = state.toDrivingUiModel()
+    var progressRouteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var displayedRouteProgress by rememberSaveable { mutableStateOf(0f) }
+    LaunchedEffect(state.route?.routeId, ui.progress) {
+        val routeId = state.route?.routeId
+        if (routeId != progressRouteId) {
+            progressRouteId = routeId
+            displayedRouteProgress = ui.progress
+        } else if (ui.progress > displayedRouteProgress) {
+            displayedRouteProgress = ui.progress
+        }
+    }
     LaunchedEffect(ui.isRouteRecalculationInProgress, state.routeUpdateReason) {
         Log.i(
             NAVIGATION_UI_LOG_TAG,
@@ -482,23 +494,13 @@ internal fun ActiveNavigationScreen(
                     ),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Surface(
+                ArrivalEtaBadge(
+                    arrivalTime = ui.arrivalTime,
+                    progress = displayedRouteProgress,
                     modifier = Modifier.padding(
                         bottom = navigationLeftControlBottomPadding(showTripSummary),
-                    ).testTag("navigation_arrival_time"),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(ui.arrivalTime, style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold, maxLines = 1)
-                        Text("Arrivo", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
+                    ),
+                )
                 Spacer(modifier = Modifier.weight(1f))
                 MapModeControls(
                     cameraMode = cameraMode,
@@ -1334,6 +1336,71 @@ private fun StopNavigationGlyph() {
             size = androidx.compose.ui.geometry.Size(size.width * 0.56f, size.height * 0.56f),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
         )
+    }
+}
+
+@Composable
+private fun ArrivalEtaBadge(
+    arrivalTime: String,
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val ringColor = Color(0xFFFF8A80)
+    Box(
+        modifier = modifier
+            .size(72.dp)
+            .testTag("navigation_arrival_time"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 6.dp.toPx()
+            val inset = stroke / 2f
+            val arcSize = androidx.compose.ui.geometry.Size(
+                width = size.width - stroke,
+                height = size.height - stroke,
+            )
+            drawArc(
+                color = ringColor.copy(alpha = 0.22f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+            )
+            drawArc(
+                color = ringColor,
+                startAngle = -90f,
+                sweepAngle = 360f * progress.coerceIn(0f, 1f),
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = stroke,
+                    cap = StrokeCap.Round,
+                ),
+            )
+        }
+        Surface(
+            modifier = Modifier.size(60.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+            contentColor = MaterialTheme.colorScheme.primary,
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = arrivalTime,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text("ETA", style = MaterialTheme.typography.labelSmall)
+            }
+        }
     }
 }
 

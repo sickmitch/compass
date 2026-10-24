@@ -13,12 +13,12 @@ import org.junit.Test
 
 class NavigationEngineTest {
     @Test
-    fun fuelStopAutomaticallyCompletesAfterTwoAccurateFixesBeyond50Meters() {
+    fun fuelStopAutomaticallyCompletesAfterOneAccurateFixBeyond50MetersAtTenSecondCheck() {
         val engine = engineAtFuelStop()
         val before = engine.state.value.routeProgressFraction
-        engine.updateLocation(fix(45.0, 9.0030, 12_000, 90.0), Instant.ofEpochMilli(12_000))
+        engine.updateLocation(fix(45.0, 9.0021, 3_000, 90.0), Instant.ofEpochMilli(3_000))
         assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
-        engine.updateLocation(fix(45.0, 9.0032, 13_000, 90.0), Instant.ofEpochMilli(13_000))
+        engine.updateLocation(fix(45.0, 9.0030, 12_000, 90.0), Instant.ofEpochMilli(12_000))
         val resumed = engine.state.value
         assertEquals(null, resumed.activeFuelStopVisit)
         assertEquals("departure-test", resumed.lastCompletedFuelStop?.mimitStationId)
@@ -30,22 +30,22 @@ class NavigationEngineTest {
     }
 
     @Test
-    fun fuelStopDepartureRejectsDriftPoorAccuracyAndInterruptedEvidence() {
+    fun fuelStopDepartureWaitsForTenSecondCheckAndRejectsDrift() {
         val engine = engineAtFuelStop()
         val fixes = listOf(
-            fix(45.0, 9.0025, 10_000, 90.0), // less than 50 m
-            fix(45.0, 9.0025, 11_000, 90.0),
-            fix(45.0, 9.0030, 12_000, 90.0), // only one reliable distant fix
-            fix(45.0, 9.0032, 13_000, 90.0).copy(accuracyMeters = 50.0),
-            fix(45.0, 9.0032, 14_000, 90.0),
-            fix(45.0, 9.0032, 15_000, 90.0).copy(accuracyMeters = 120.0),
-            fix(45.0, 9.0032, 16_000, 90.0),
+            fix(45.0, 9.0025, 3_000, 90.0), // less than 50 m
+            fix(45.0, 9.0025, 11_000, 90.0), // scheduled check, still parked
         )
         fixes.forEach { location ->
             engine.updateLocation(location, Instant.ofEpochMilli(location.timestampEpochMillis))
             assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
             assertEquals(null, engine.state.value.lastCompletedFuelStop)
         }
+        engine.updateLocation(
+            fix(45.0, 9.0030, 21_000, 90.0),
+            Instant.ofEpochMilli(21_000),
+        )
+        assertEquals(null, engine.state.value.activeFuelStopVisit)
     }
 
     private fun engineAtFuelStop(): NavigationEngine {
@@ -644,32 +644,62 @@ class NavigationEngineTest {
     }
 
     @Test
-    fun intermediateStopResumesAfterTwoReliableDepartureFixes() {
-        val base = route()
-        val engine = testEngine()
-        engine.preview(
-            base.copy(
-                intermediateStops = listOf(
-                    NavigationIntermediateStop(1, Coordinate(45.0, 9.0020)),
+    fun intermediateStopResumesOnlyAtTenSecondCheckInEveryTravelMode() {
+        org.compass.cng.domain.model.RouteTravelMode.entries.forEach { mode ->
+            val base = route()
+            val engine = testEngine()
+            engine.preview(
+                base.copy(
+                    travelMode = mode,
+                    intermediateStops = listOf(
+                        NavigationIntermediateStop(1, Coordinate(45.0, 9.0020)),
+                    ),
                 ),
-            ),
-        )
+            )
+            engine.start()
+            engine.updateLocation(fix(45.0, 9.0020, 2_000, 90.0), Instant.ofEpochMilli(2_000))
+
+            engine.updateLocation(fix(45.0, 9.0021, 3_000, 90.0), Instant.ofEpochMilli(3_000))
+            assertEquals(NavigationPhase.AT_INTERMEDIATE_STOP, engine.state.value.phase)
+            engine.updateLocation(fix(45.0, 9.0027, 11_999, 90.0), Instant.ofEpochMilli(11_999))
+            assertEquals(NavigationPhase.AT_INTERMEDIATE_STOP, engine.state.value.phase)
+            engine.updateLocation(
+                fix(45.0, 9.0027, 12_000, 90.0).copy(speedMetersPerSecond = null),
+                Instant.ofEpochMilli(12_000),
+            )
+
+            assertEquals(null, engine.state.value.activeIntermediateStopVisit)
+            assertEquals(
+                NavigationIntermediateStopLifecycle.COMPLETED,
+                engine.state.value.intermediateStopProgress.single().lifecycle,
+            )
+            assertEquals(
+                NavigationIntermediateStopCompletionMode.GPS_DEPARTURE,
+                engine.state.value.lastIntermediateStopCompletionMode,
+            )
+            assertEquals(engine.state.value.drivingDurationRemainingSeconds,
+                engine.state.value.totalDurationRemainingSeconds)
+            assertTrue(engine.state.value.routeProgressFraction > 0.6)
+        }
+    }
+
+    @Test
+    fun intermediateDepartureRejectsInaccurateFixAndRechecksAfterTenSeconds() {
+        val engine = testEngine()
+        engine.preview(route().copy(intermediateStops = listOf(
+            NavigationIntermediateStop(1, Coordinate(45.0, 9.002)),
+        )))
         engine.start()
-        engine.updateLocation(fix(45.0, 9.0020, 2_000, 90.0), Instant.ofEpochMilli(2_000))
-
-        engine.updateLocation(fix(45.0, 9.0030, 3_000, 90.0), Instant.ofEpochMilli(3_000))
-        assertEquals(NavigationPhase.AT_INTERMEDIATE_STOP, engine.state.value.phase)
-        engine.updateLocation(fix(45.0, 9.0040, 4_000, 90.0), Instant.ofEpochMilli(4_000))
-
+        engine.updateLocation(fix(45.0, 9.002, 2_000, 90.0), Instant.ofEpochMilli(2_000))
+        engine.updateLocation(
+            fix(45.0, 9.003, 12_000, 90.0).copy(accuracyMeters = 50.0),
+            Instant.ofEpochMilli(12_000),
+        )
+        assertNotNull(engine.state.value.activeIntermediateStopVisit)
+        engine.updateLocation(fix(45.0, 9.003, 13_000, 90.0), Instant.ofEpochMilli(13_000))
+        assertNotNull(engine.state.value.activeIntermediateStopVisit)
+        engine.updateLocation(fix(45.0, 9.003, 22_000, 90.0), Instant.ofEpochMilli(22_000))
         assertEquals(null, engine.state.value.activeIntermediateStopVisit)
-        assertEquals(
-            NavigationIntermediateStopLifecycle.COMPLETED,
-            engine.state.value.intermediateStopProgress.single().lifecycle,
-        )
-        assertEquals(
-            NavigationIntermediateStopCompletionMode.GPS_DEPARTURE,
-            engine.state.value.lastIntermediateStopCompletionMode,
-        )
     }
 
     private fun testEngine(
