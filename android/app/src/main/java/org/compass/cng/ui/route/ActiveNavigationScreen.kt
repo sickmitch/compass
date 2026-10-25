@@ -471,16 +471,6 @@ internal fun ActiveNavigationScreen(
                 // the ETA pill and the map controls visibly drift apart.
                 verticalAlignment = Alignment.Bottom,
             ) {
-                VoiceGuidanceToggle(
-                    enabled = state.voiceGuidanceEnabled,
-                    onToggle = {
-                        onVoiceGuidanceEnabledChange(!state.voiceGuidanceEnabled)
-                    },
-                    modifier = Modifier.padding(
-                        bottom = navigationLeftControlBottomPadding(showTripSummary),
-                    ),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
                 ArrivalEtaBadge(
                     arrivalTime = ui.arrivalTime,
                     progress = ui.progress,
@@ -492,6 +482,10 @@ internal fun ActiveNavigationScreen(
                 MapModeControls(
                     cameraMode = cameraMode,
                     tripSummaryVisible = showTripSummary,
+                    voiceGuidanceEnabled = state.voiceGuidanceEnabled,
+                    onToggleVoiceGuidance = {
+                        onVoiceGuidanceEnabledChange(!state.voiceGuidanceEnabled)
+                    },
                     hasRemovableNextStop = shouldShowRemoveNextStop(
                         hasNextFuelStop = state.nextFuelStop != null,
                         hasNextIntermediateStop = state.nextIntermediateStop != null,
@@ -979,7 +973,8 @@ internal fun shouldShowRemoveNextStop(
 internal const val NAVIGATION_GLASS_PANEL_ALPHA = 0.70f
 
 internal fun navigationLeftControlBottomPadding(tripSummaryVisible: Boolean) =
-    if (tripSummaryVisible) 0.dp else 44.dp
+    // Together with the row's 8.dp inset, reserve 32.dp above the map attribution.
+    if (tripSummaryVisible) 0.dp else 24.dp
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
@@ -1079,6 +1074,8 @@ private fun JunctionSignPanel(
 private fun MapModeControls(
     cameraMode: NavigationCameraMode,
     tripSummaryVisible: Boolean,
+    voiceGuidanceEnabled: Boolean,
+    onToggleVoiceGuidance: () -> Unit,
     hasRemovableNextStop: Boolean,
     onOverview: () -> Unit,
     onRecenter: () -> Unit,
@@ -1210,6 +1207,13 @@ private fun MapModeControls(
                     ) {
                         Icon(Icons.Rounded.Settings, contentDescription = null)
                     }
+                    VoiceGuidanceToggle(
+                        enabled = voiceGuidanceEnabled,
+                        onToggle = {
+                            onToggleVoiceGuidance()
+                            actionsExpanded = false
+                        },
+                    )
                 }
             }
             MapIconControlButton(

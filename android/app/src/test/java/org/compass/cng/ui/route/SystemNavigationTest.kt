@@ -29,9 +29,9 @@ class SystemNavigationTest {
     }
 
     @Test
-    fun expandedTripPanelAlignsLeftAndRightNavigationControls() {
+    fun etaKeepsAttributionClearanceAndAlignsAboveExpandedTripPanel() {
         assertEquals(0.dp, navigationLeftControlBottomPadding(tripSummaryVisible = true))
-        assertEquals(44.dp, navigationLeftControlBottomPadding(tripSummaryVisible = false))
+        assertEquals(24.dp, navigationLeftControlBottomPadding(tripSummaryVisible = false))
     }
 
     @Test
