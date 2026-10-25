@@ -95,9 +95,17 @@ class NavigationLocationPipelineTest {
         val halfway = transition.poseAt(0.5f)
 
         assertEquals(NavigationPuckTransitionMode.ANIMATE, transition.mode)
-        assertEquals(850L, transition.durationMillis)
+        assertEquals(1_000L, transition.durationMillis)
         assertEquals(9.0005, halfway.coordinate.longitude, 0.000_001)
         assertTrue(halfway.bearingDegrees < 0.1 || halfway.bearingDegrees > 359.9)
+        val duplicate = planNavigationPuckTransition(halfway, 2_000, target)
+        assertEquals(NavigationPuckTransitionMode.HOLD, duplicate.mode)
+        assertEquals(halfway, duplicate.target)
+        val fasterFix = planNavigationPuckTransition(
+            halfway, 2_000, target.copy(timestampEpochMillis = 2_500),
+        )
+        assertEquals(NavigationPuckTransitionMode.ANIMATE, fasterFix.mode)
+        assertEquals(500L, fasterFix.durationMillis)
     }
 
     @Test

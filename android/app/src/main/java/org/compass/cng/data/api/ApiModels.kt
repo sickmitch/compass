@@ -163,6 +163,7 @@ data class ApiNavigationTiming(
     val trafficState: String = "not_configured",
     val trafficAware: Boolean = false,
     val trafficObservedAt: String? = null,
+    val trafficDetected: Boolean = false,
 )
 
 data class ApiManeuver(

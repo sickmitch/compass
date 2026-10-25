@@ -203,6 +203,8 @@ class NavigationSession(
             savedAtEpochMillis = savedAtEpochMillis,
             navigationPosition = navigationPosition,
             routeProgressFraction = routeProgressFraction,
+            journeyProgressOffset = journeyProgressOffset,
+            journeyProgressFraction = journeyProgressFraction,
             distanceRemainingMeters = distanceRemainingMeters,
             drivingDurationRemainingSeconds = drivingDurationRemainingSeconds,
             totalDurationRemainingSeconds = totalDurationRemainingSeconds,

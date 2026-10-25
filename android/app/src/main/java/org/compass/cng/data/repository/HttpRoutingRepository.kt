@@ -1159,6 +1159,7 @@ private fun ApiNavigationTiming.toNavigationTiming(): NavigationTiming = Navigat
     trafficState = trafficState,
     trafficAware = trafficAware,
     trafficObservedAt = trafficObservedAt?.let(OffsetDateTime::parse),
+    trafficDetected = trafficDetected,
 )
 
 private fun ApiNavigationTiming.toLegNavigationTiming(

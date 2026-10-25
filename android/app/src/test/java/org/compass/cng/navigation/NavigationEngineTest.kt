@@ -13,6 +13,36 @@ import org.junit.Test
 
 class NavigationEngineTest {
     @Test
+    fun journeyProgressSurvivesRepeatedTrafficRefreshButResetsForDeviation() {
+        val engine = testEngine()
+        val original = route()
+        engine.preview(original)
+        engine.start(nowEpochMillis = 1_000)
+        engine.updateLocation(fix(45.0, 9.002, 2_000, 90.0), Instant.ofEpochMilli(2_000))
+        val progress = engine.state.value.journeyProgressFraction
+        assertTrue(progress > 0.1)
+        repeat(3) { index ->
+            engine.beginRouteUpdate(RouteUpdateReason.TRAFFIC_REFRESH)
+            engine.replaceRoute(
+                original.copy(routeId = "refresh-$index"), 3_000L + index, null,
+            )
+            assertEquals(0.0, engine.state.value.routeProgressFraction, 0.0)
+            assertEquals(progress, engine.state.value.journeyProgressFraction, 0.0)
+            assertEquals(progress, engine.state.value.journeyProgressOffset, 0.0)
+        }
+        engine.updateLocation(fix(45.0, 9.001, 6_000, 90.0), Instant.ofEpochMilli(6_000))
+        val advanced = engine.state.value.journeyProgressFraction
+        assertTrue(advanced > progress)
+        assertEquals(
+            progress + (1 - progress) * engine.state.value.routeProgressFraction,
+            advanced, 0.00001,
+        )
+        engine.beginRouteUpdate(RouteUpdateReason.OFF_ROUTE)
+        engine.replaceRoute(original.copy(routeId = "deviation"), 7_000, null)
+        assertEquals(0.0, engine.state.value.journeyProgressFraction, 0.0)
+    }
+
+    @Test
     fun fuelStopAutomaticallyCompletesAfterOneAccurateFixBeyond50MetersAtTenSecondCheck() {
         val engine = engineAtFuelStop()
         val before = engine.state.value.routeProgressFraction

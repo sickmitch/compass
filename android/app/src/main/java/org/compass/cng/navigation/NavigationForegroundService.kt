@@ -647,7 +647,7 @@ class NavigationForegroundService : Service(), LocationListener {
         const val ACTION_STOP = "org.compass.cng.navigation.STOP"
         private const val NOTIFICATION_CHANNEL_ID = "compass_navigation"
         private const val NOTIFICATION_ID = 4_201
-        private const val LOCATION_UPDATE_INTERVAL_MILLIS = 1_000L
+        private const val LOCATION_UPDATE_INTERVAL_MILLIS = 500L
         private const val GPS_LOSS_CHECK_INTERVAL_MILLIS = 5_000L
         private const val REPLAY_INTERVAL_MILLIS = 1_500L
         private const val REPLAY_SHAPE_INDEX_STEP = 1

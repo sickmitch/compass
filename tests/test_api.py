@@ -475,6 +475,7 @@ def test_base_route_contract_is_provider_independent() -> None:
                 "traffic_state": "not_configured",
                 "traffic_aware": False,
                 "traffic_observed_at": None,
+                "traffic_detected": False,
             },
     }
     assert provider.request == RouteRequest(

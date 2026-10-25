@@ -16,12 +16,15 @@ internal class MapPuckAnimator(
     private var animator: ValueAnimator? = null
     private var displayedPose: NavigationPuckPose? = null
     private var previousTargetTimestampEpochMillis: Long? = null
+    private var previousTarget: NavigationPosition? = null
+    private var frameListener: ((NavigationPuckPose) -> Unit)? = null
 
     fun reset(position: NavigationPosition) {
         animator?.cancel()
         animator = null
         displayedPose = NavigationPuckPose(position.coordinate, position.bearingDegrees)
         previousTargetTimestampEpochMillis = position.timestampEpochMillis
+        previousTarget = null
     }
 
     fun moveTo(
@@ -29,6 +32,12 @@ internal class MapPuckAnimator(
         onTransition: (NavigationPuckTransition) -> Unit = {},
         onFrame: (NavigationPuckPose) -> Unit,
     ) {
+        frameListener = onFrame
+        // UI timers and panel changes can deliver the same GPS fix repeatedly.
+        // Keep the active frame animation instead of cancelling it and snapping.
+        if (position == previousTarget) return
+        if (previousTargetTimestampEpochMillis?.let { position.timestampEpochMillis < it } == true) return
+        previousTarget = position
         animator?.cancel()
         val transition = planNavigationPuckTransition(
             displayedPose = displayedPose,
@@ -51,7 +60,7 @@ internal class MapPuckAnimator(
                     addUpdateListener { valueAnimator ->
                         transition.poseAt(valueAnimator.animatedValue as Float).also { pose ->
                             displayedPose = pose
-                            onFrame(pose)
+                            frameListener?.invoke(pose)
                         }
                     }
                     start()
@@ -63,5 +72,7 @@ internal class MapPuckAnimator(
     fun cancel() {
         animator?.cancel()
         animator = null
+        previousTarget = null
+        frameListener = null
     }
 }

@@ -301,7 +301,7 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
-    fun exposesFreshTrafficDelayWithoutCallingGraphSpeedsLiveTraffic() {
+    fun exposesTrafficAlertWithoutDelayMinutes() {
         val observedAt = OffsetDateTime.of(2026, 9, 5, 7, 52, 0, 0, ZoneOffset.UTC)
         val state = sampleState().let { sample ->
             sample.copy(
@@ -310,7 +310,8 @@ class NavigationDrivingUiModelTest {
                         trafficDelaySeconds = 480.0,
                         trafficDelayState = "estimated",
                         trafficState = "fresh",
-                        trafficAware = true,
+                        trafficAware = false,
+                        trafficDetected = true,
                         trafficObservedAt = observedAt,
                     ),
                 ),
@@ -318,12 +319,14 @@ class NavigationDrivingUiModelTest {
         }
 
         val message = state.toDrivingUiModel().statusMessages.single {
-            "Traffico live incluso" in it.text
+            "Traffico rilevato" in it.text
         }
 
-        assertEquals(NavigationStatusLevel.POSITIVE, message.level)
-        assertTrue("ritardo 8 min" in message.text)
-        assertTrue("aggiornato" in message.text)
+        assertEquals(NavigationStatusLevel.WARNING, message.level)
+        assertEquals(
+            "Traffico rilevato, l'ETA è riferito alle condizioni ottimali su questo percorso.",
+            message.text,
+        )
     }
 
     @Test
@@ -346,7 +349,7 @@ class NavigationDrivingUiModelTest {
 
         assertEquals("22:45", ui.nextCngStop?.arrivalTime)
         assertEquals("22:45", ui.arrivalTime)
-        assertTrue(ui.statusMessages.any { "aggiornato 08:10" in it.text })
+        assertTrue(ui.statusMessages.none { "ritardo" in it.text || "aggiornato" in it.text })
     }
 
     @Test
@@ -361,7 +364,7 @@ class NavigationDrivingUiModelTest {
 
         assertTrue(
             state.toDrivingUiModel().statusMessages.any {
-                it.text == "Traffico aggiornato, ma questa rotta usa velocità standard."
+                it.text == "ETA riferito alle condizioni ottimali su questo percorso."
             },
         )
     }

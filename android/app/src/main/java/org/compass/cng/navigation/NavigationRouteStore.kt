@@ -30,10 +30,14 @@ data class NavigationProgressSnapshot(
     val completedIntermediateStopSequences: Set<Int> = emptySet(),
     val activeIntermediateStopVisit: NavigationIntermediateStopVisit? = null,
     val lastCompletedIntermediateStopSequence: Int? = null,
+    val journeyProgressOffset: Double = 0.0,
+    val journeyProgressFraction: Double = routeProgressFraction,
 ) {
     init {
         require(savedAtEpochMillis >= 0L)
         require(routeProgressFraction in 0.0..1.0)
+        require(journeyProgressOffset in 0.0..1.0)
+        require(journeyProgressFraction in journeyProgressOffset..1.0)
         require(completedFuelStopSequences.all { it > 0 })
         require(completedIntermediateStopSequences.all { it > 0 })
     }

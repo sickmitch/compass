@@ -137,7 +137,7 @@ internal fun NavigationState.toDrivingUiModel(
         arrivalTime = estimatedArrivalAt?.let {
             NAVIGATION_CLOCK_FORMATTER.format(it.atZone(displayZone))
         } ?: "—",
-        progress = routeProgressFraction.coerceIn(0.0, 1.0).toFloat(),
+        progress = journeyProgressFraction.coerceIn(0.0, 1.0).toFloat(),
         currentSpeedLimitKph = currentSpeedLimitKph.takeIf {
             activeRoute.travelMode == RouteTravelMode.DRIVING
         },
@@ -379,17 +379,12 @@ internal fun trafficTimingText(
     timing: NavigationTiming,
     displayZone: ZoneId = ZoneId.systemDefault(),
 ): String = when {
-    timing.trafficAware -> buildString {
-        append("Traffico live incluso")
-        timing.trafficDelaySeconds?.let { append(" · ritardo ${formatDuration(it)}") }
-        timing.trafficObservedAt?.let {
-            append(
-                " · aggiornato ${NAVIGATION_CLOCK_FORMATTER.format(it.atZoneSameInstant(displayZone))}",
-            )
-        }
-    }
+    timing.trafficDetected ->
+        "Traffico rilevato, l'ETA è riferito alle condizioni ottimali su questo percorso."
+    timing.trafficAware ->
+        "ETA dal server precedente: aggiorna il backend per escludere il traffico."
     timing.trafficState in setOf("fresh", "mock") ->
-        "Traffico aggiornato, ma questa rotta usa velocità standard."
+        "ETA riferito alle condizioni ottimali su questo percorso."
     timing.trafficState == "configured" ->
         "Traffico configurato: attendo il primo aggiornamento."
     timing.trafficState == "stale" ->
@@ -402,8 +397,8 @@ private fun trafficStatusUiModel(
     displayZone: ZoneId,
 ) = NavigationStatusUiModel(
     text = trafficTimingText(timing, displayZone),
-    level = if (timing.trafficAware) {
-        NavigationStatusLevel.POSITIVE
+    level = if (timing.trafficDetected) {
+        NavigationStatusLevel.WARNING
     } else {
         NavigationStatusLevel.NORMAL
     },

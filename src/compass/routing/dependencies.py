@@ -16,6 +16,7 @@ async def get_routing_provider() -> AsyncIterator[RoutingProvider]:
             read_timeout_seconds=settings.valhalla_read_timeout_seconds,
             user_agent=settings.http_user_agent,
             speed_limits_enabled=settings.valhalla_speed_limits_enabled,
+            traffic_alert_only=True,
             traffic_aware=(
                 settings.traffic_enabled and settings.traffic_valhalla_overlay_enabled
             ),

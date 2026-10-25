@@ -206,6 +206,7 @@ class NavigationTimingResponse(StrictModel):
     traffic_state: TrafficHealthState = "not_configured"
     traffic_aware: bool = False
     traffic_observed_at: datetime | None = None
+    traffic_detected: bool = False
 
 
 class BaseRouteResponse(StrictModel):
@@ -878,6 +879,10 @@ def _navigation_traffic(
     route_is_traffic_aware = bool(getattr(route, "traffic_aware", False))
     fallback_used = bool(getattr(route, "traffic_fallback_used", False))
     current_data = health.provider_status in {"fresh", "mock"}
+    traffic_detected = (
+        current_data and route.traffic_detected
+        and health.last_success_at is not None and not fallback_used
+    )
     traffic_aware = (
         current_data
         and route_is_traffic_aware
@@ -888,7 +893,10 @@ def _navigation_traffic(
         "traffic_delay_seconds": delay if traffic_aware else None,
         "traffic_state": health.provider_status,
         "traffic_aware": traffic_aware,
-        "traffic_observed_at": health.last_success_at if traffic_aware else None,
+        "traffic_observed_at": (
+            health.last_success_at if traffic_aware or traffic_detected else None
+        ),
+        "traffic_detected": traffic_detected,
     }
 
 

@@ -185,6 +185,9 @@ data class NavigationState(
     val nextManeuver: Maneuver? = null,
     val distanceToNextManeuverMeters: Double? = null,
     val routeProgressFraction: Double = 0.0,
+    // Separate journey progress from the residual route replaced by traffic refreshes.
+    val journeyProgressOffset: Double = 0.0,
+    val journeyProgressFraction: Double = routeProgressFraction,
     val nextFuelStop: NavigationFuelStopProgress? = null,
     val fuelStopProgress: List<NavigationFuelStopProgress> = emptyList(),
     val activeFuelStopVisit: NavigationFuelStopVisit? = null,

@@ -3,9 +3,9 @@ package org.compass.cng.navigation
 import org.compass.cng.domain.model.Coordinate
 
 data class NavigationPuckMotionConfig(
-    val minimumAnimationMillis: Long = 300,
-    val maximumAnimationMillis: Long = 1_300,
-    val animationIntervalFraction: Double = 0.85,
+    val minimumAnimationMillis: Long = 200,
+    val maximumAnimationMillis: Long = 2_000,
+    val animationIntervalFraction: Double = 1.0,
     val stationarySpeedMetersPerSecond: Double = 1.2,
     val stationaryDeadbandMeters: Double = 3.0,
     val maximumInterpolatedDistanceMeters: Double = 250.0,
@@ -77,9 +77,12 @@ fun planNavigationPuckTransition(
     val intervalMillis = previousTargetTimestampEpochMillis?.let {
         targetPosition.timestampEpochMillis - it
     }
-    if (distance > config.maximumInterpolatedDistanceMeters ||
-        intervalMillis == null || intervalMillis <= 0
-    ) {
+    if (intervalMillis != null && intervalMillis <= 0) {
+        return NavigationPuckTransition(
+            displayedPose, displayedPose, NavigationPuckTransitionMode.HOLD, 0, distance,
+        )
+    }
+    if (distance > config.maximumInterpolatedDistanceMeters || intervalMillis == null) {
         return NavigationPuckTransition(
             displayedPose,
             target,

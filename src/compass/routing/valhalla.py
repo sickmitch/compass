@@ -35,6 +35,14 @@ DEFAULT_DEPARTURE_TIMEZONE = ZoneInfo("Europe/Rome")
 LOGGER = logging.getLogger("compass.routing.valhalla")
 
 
+def _use_graph_speeds(payload: dict[str, Any]) -> None:
+    payload.pop("date_time", None)
+    payload.pop("prioritize_bidirectional", None)
+    payload.setdefault("costing_options", {}).setdefault("auto", {})["speed_types"] = [
+        "constrained", "freeflow",
+    ]
+
+
 class ValhallaRoutingAdapter:
     """Translate the Compass routing boundary to Valhalla's HTTP API."""
 
@@ -47,6 +55,7 @@ class ValhallaRoutingAdapter:
         user_agent: str,
         speed_limits_enabled: bool = False,
         traffic_aware: bool = False,
+        traffic_alert_only: bool = False,
         traffic_speed_types: tuple[str, ...] = (
             "current",
             "predicted",
@@ -66,12 +75,15 @@ class ValhallaRoutingAdapter:
         self._headers = {"User-Agent": user_agent}
         self._speed_limits_enabled = speed_limits_enabled
         self._traffic_aware = traffic_aware
+        self._traffic_alert_only = traffic_alert_only
         self._traffic_speed_types = traffic_speed_types
         self._departure_timezone = ZoneInfo(departure_timezone)
         self._client = client
 
     async def route(self, request: RouteRequest) -> BaseRoute:
-        traffic_aware = self._traffic_aware and request.costing == "auto"
+        traffic_aware = (
+            self._traffic_aware and not self._traffic_alert_only and request.costing == "auto"
+        )
         payload = _route_payload(
             (request.origin, request.destination),
             costing=request.costing,
@@ -83,6 +95,8 @@ class ValhallaRoutingAdapter:
             origin_direction=request.origin_direction,
             allow_highways=request.allow_highways,
         )
+        if self._traffic_alert_only and request.costing == "auto":
+            _use_graph_speeds(payload)
         response = await self._request("POST", "/route", json=payload)
         if traffic_aware and _is_no_route_response(response):
             LOGGER.warning(
@@ -107,6 +121,8 @@ class ValhallaRoutingAdapter:
             costing=request.costing,
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
+        if self._traffic_alert_only:
+            return replace(route, traffic_detected=await self._detect_traffic(payload, route))
         if not traffic_aware:
             return route
         baseline = await self._route_baseline(payload, expected_leg_count=1)
@@ -121,7 +137,9 @@ class ValhallaRoutingAdapter:
         )
 
     async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute:
-        traffic_aware = self._traffic_aware and request.costing == "auto"
+        traffic_aware = (
+            self._traffic_aware and not self._traffic_alert_only and request.costing == "auto"
+        )
         locations = (request.origin, *request.waypoints, request.destination)
         payload = _route_payload(
             locations,
@@ -134,11 +152,9 @@ class ValhallaRoutingAdapter:
             origin_direction=request.origin_direction,
             allow_highways=request.allow_highways,
         )
-        response = await self._request(
-            "POST",
-            "/route",
-            json=payload,
-        )
+        if self._traffic_alert_only and request.costing == "auto":
+            _use_graph_speeds(payload)
+        response = await self._request("POST", "/route", json=payload)
         if traffic_aware and _is_no_route_response(response):
             LOGGER.warning(
                 "time-dependent waypoint route found no path; retrying with Valhalla graph speeds",
@@ -166,6 +182,8 @@ class ValhallaRoutingAdapter:
             costing=request.costing,
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
+        if self._traffic_alert_only:
+            return replace(route, traffic_detected=await self._detect_traffic(payload, route))
         if not traffic_aware:
             return route
         baseline = await self._route_baseline(
@@ -200,7 +218,9 @@ class ValhallaRoutingAdapter:
             payload,
             costing=request.costing,
             departure_at=request.departure_at,
-            traffic_aware=self._traffic_aware and request.costing == "auto",
+            traffic_aware=(
+                self._traffic_aware and not self._traffic_alert_only and request.costing == "auto"
+            ),
             traffic_speed_types=self._traffic_speed_types,
             departure_timezone=self._departure_timezone,
         )
@@ -209,6 +229,8 @@ class ValhallaRoutingAdapter:
             costing=request.costing,
             allow_highways=request.allow_highways,
         )
+        if self._traffic_alert_only and request.costing == "auto":
+            _use_graph_speeds(payload)
         response = await self._request("POST", "/sources_to_targets", json=payload)
         if response.status_code >= 500:
             raise RoutingUnavailableError(f"Valhalla returned HTTP {response.status_code}")
@@ -237,6 +259,34 @@ class ValhallaRoutingAdapter:
             source_count=len(request.sources),
             target_count=len(request.targets),
         )
+
+    async def _detect_traffic(
+        self, payload: dict[str, Any], route: BaseRoute | WaypointRoute
+    ) -> bool:
+        """Optional congestion probe: never replace baseline geometry, legs or times."""
+        if not self._traffic_aware or payload["costing"] != "auto":
+            return False
+        from copy import deepcopy
+
+        probe = deepcopy(payload)
+        _apply_time_dependent_costing(
+            probe, costing="auto", departure_at=None, traffic_aware=True,
+            traffic_speed_types=self._traffic_speed_types,
+            departure_timezone=self._departure_timezone,
+        )
+        probe["prioritize_bidirectional"] = True
+        try:
+            response = await self._request("POST", "/route", json=probe)
+            _raise_route_http_error(response)
+            value = _json_mapping(response)
+            live = (
+                _parse_route(value) if isinstance(route, BaseRoute)
+                else _parse_waypoint_route(value, expected_leg_count=len(route.legs))
+            )
+            return live.duration_seconds > route.duration_seconds + 1.0
+        except (RoutingUnavailableError, RoutingProviderError, NoRouteError):
+            LOGGER.warning("traffic alert unavailable; graph-speed route preserved")
+            return False
 
     async def is_ready(self) -> bool:
         try:

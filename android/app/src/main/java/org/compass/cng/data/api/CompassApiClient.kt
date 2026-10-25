@@ -1096,6 +1096,7 @@ private data class NavigationTimingDto(
     @SerialName("traffic_state") val trafficState: String = "not_configured",
     @SerialName("traffic_aware") val trafficAware: Boolean = false,
     @SerialName("traffic_observed_at") val trafficObservedAt: String? = null,
+    @SerialName("traffic_detected") val trafficDetected: Boolean = false,
 )
 
 @Serializable
@@ -2239,6 +2240,7 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
         trafficState = trafficState,
         trafficAware = trafficAware,
         trafficObservedAt = trafficObservedAt,
+        trafficDetected = trafficDetected,
     )
 }
 

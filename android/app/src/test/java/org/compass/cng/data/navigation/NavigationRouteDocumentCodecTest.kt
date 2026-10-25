@@ -95,6 +95,8 @@ class NavigationRouteDocumentCodecTest {
                 route.geometry[1], 1, 0.0, 90.0, 4.0, 302_000L,
             ),
             routeProgressFraction = 0.5,
+            journeyProgressOffset = 0.4,
+            journeyProgressFraction = 0.7,
             distanceRemainingMeters = 60_000.0,
             drivingDurationRemainingSeconds = 2_700.0,
             totalDurationRemainingSeconds = 3_600.0,

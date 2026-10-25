@@ -26,6 +26,7 @@ data class NavigationTiming(
     val trafficState: String = "not_configured",
     val trafficAware: Boolean = false,
     val trafficObservedAt: OffsetDateTime? = null,
+    val trafficDetected: Boolean = false,
 ) {
     init {
         require(routeId.isNotBlank()) { "route identity must not be blank" }

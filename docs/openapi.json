@@ -2598,6 +2598,11 @@
             "title": "Traffic Delay State",
             "type": "string"
           },
+          "traffic_detected": {
+            "default": false,
+            "title": "Traffic Detected",
+            "type": "boolean"
+          },
           "traffic_observed_at": {
             "anyOf": [
               {

@@ -218,6 +218,8 @@ class NavigationEngine(
             nextManeuver = progress.nextManeuverIndex?.let(route.maneuvers::getOrNull),
             distanceToNextManeuverMeters = progress.distanceToNextManeuverMeters,
             routeProgressFraction = progress.routeProgressFraction,
+            journeyProgressOffset = progress.journeyProgressOffset,
+            journeyProgressFraction = progress.journeyProgressFraction,
             nextFuelStop = fuelProgress.firstOrNull {
                 it.lifecycle != NavigationFuelStopLifecycle.COMPLETED
             },
@@ -636,6 +638,13 @@ class NavigationEngine(
             } else {
                 previousState.routeProgressFraction
             },
+            journeyProgressFraction = if (progressIsReliable) {
+                maxOf(
+                    previousState.journeyProgressFraction,
+                    previousState.journeyProgressOffset +
+                        (1.0 - previousState.journeyProgressOffset) * progressFraction,
+                ).coerceIn(0.0, 1.0)
+            } else previousState.journeyProgressFraction,
             nextFuelStop = if (progressIsReliable) nextFuel else previousState.nextFuelStop,
             fuelStopProgress = if (progressIsReliable) {
                 fuelProgress
@@ -685,6 +694,11 @@ class NavigationEngine(
         currentLocation: NavigationLocation?,
     ) {
         val previousState = mutableState.value
+        val progressOffset = if (
+            previousState.routeUpdateReason == RouteUpdateReason.TRAFFIC_REFRESH ||
+            (previousState.routeUpdateReason == RouteUpdateReason.CONNECTIVITY_RECOVERY &&
+                previousState.offRouteStatus == OffRouteStatus.ON_ROUTE)
+        ) previousState.journeyProgressFraction else 0.0
         val updateNotice = if (previousState.routeUpdateReason == RouteUpdateReason.OFF_ROUTE) {
             previousState.totalDurationRemainingSeconds?.let { previousDuration ->
                 NavigationRouteUpdateNotice(
@@ -704,6 +718,8 @@ class NavigationEngine(
         mutableState.value = NavigationState(
             phase = NavigationPhase.NAVIGATING,
             route = route,
+            journeyProgressOffset = progressOffset,
+            journeyProgressFraction = progressOffset,
             distanceRemainingMeters = route.totalDistanceMeters,
             drivingDurationRemainingSeconds = route.drivingDurationSeconds,
             totalDurationRemainingSeconds = route.totalTripDurationSeconds,

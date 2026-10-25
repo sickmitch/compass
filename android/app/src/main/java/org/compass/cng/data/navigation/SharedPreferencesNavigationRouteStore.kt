@@ -215,11 +215,15 @@ private data class StoredNavigationProgress(
     val completedIntermediateStopSequences: Set<Int> = emptySet(),
     val activeIntermediateStopVisit: StoredIntermediateStopVisit? = null,
     val lastCompletedIntermediateStopSequence: Int? = null,
+    val journeyProgressOffset: Double = 0.0,
+    val journeyProgressFraction: Double = routeProgressFraction,
 ) {
     fun toDomain(route: NavigationRoute) = NavigationProgressSnapshot(
         savedAtEpochMillis = savedAtEpochMillis,
         navigationPosition = navigationPosition?.toDomain(),
         routeProgressFraction = routeProgressFraction,
+        journeyProgressOffset = journeyProgressOffset,
+        journeyProgressFraction = journeyProgressFraction,
         distanceRemainingMeters = distanceRemainingMeters,
         drivingDurationRemainingSeconds = drivingDurationRemainingSeconds,
         totalDurationRemainingSeconds = totalDurationRemainingSeconds,
@@ -263,6 +267,8 @@ private data class StoredNavigationProgress(
             value.completedIntermediateStopSequences,
             value.activeIntermediateStopVisit?.let(StoredIntermediateStopVisit::fromDomain),
             value.lastCompletedIntermediateStopSequence,
+            value.journeyProgressOffset,
+            value.journeyProgressFraction,
         )
     }
 }
@@ -382,6 +388,7 @@ private data class StoredNavigationTiming(
     val trafficState: String = "not_configured",
     val trafficAware: Boolean = false,
     val trafficObservedAt: String? = null,
+    val trafficDetected: Boolean = false,
 ) {
     fun toDomain() = NavigationTiming(
         routeId, drivingDurationSeconds, remainingDrivingDurationSeconds, refuelingStopCount,
@@ -389,6 +396,7 @@ private data class StoredNavigationTiming(
         departureAt?.let(OffsetDateTime::parse), drivingArrivalAt?.let(OffsetDateTime::parse),
         tripArrivalAt?.let(OffsetDateTime::parse), trafficDelaySeconds, trafficDelayState,
         trafficState, trafficAware, trafficObservedAt?.let(OffsetDateTime::parse),
+        trafficDetected,
     )
 
     companion object {
@@ -399,6 +407,7 @@ private data class StoredNavigationTiming(
             value.departureAt?.toString(), value.drivingArrivalAt?.toString(),
             value.tripArrivalAt?.toString(), value.trafficDelaySeconds, value.trafficDelayState,
             value.trafficState, value.trafficAware, value.trafficObservedAt?.toString(),
+            value.trafficDetected,
         )
     }
 }

@@ -237,17 +237,6 @@ internal fun ActiveNavigationScreen(
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
     val ui = state.toDrivingUiModel()
-    var progressRouteId by rememberSaveable { mutableStateOf<String?>(null) }
-    var displayedRouteProgress by rememberSaveable { mutableStateOf(0f) }
-    LaunchedEffect(state.route?.routeId, ui.progress) {
-        val routeId = state.route?.routeId
-        if (routeId != progressRouteId) {
-            progressRouteId = routeId
-            displayedRouteProgress = ui.progress
-        } else if (ui.progress > displayedRouteProgress) {
-            displayedRouteProgress = ui.progress
-        }
-    }
     LaunchedEffect(ui.isRouteRecalculationInProgress, state.routeUpdateReason) {
         Log.i(
             NAVIGATION_UI_LOG_TAG,
@@ -494,7 +483,7 @@ internal fun ActiveNavigationScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 ArrivalEtaBadge(
                     arrivalTime = ui.arrivalTime,
-                    progress = displayedRouteProgress,
+                    progress = ui.progress,
                     modifier = Modifier.padding(
                         bottom = navigationLeftControlBottomPadding(showTripSummary),
                     ),
@@ -1279,7 +1268,7 @@ private fun ArrivalEtaBadge(
     progress: Float,
     modifier: Modifier = Modifier,
 ) {
-    val ringColor = Color(0xFFFF8A80)
+    val ringColor = Color(0xFF98EEB0)
     Box(
         modifier = modifier
             .size(72.dp)

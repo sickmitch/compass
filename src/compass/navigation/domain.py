@@ -23,6 +23,7 @@ class NavigationTiming:
     traffic_state: str = "not_configured"
     traffic_aware: bool = False
     traffic_observed_at: datetime | None = None
+    traffic_detected: bool = False
 
 
 def build_navigation_timing(
@@ -37,6 +38,7 @@ def build_navigation_timing(
     traffic_state: str = "not_configured",
     traffic_aware: bool = False,
     traffic_observed_at: datetime | None = None,
+    traffic_detected: bool = False,
 ) -> NavigationTiming:
     """Build stable route identity and trip timing without changing routing cost.
 
@@ -94,7 +96,8 @@ def build_navigation_timing(
         traffic_delay_state="estimated" if traffic_aware else "unavailable",
         traffic_state=traffic_state,
         traffic_aware=traffic_aware,
-        traffic_observed_at=traffic_observed_at if traffic_aware else None,
+        traffic_observed_at=traffic_observed_at if traffic_aware or traffic_detected else None,
+        traffic_detected=traffic_detected,
     )
 
 

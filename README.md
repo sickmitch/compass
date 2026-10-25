@@ -93,6 +93,8 @@ automatic vehicle tank telemetry or automatic inference that a station is unexpe
 
 ## Quick local validation
 
+Current ETA policy: [traffic is alert-only, not a duration adjustment](docs/phases/android-0.28.40-traffic-alert-gate.md).
+
 Python 3.12+ and Docker with Compose are required.
 
 Fixture-based Python tests ignore the operator's `.env` and inherited application settings;

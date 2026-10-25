@@ -115,6 +115,7 @@ class BaseRoute:
     traffic_aware: bool = False
     traffic_delay_seconds: float | None = None
     traffic_fallback_used: bool = False
+    traffic_detected: bool = False
     speed_limits: tuple[RouteSpeedLimit, ...] = ()
     speed_limit_source: str | None = None
     uses_highways: bool = False
@@ -140,6 +141,7 @@ class WaypointRoute:
     traffic_aware: bool = False
     traffic_delay_seconds: float | None = None
     traffic_fallback_used: bool = False
+    traffic_detected: bool = False
 
     @property
     def uses_highways(self) -> bool:
