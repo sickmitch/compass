@@ -270,7 +270,7 @@ internal fun ActiveNavigationScreen(
     var cameraMode by rememberSaveable { mutableStateOf(NavigationCameraMode.FOLLOW) }
     var cameraGestureRevision by rememberSaveable { mutableStateOf(0L) }
     var showTripSummary by rememberSaveable { mutableStateOf(false) }
-    var showDetails by rememberSaveable { mutableStateOf(false) }
+    var showCngDetails by rememberSaveable { mutableStateOf(false) }
     var showDeveloperTools by rememberSaveable { mutableStateOf(false) }
     var confirmFuelStopReplacement by rememberSaveable { mutableStateOf(false) }
     var confirmStopNavigation by rememberSaveable { mutableStateOf(false) }
@@ -333,7 +333,7 @@ internal fun ActiveNavigationScreen(
             onDismiss = { confirmFuelStopReplacement = false },
             onConfirm = {
                 confirmFuelStopReplacement = false
-                showDetails = false
+                showCngDetails = false
                 onReplaceUnavailableFuelStop()
             },
         )
@@ -362,17 +362,17 @@ internal fun ActiveNavigationScreen(
             onClose = { showDeveloperTools = false },
         )
     }
-    if (showDetails) {
-        NavigationDetailsSheet(
+    if (showCngDetails) {
+        CngDetailsSheet(
             state = state,
             ui = ui,
-            onDismiss = { showDetails = false },
+            onDismiss = { showCngDetails = false },
             onRequestRouteUpdate = onRequestRouteUpdate,
             onReplaceFuelStop = { confirmFuelStopReplacement = true },
             onCompleteFuelStop = onCompleteFuelStop,
             onCompleteIntermediateStop = onCompleteIntermediateStop,
             onOpenDeveloperTools = {
-                showDetails = false
+                showCngDetails = false
                 showDeveloperTools = true
             },
             onStopNavigation = onStopNavigation,
@@ -432,7 +432,7 @@ internal fun ActiveNavigationScreen(
             ui.nextCngStop?.let { stop ->
                 CngGuidanceCard(
                     stop = stop,
-                    onOpenDetails = { showDetails = true },
+                    onOpenDetails = { showCngDetails = true },
                     onCompleteFuelStop = onCompleteFuelStop,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
@@ -509,8 +509,8 @@ internal fun ActiveNavigationScreen(
                         cameraMode = nextMode
                     },
                     onShowTripSummary = {
-                        showTripSummary = true
-                        Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=true")
+                        showTripSummary = !showTripSummary
+                        Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=$showTripSummary")
                     },
                     onForceRouteUpdate = onRequestRouteUpdate,
                     onRemoveNextStop = onRemoveNextStop,
@@ -553,11 +553,6 @@ internal fun ActiveNavigationScreen(
                 ) {
                     TripBottomBar(
                         ui = ui,
-                        onOpenDetails = { showDetails = true },
-                        onHide = {
-                            showTripSummary = false
-                            Log.i(NAVIGATION_UI_LOG_TAG, "trip_summary visible=false")
-                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -840,22 +835,15 @@ private fun VoiceGuidanceToggle(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    MapIconControlButton(
         onClick = onToggle,
-        modifier = modifier
-            .size(60.dp)
-            .testTag("navigation_voice_toggle")
-            .clearAndSetSemantics {
-                contentDescription = if (enabled) {
-                    "Voce attiva. Tocca per disattivare"
-                } else {
-                    "Voce disattivata. Tocca per attivare"
-                }
-            },
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        contentColor = MaterialTheme.colorScheme.primary,
-        tonalElevation = 9.dp,
+        modifier = modifier,
+        testTag = "navigation_voice_toggle",
+        contentDescription = if (enabled) {
+            "Voce attiva. Tocca per disattivare"
+        } else {
+            "Voce disattivata. Tocca per attivare"
+        },
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -868,7 +856,6 @@ private fun VoiceGuidanceToggle(
                     Icons.AutoMirrored.Rounded.VolumeOff
                 },
                 contentDescription = null,
-                modifier = Modifier.size(32.dp),
             )
         }
     }
@@ -1095,14 +1082,16 @@ private fun MapModeControls(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        if (!tripSummaryVisible) {
-            MapIconControlButton(
-                testTag = "navigation_trip_toggle",
-                contentDescription = "Apri dettagli viaggio",
-                onClick = onShowTripSummary,
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.ListAlt, contentDescription = null)
-            }
+        MapIconControlButton(
+            testTag = "navigation_trip_toggle",
+            contentDescription = if (tripSummaryVisible) "Chiudi riepilogo viaggio" else "Apri riepilogo viaggio",
+            onClick = onShowTripSummary,
+        ) {
+            Icon(
+                imageVector = if (tripSummaryVisible) Icons.Rounded.KeyboardArrowDown
+                    else Icons.AutoMirrored.Rounded.ListAlt,
+                contentDescription = null,
+            )
         }
         if (policy.showOrientationToggle) {
             MapIconControlButton(
@@ -1334,8 +1323,6 @@ private fun ArrivalEtaBadge(
 @Composable
 private fun TripBottomBar(
     ui: NavigationDrivingUiModel,
-    onOpenDetails: () -> Unit,
-    onHide: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -1359,6 +1346,14 @@ private fun TripBottomBar(
                 DrivingSummaryValue("Rimanenti", ui.remainingDistance)
                 DrivingSummaryValue("Durata", ui.remainingDuration)
                 DrivingSummaryValue("Arrivo", ui.arrivalTime)
+            }
+            ui.statusMessages.filter { it.level == NavigationStatusLevel.WARNING }.forEach { message ->
+                Text(
+                    text = message.text,
+                    modifier = Modifier.padding(top = 6.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.compassSemanticColors.onWarningContainer,
+                )
             }
             ui.nextCngStop?.let { stop ->
                 HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 7.dp))
@@ -1396,45 +1391,7 @@ private fun TripBottomBar(
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                CompassTextButton(
-                    onClick = onHide,
-                    modifier = Modifier.testTag("navigation_trip_toggle"),
-                ) {
-                    TripPanelActionLabel("Nascondi", pointsUp = false)
-                }
-                CompassTextButton(
-                    onClick = onOpenDetails,
-                    modifier = Modifier.testTag("navigation_details_button"),
-                ) {
-                    TripPanelActionLabel("Dettagli", pointsUp = true)
-                }
-            }
         }
-    }
-}
-
-@Composable
-private fun TripPanelActionLabel(label: String, pointsUp: Boolean) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        Text(label)
-        Icon(
-            imageVector = if (pointsUp) {
-                Icons.Rounded.KeyboardArrowUp
-            } else {
-                Icons.Rounded.KeyboardArrowDown
-            },
-            contentDescription = null,
-            modifier = Modifier
-                .size(18.dp)
-                .clearAndSetSemantics {},
-        )
     }
 }
 
@@ -1457,7 +1414,7 @@ private fun DrivingSummaryValue(label: String, value: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NavigationDetailsSheet(
+private fun CngDetailsSheet(
     state: NavigationState,
     ui: NavigationDrivingUiModel,
     onDismiss: () -> Unit,
@@ -1470,12 +1427,12 @@ private fun NavigationDetailsSheet(
 ) {
     val route = requireNotNull(state.route)
     LaunchedEffect(Unit) {
-        Log.i(NAVIGATION_UI_LOG_TAG, "surface=trip_details visible=true")
+        Log.i(NAVIGATION_UI_LOG_TAG, "surface=cng_details visible=true")
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        modifier = Modifier.testTag("navigation_details_sheet"),
+        modifier = Modifier.testTag("navigation_cng_details_sheet"),
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
@@ -1488,42 +1445,10 @@ private fun NavigationDetailsSheet(
         ) {
             item {
                 Text(
-                    "Dettagli viaggio",
+                    "Tappe CNG",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
-            }
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    DrivingSummaryValue("Rimanenti", ui.remainingDistance)
-                    DrivingSummaryValue("Durata", ui.remainingDuration)
-                    DrivingSummaryValue("Arrivo", ui.arrivalTime)
-                }
-            }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ui.statusMessages.forEach { message ->
-                        Text(
-                            text = message.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = when (message.level) {
-                                NavigationStatusLevel.NORMAL ->
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                NavigationStatusLevel.POSITIVE -> MaterialTheme.colorScheme.primary
-                                NavigationStatusLevel.WARNING ->
-                                    MaterialTheme.compassSemanticColors.onWarningContainer
-                            },
-                            fontWeight = if (message.level == NavigationStatusLevel.NORMAL) {
-                                FontWeight.Normal
-                            } else {
-                                FontWeight.SemiBold
-                            },
-                        )
-                    }
-                }
             }
             if (route.fuelStops.isNotEmpty()) {
                 item {
