@@ -1813,13 +1813,6 @@ private fun NavigationPreviewContent(
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
-                    if (route.travelMode == RouteTravelMode.DRIVING && !route.timing.trafficAware) {
-                        Text(
-                            "Traffico live non disponibile: l’ETA usa i tempi di percorrenza correnti del routing.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.compassSemanticColors.onWarningContainer,
-                        )
-                    }
                 }
             }
         }
@@ -3758,7 +3751,12 @@ private fun RouteSummary(route: RoutePreview, modifier: Modifier = Modifier) {
             } else {
                 SummaryValue(
                     label = "Traffico",
-                    value = if (route.navigation.trafficAware) "Live" else "Non live",
+                    value = when (route.navigation.trafficState) {
+                        "fresh" -> "Live"
+                        "mock" -> "Simulato"
+                        "stale" -> "Scaduto"
+                        else -> "Non live"
+                    },
                 )
             }
         }

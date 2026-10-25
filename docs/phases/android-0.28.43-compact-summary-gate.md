@@ -29,3 +29,8 @@ attribution. Also check CNG card access and completion controls on a route with 
 If layout differs, return screenshots with the summary and action menu open/closed.
 For crashes, capture `adb logcat -d -v threadtime AndroidRuntime:E CompassNavigationUi:I '*:S'`.
 Physical-device layout acceptance remains pending operator feedback.
+
+Verification on 2026-10-25: existing implementation preserved and reviewed; 456 Python
+tests passed (five PostGIS tests excluded), Ruff and diff checks passed. Android build
+and unit-test tasks succeeded using up-to-date Gradle outputs. APK republished and
+signature verified; `dist/last.txt` points to `compass-0.28.43.apk`.

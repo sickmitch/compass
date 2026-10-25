@@ -39,6 +39,7 @@ internal data class NavigationDrivingUiModel(
     val cngStops: List<NavigationCngUiModel>,
     val isRouteRecalculationInProgress: Boolean,
     val statusMessages: List<NavigationStatusUiModel>,
+    val trafficDetected: Boolean = false,
 )
 
 internal data class NavigationJunctionSignUiModel(
@@ -99,6 +100,7 @@ internal fun NavigationState.toDrivingUiModel(
     val maneuverRoad = currentRoadName ?: maneuver?.streetNames?.firstOrNull()
     val refuellingVisit = activeFuelStopVisit
     return NavigationDrivingUiModel(
+        trafficDetected = activeRoute.timing.trafficDetected,
         maneuverVisual = if (refuellingVisit != null) {
             maneuverVisual(4, "Rifornimento CNG")
         } else {
@@ -384,7 +386,7 @@ internal fun trafficTimingText(
     timing.trafficAware ->
         "ETA dal server precedente: aggiorna il backend per escludere il traffico."
     timing.trafficState in setOf("fresh", "mock") ->
-        "ETA riferito alle condizioni ottimali su questo percorso."
+        "Non c'è traffico al momento."
     timing.trafficState == "configured" ->
         "Traffico configurato: attendo il primo aggiornamento."
     timing.trafficState == "stale" ->

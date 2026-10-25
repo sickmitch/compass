@@ -323,6 +323,7 @@ class NavigationDrivingUiModelTest {
         }
 
         assertEquals(NavigationStatusLevel.WARNING, message.level)
+        assertTrue(state.toDrivingUiModel().trafficDetected)
         assertEquals(
             "Traffico rilevato, l'ETA è riferito alle condizioni ottimali su questo percorso.",
             message.text,
@@ -353,7 +354,7 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
-    fun reportsGraphSpeedFallbackEvenWhenTrafficFeedIsFresh() {
+    fun reportsNoTrafficForFreshFeedWithoutCongestion() {
         val state = sampleState().let { sample ->
             sample.copy(
                 route = sample.route?.copy(
@@ -364,9 +365,25 @@ class NavigationDrivingUiModelTest {
 
         assertTrue(
             state.toDrivingUiModel().statusMessages.any {
-                it.text == "ETA riferito alle condizioni ottimali su questo percorso."
+                it.text == "Non c'è traffico al momento."
             },
         )
+        assertEquals(false, state.toDrivingUiModel().trafficDetected)
+    }
+
+    @Test
+    fun clearsEtaTrafficHighlightAfterRouteUpdateAndDoesNotCallStaleDataZeroTraffic() {
+        val sample = sampleState()
+        val route = requireNotNull(sample.route)
+        val congested = sample.copy(route = route.copy(
+            timing = route.timing.copy(trafficState = "fresh", trafficDetected = true),
+        ))
+        assertTrue(congested.toDrivingUiModel().trafficDetected)
+        val updated = congested.copy(route = route.copy(
+            timing = route.timing.copy(trafficState = "stale", trafficDetected = false),
+        )).toDrivingUiModel()
+        assertEquals(false, updated.trafficDetected)
+        assertTrue(updated.statusMessages.none { it.text == "Non c'è traffico al momento." })
     }
 
     @Test
