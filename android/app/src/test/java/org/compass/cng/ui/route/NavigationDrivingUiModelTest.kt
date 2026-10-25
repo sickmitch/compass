@@ -325,7 +325,7 @@ class NavigationDrivingUiModelTest {
         assertEquals(NavigationStatusLevel.WARNING, message.level)
         assertTrue(state.toDrivingUiModel().trafficDetected)
         assertEquals(
-            "Traffico rilevato, l'ETA è riferito alle condizioni ottimali su questo percorso.",
+            "Traffico rilevato ma non conteggiabile nell'ETA",
             message.text,
         )
     }
@@ -358,7 +358,9 @@ class NavigationDrivingUiModelTest {
         val state = sampleState().let { sample ->
             sample.copy(
                 route = sample.route?.copy(
-                    timing = requireNotNull(sample.route).timing.copy(trafficState = "fresh"),
+                    timing = requireNotNull(sample.route).timing.copy(
+                        trafficState = "fresh", trafficDelaySeconds = 0.0,
+                    ),
                 ),
             )
         }
@@ -384,6 +386,18 @@ class NavigationDrivingUiModelTest {
         )).toDrivingUiModel()
         assertEquals(false, updated.trafficDetected)
         assertTrue(updated.statusMessages.none { it.text == "Non c'è traffico al momento." })
+    }
+
+    @Test
+    fun previewShowsMeasuredMinutesOnlyForFreshSuccessfulProbes() {
+        val timing = requireNotNull(sampleState().route).timing.copy(
+            trafficState = "fresh", trafficDelaySeconds = 125.0,
+        )
+        assertEquals("2 min", trafficPreviewText(timing))
+        assertEquals("<1 min", trafficPreviewText(timing.copy(trafficDelaySeconds = 20.0)))
+        assertEquals("0 min", trafficPreviewText(timing.copy(trafficDelaySeconds = 0.0)))
+        assertEquals("Non live", trafficPreviewText(timing.copy(trafficState = "stale")))
+        assertEquals("Non live", trafficPreviewText(timing.copy(trafficDelaySeconds = null)))
     }
 
     @Test

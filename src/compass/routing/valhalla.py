@@ -122,7 +122,9 @@ class ValhallaRoutingAdapter:
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
         if self._traffic_alert_only:
-            return replace(route, traffic_detected=await self._detect_traffic(payload, route))
+            delay = await self._detect_traffic(payload, route)
+            return replace(route, traffic_detected=delay is not None and delay > 0,
+                           traffic_delay_seconds=delay)
         if not traffic_aware:
             return route
         baseline = await self._route_baseline(payload, expected_leg_count=1)
@@ -183,7 +185,9 @@ class ValhallaRoutingAdapter:
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
         if self._traffic_alert_only:
-            return replace(route, traffic_detected=await self._detect_traffic(payload, route))
+            delay = await self._detect_traffic(payload, route)
+            return replace(route, traffic_detected=delay is not None and delay > 0,
+                           traffic_delay_seconds=delay)
         if not traffic_aware:
             return route
         baseline = await self._route_baseline(
@@ -262,10 +266,10 @@ class ValhallaRoutingAdapter:
 
     async def _detect_traffic(
         self, payload: dict[str, Any], route: BaseRoute | WaypointRoute
-    ) -> bool:
+    ) -> float | None:
         """Optional congestion probe: never replace baseline geometry, legs or times."""
         if not self._traffic_aware or payload["costing"] != "auto":
-            return False
+            return None
         from copy import deepcopy
 
         probe = deepcopy(payload)
@@ -283,10 +287,11 @@ class ValhallaRoutingAdapter:
                 _parse_route(value) if isinstance(route, BaseRoute)
                 else _parse_waypoint_route(value, expected_leg_count=len(route.legs))
             )
-            return live.duration_seconds > route.duration_seconds + 1.0
+            delay = live.duration_seconds - route.duration_seconds
+            return delay if delay > 1.0 else 0.0
         except (RoutingUnavailableError, RoutingProviderError, NoRouteError):
             LOGGER.warning("traffic alert unavailable; graph-speed route preserved")
-            return False
+            return None
 
     async def is_ready(self) -> bool:
         try:

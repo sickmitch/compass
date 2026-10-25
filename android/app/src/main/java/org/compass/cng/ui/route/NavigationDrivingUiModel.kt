@@ -377,15 +377,25 @@ private fun List<org.compass.cng.domain.model.ManeuverSignElement>.joinSignText(
 
 internal fun NavigationFuelStop.displayName(): String = name ?: "MIMIT $mimitStationId"
 
+internal fun trafficPreviewText(timing: NavigationTiming): String {
+    if (timing.trafficState !in setOf("fresh", "mock")) return "Non live"
+    val seconds = timing.trafficDelaySeconds ?: return "Non live"
+    return when {
+        seconds <= 0 -> "0 min"
+        seconds < 60 -> "<1 min"
+        else -> "${(seconds / 60).roundToInt()} min"
+    }
+}
+
 internal fun trafficTimingText(
     timing: NavigationTiming,
     displayZone: ZoneId = ZoneId.systemDefault(),
 ): String = when {
     timing.trafficDetected ->
-        "Traffico rilevato, l'ETA è riferito alle condizioni ottimali su questo percorso."
+        "Traffico rilevato ma non conteggiabile nell'ETA"
     timing.trafficAware ->
         "ETA dal server precedente: aggiorna il backend per escludere il traffico."
-    timing.trafficState in setOf("fresh", "mock") ->
+    timing.trafficState in setOf("fresh", "mock") && timing.trafficDelaySeconds == 0.0 ->
         "Non c'è traffico al momento."
     timing.trafficState == "configured" ->
         "Traffico configurato: attendo il primo aggiornamento."

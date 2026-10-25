@@ -92,11 +92,11 @@ def build_navigation_timing(
         departure_at=departure_at,
         driving_arrival_at=driving_arrival,
         trip_arrival_at=trip_arrival,
-        traffic_delay_seconds=traffic_delay_seconds if traffic_aware else None,
-        traffic_delay_state="estimated" if traffic_aware else "unavailable",
+        traffic_delay_seconds=traffic_delay_seconds,
+        traffic_delay_state="estimated" if traffic_delay_seconds is not None else "unavailable",
         traffic_state=traffic_state,
         traffic_aware=traffic_aware,
-        traffic_observed_at=traffic_observed_at if traffic_aware or traffic_detected else None,
+        traffic_observed_at=traffic_observed_at,
         traffic_detected=traffic_detected,
     )
 

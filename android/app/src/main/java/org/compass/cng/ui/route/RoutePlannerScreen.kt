@@ -1759,21 +1759,21 @@ private fun NavigationPreviewContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         SummaryValue("Distanza", formatDistance(route.totalDistanceMeters))
-                        SummaryValue(
-                            when (route.travelMode) {
-                                RouteTravelMode.DRIVING -> "Guida"
-                                RouteTravelMode.WALKING -> "Cammino"
-                                RouteTravelMode.CYCLING -> "Pedalata"
-                            },
-                            formatDuration(route.drivingDurationSeconds),
-                        )
+                        if (route.travelMode != RouteTravelMode.DRIVING) {
+                            SummaryValue(
+                                if (route.travelMode == RouteTravelMode.WALKING) "Cammino" else "Pedalata",
+                                formatDuration(route.drivingDurationSeconds),
+                            )
+                        }
                         SummaryValue("Totale", formatDuration(route.totalTripDurationSeconds))
                     }
                     if (route.travelMode == RouteTravelMode.DRIVING) {
                         Text(
                             trafficTimingText(route.timing),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (route.timing.trafficDetected) {
+                                androidx.compose.ui.graphics.Color(0xFFFFBE8A)
+                            } else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
                         Text(
@@ -3751,12 +3751,7 @@ private fun RouteSummary(route: RoutePreview, modifier: Modifier = Modifier) {
             } else {
                 SummaryValue(
                     label = "Traffico",
-                    value = when (route.navigation.trafficState) {
-                        "fresh" -> "Live"
-                        "mock" -> "Simulato"
-                        "stale" -> "Scaduto"
-                        else -> "Non live"
-                    },
+                    value = trafficPreviewText(route.navigation),
                 )
             }
         }

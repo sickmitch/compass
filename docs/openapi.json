@@ -2587,6 +2587,7 @@
                 "type": "null"
               }
             ],
+            "description": "Diagnostic live-versus-baseline duration difference, in seconds. Null means unavailable, zero means no detected delay. In alert-only mode traffic_aware is false and this value is not added to duration or ETA.",
             "title": "Traffic Delay Seconds"
           },
           "traffic_delay_state": {

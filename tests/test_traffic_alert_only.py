@@ -15,7 +15,10 @@ from compass.routing.valhalla import ValhallaRoutingAdapter
 
 @pytest.mark.parametrize("waypoints", [False, True])
 @pytest.mark.parametrize("probe_status", [200, 503])
-def test_alert_probe_cannot_change_route_geometry_maneuvers_or_times(waypoints, probe_status):
+@pytest.mark.parametrize("probe_delay", [1800, 0, -30])
+def test_alert_probe_cannot_change_route_geometry_maneuvers_or_times(
+    waypoints, probe_status, probe_delay
+):
     fixture = json.loads(Path("tests/fixtures/valhalla_route_response.json").read_text())
     if waypoints:
         fixture["trip"]["legs"].append(deepcopy(fixture["trip"]["legs"][0]))
@@ -32,9 +35,9 @@ def test_alert_probe_cannot_change_route_geometry_maneuvers_or_times(waypoints, 
             return httpx.Response(200, json=fixture)
         assert "current" in payload["costing_options"]["auto"]["speed_types"]
         live = deepcopy(fixture)
-        live["trip"]["summary"]["time"] += 1800
+        live["trip"]["summary"]["time"] += probe_delay
         for leg in live["trip"]["legs"]:
-            leg["summary"]["time"] += 1800
+            leg["summary"]["time"] += probe_delay
             leg["shape"] = "different-live-route"
         return httpx.Response(probe_status, json=live)
 
@@ -54,9 +57,9 @@ def test_alert_probe_cannot_change_route_geometry_maneuvers_or_times(waypoints, 
 
     result = asyncio.run(run())
     assert len(calls) == 2
-    assert result.traffic_detected is (probe_status == 200)
+    assert result.traffic_detected is (probe_status == 200 and probe_delay > 0)
     assert result.traffic_aware is False
-    assert result.traffic_delay_seconds is None
+    assert result.traffic_delay_seconds == (max(0, probe_delay) if probe_status == 200 else None)
     assert result.duration_seconds == fixture["trip"]["summary"]["time"]
     if waypoints:
         for leg, expected in zip(result.legs, fixture["trip"]["legs"], strict=True):
@@ -110,7 +113,8 @@ def test_alert_requires_current_provider_data(monkeypatch, state, expected):
         "compass.api.routes.traffic_health_from_settings",
         lambda _: SimpleNamespace(provider_status=state, last_success_at=observed),
     )
-    route = BaseRoute(1000, 120, "shape", (), "valhalla", traffic_detected=True)
+    route = BaseRoute(1000, 120, "shape", (), "valhalla", traffic_detected=True,
+                      traffic_delay_seconds=180)
     metadata = _navigation_traffic(route, Settings(_env_file=None))
     timing = build_navigation_timing(
         encoded_polylines=("shape",), driving_duration_seconds=120,
@@ -118,6 +122,6 @@ def test_alert_requires_current_provider_data(monkeypatch, state, expected):
     )
     assert timing.traffic_detected is expected
     assert timing.traffic_aware is False
-    assert timing.traffic_delay_seconds is None
+    assert timing.traffic_delay_seconds == (180 if expected else None)
     assert timing.driving_duration_seconds == 120
     assert timing.total_trip_duration_seconds == 1320

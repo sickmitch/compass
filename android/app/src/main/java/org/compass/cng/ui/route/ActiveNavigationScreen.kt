@@ -1316,7 +1316,7 @@ private fun ArrivalEtaBadge(
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )
-                Text("ETA", style = MaterialTheme.typography.labelSmall)
+                Text("~ETA", style = MaterialTheme.typography.labelSmall)
             }
         }
     }

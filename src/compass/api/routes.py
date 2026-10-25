@@ -201,7 +201,14 @@ class NavigationTimingResponse(StrictModel):
     departure_at: datetime | None
     driving_arrival_at: datetime | None
     trip_arrival_at: datetime | None
-    traffic_delay_seconds: float | None = Field(default=None, ge=0)
+    traffic_delay_seconds: float | None = Field(
+        default=None, ge=0,
+        description=(
+            "Diagnostic live-versus-baseline duration difference, in seconds. "
+            "Null means unavailable, zero means no detected delay. In alert-only mode "
+            "traffic_aware is false and this value is not added to duration or ETA."
+        ),
+    )
     traffic_delay_state: Literal["unavailable", "estimated"] = "unavailable"
     traffic_state: TrafficHealthState = "not_configured"
     traffic_aware: bool = False
@@ -890,11 +897,15 @@ def _navigation_traffic(
         and delay is not None
     )
     return {
-        "traffic_delay_seconds": delay if traffic_aware else None,
+        "traffic_delay_seconds": (
+            delay if current_data and not fallback_used and health.last_success_at is not None
+            else None
+        ),
         "traffic_state": health.provider_status,
         "traffic_aware": traffic_aware,
         "traffic_observed_at": (
-            health.last_success_at if traffic_aware or traffic_detected else None
+            health.last_success_at if current_data and delay is not None and not fallback_used
+            else None
         ),
         "traffic_detected": traffic_detected,
     }
