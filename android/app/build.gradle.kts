@@ -1,9 +1,58 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import com.android.build.api.artifact.SingleArtifact
+import groovy.json.JsonSlurper
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
+abstract class PublishCompassApk : DefaultTask() {
+    @get:InputDirectory abstract val apkDirectory: DirectoryProperty
+    @get:OutputDirectory abstract val distributionDirectory: DirectoryProperty
+
+    @TaskAction
+    fun publish() {
+        val sourceDirectory = apkDirectory.get().asFile
+        val metadata = JsonSlurper().parse(sourceDirectory.resolve("output-metadata.json")) as Map<*, *>
+        val element = (metadata["elements"] as List<*>).single() as Map<*, *>
+        val source = sourceDirectory.resolve(element["outputFile"] as String)
+        check(!source.name.contains("unsigned")) { "Unsigned APK cannot be published as an update" }
+        val version = (element["versionName"] as String).removeSuffix("-debug")
+        check(Regex("\\d+\\.\\d+\\.\\d+").matches(version))
+        val dist = distributionDirectory.get().asFile
+        dist.mkdirs()
+        val name = "compass-$version.apk"
+        val stagedApk = dist.resolve("$name.part")
+        source.copyTo(stagedApk, overwrite = true)
+        Files.move(stagedApk.toPath(), dist.resolve(name).toPath(),
+            StandardCopyOption.REPLACE_EXISTING)
+        val stagedManifest = dist.resolve("last.txt.part")
+        stagedManifest.writeText("$name\n")
+        Files.move(stagedManifest.toPath(), dist.resolve("last.txt").toPath(),
+            StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("Published dist/$name and updated dist/last.txt")
+    }
+}
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+androidComponents.onVariants { variant ->
+    val capitalized = variant.name.replaceFirstChar { it.uppercase() }
+    val publishApk = tasks.register<PublishCompassApk>("publish${capitalized}CompassApk") {
+        apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+        distributionDirectory.set(rootProject.layout.projectDirectory.dir("../dist"))
+        outputs.upToDateWhen { false }
+    }
+    tasks.matching { it.name == "assemble$capitalized" }.configureEach {
+        finalizedBy(publishApk)
+    }
 }
 
 fun String.asBuildConfigString(): String =
@@ -55,8 +104,8 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 86
-        versionName = "0.28.40"
+        versionCode = 87
+        versionName = "0.28.41"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())
@@ -82,7 +131,6 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
         }
         release {
             isMinifyEnabled = false

@@ -38,8 +38,11 @@ import org.compass.cng.ui.route.PlannerStage
 import org.compass.cng.ui.route.RoutePlannerScreen
 import org.compass.cng.ui.route.RoutePlannerViewModel
 import org.compass.cng.ui.theme.CompassTheme
+import org.compass.cng.update.ClientUpdateDialog
+import org.compass.cng.update.ClientUpdateViewModel
 
 class MainActivity : ComponentActivity() {
+    private val clientUpdateViewModel: ClientUpdateViewModel by viewModels()
     private val routePlannerViewModel: RoutePlannerViewModel by viewModels {
         val application = application as CompassApplication
         RoutePlannerViewModel.Factory(
@@ -155,6 +158,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
             CompassTheme(themePreference = plannerState.appTheme) {
+                ClientUpdateDialog(
+                    viewModel = clientUpdateViewModel,
+                    allowed = plannerState.stage != PlannerStage.NAVIGATION_PREVIEW,
+                )
                 RoutePlannerScreen(
                     viewModel = routePlannerViewModel,
                     onStartNavigation = {
@@ -254,6 +261,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        clientUpdateViewModel.check()
         if (
             hasLocationPermission() &&
             routePlannerViewModel.uiState.value.stage == PlannerStage.FOLLOW

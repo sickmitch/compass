@@ -93,6 +93,9 @@ automatic vehicle tank telemetry or automatic inference that a station is unexpe
 
 ## Quick local validation
 
+Android builds now publish suffix-free APKs and update `dist/last.txt` automatically.
+See [client update checks and signing requirements](docs/phases/android-0.28.41-client-update-gate.md).
+
 Current ETA policy: [traffic is alert-only, not a duration adjustment](docs/phases/android-0.28.40-traffic-alert-gate.md).
 
 Python 3.12+ and Docker with Compose are required.
