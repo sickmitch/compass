@@ -474,7 +474,6 @@ internal fun ActiveNavigationScreen(
                 ArrivalEtaBadge(
                     arrivalTime = ui.arrivalTime,
                     progress = ui.progress,
-                    trafficDetected = ui.trafficDetected,
                     modifier = Modifier.padding(
                         bottom = navigationLeftControlBottomPadding(showTripSummary),
                     ),
@@ -1260,7 +1259,6 @@ private fun MapIconControlButton(
 private fun ArrivalEtaBadge(
     arrivalTime: String,
     progress: Float,
-    trafficDetected: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val ringColor = Color(0xFF98EEB0)
@@ -1303,7 +1301,7 @@ private fun ArrivalEtaBadge(
             modifier = Modifier.size(60.dp),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            contentColor = if (trafficDetected) Color(0xFFFFBE8A) else MaterialTheme.colorScheme.primary,
+            contentColor = Color(0xFF98EEB0),
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -1316,7 +1314,7 @@ private fun ArrivalEtaBadge(
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )
-                Text("~ETA", style = MaterialTheme.typography.labelSmall)
+                Text("ETA", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -1349,7 +1347,7 @@ private fun TripBottomBar(
                 DrivingSummaryValue("Durata", ui.remainingDuration)
                 DrivingSummaryValue(
                     "Arrivo", ui.arrivalTime,
-                    color = if (ui.trafficDetected) Color(0xFFFFBE8A) else Color.Unspecified,
+                    color = Color(0xFF98EEB0),
                 )
             }
             ui.statusMessages.filter { it.level == NavigationStatusLevel.WARNING }.forEach { message ->

@@ -32,8 +32,7 @@ Compass già usato per le prove.
    soglie pedonali 100 m, 50 m ("A breve") e 10 m.
 4. Deviare volontariamente di almeno 15–20 metri e verificare il ricalcolo pedonale; chiudere e
    riaprire l'app durante l'anteprima o la navigazione e verificare che la modalità resti **A piedi**.
-5. Tornare a **Auto** e verificare che Piano CNG, Sosta CNG, traffico, autostrade e limiti di velocità
-   mantengano il comportamento precedente.
+
 
 ## Verifica contratto live
 

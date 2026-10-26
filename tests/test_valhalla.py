@@ -1,8 +1,6 @@
 import asyncio
 import json
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -49,23 +47,6 @@ def _adapter(handler: httpx.AsyncBaseTransport) -> tuple[ValhallaRoutingAdapter,
     )
 
 
-def _traffic_adapter(
-    handler: httpx.AsyncBaseTransport,
-) -> tuple[ValhallaRoutingAdapter, httpx.AsyncClient]:
-    client = httpx.AsyncClient(transport=handler)
-    return (
-        ValhallaRoutingAdapter(
-            base_url="http://valhalla.test:8002/",
-            connect_timeout_seconds=1,
-            read_timeout_seconds=2,
-            user_agent="compass-test/0.1.0",
-            traffic_aware=True,
-            client=client,
-        ),
-        client,
-    )
-
-
 def _speed_limit_adapter(
     handler: httpx.AsyncBaseTransport,
 ) -> tuple[ValhallaRoutingAdapter, httpx.AsyncClient]:
@@ -97,6 +78,7 @@ def test_route_translates_request_and_normalizes_response() -> None:
                 {"lat": 45.4781, "lon": 9.2271, "type": "break"},
             ],
             "costing": "auto",
+            "costing_options": {"auto": {"speed_types": ["constrained", "freeflow"]}},
             "units": "kilometers",
             "language": "it-IT",
             "directions_type": "instructions",
@@ -139,7 +121,6 @@ def test_active_travel_costing_without_automotive_enrichment(costing) -> None:
         return httpx.Response(200, json=fixture)
 
     adapter, client = _speed_limit_adapter(httpx.MockTransport(handler))
-    adapter._traffic_aware = True
     try:
         route = asyncio.run(adapter.route(RouteRequest(
             origin=Coordinate(latitude=45.4642, longitude=9.1900),
@@ -154,7 +135,6 @@ def test_active_travel_costing_without_automotive_enrichment(costing) -> None:
     assert len(payloads) == 1
     assert "costing_options" not in payloads[0]
     assert "date_time" not in payloads[0]
-    assert route.traffic_aware is False
     assert route.speed_limits == ()
 
 
@@ -201,7 +181,8 @@ def test_route_excludes_highways_and_reports_provider_highway_usage() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["costing_options"] == {
-            "auto": {"use_highways": 0.0, "exclude_highways": True}
+            "auto": {"use_highways": 0.0, "exclude_highways": True,
+                     "speed_types": ["constrained", "freeflow"]}
         }
         return httpx.Response(200, json=fixture)
 
@@ -256,39 +237,6 @@ def test_route_uses_trip_summary_as_highway_detection_fallback() -> None:
         asyncio.run(client.aclose())
 
     assert route.uses_highways is True
-
-
-def test_traffic_fallback_preserves_no_highway_costing() -> None:
-    fixture = json.loads(FIXTURE.read_text())
-    fixture["trip"]["legs"][0]["summary"]["has_highway"] = False
-    payloads: list[dict[str, object]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        payloads.append(payload)
-        if "date_time" in payload:
-            return httpx.Response(400, json={"error_code": 442, "error": "No path"})
-        return httpx.Response(200, json=fixture)
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(
-            adapter.route(
-                RouteRequest(
-                    origin=Coordinate(45.4642, 9.19),
-                    destination=Coordinate(45.4781, 9.2271),
-                    allow_highways=False,
-                )
-            )
-        )
-    finally:
-        asyncio.run(client.aclose())
-
-    assert route.uses_highways is False
-    assert payloads[0]["costing_options"]["auto"]["speed_types"]
-    assert payloads[1]["costing_options"] == {
-        "auto": {"use_highways": 0.0, "exclude_highways": True}
-    }
 
 
 def test_route_enriches_speed_limits_by_shape_index_and_merges_equal_edges() -> None:
@@ -429,211 +377,6 @@ def test_route_rejects_zero_cost_provider_result_as_non_navigable() -> None:
         asyncio.run(client.aclose())
 
 
-def test_traffic_aware_route_uses_current_depart_at_when_departure_is_omitted() -> None:
-    fixture = json.loads(FIXTURE.read_text())
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        if "date_time" in payload:
-            date_time = payload["date_time"]
-            assert date_time["type"] == 1
-            implicit_departure = datetime.fromisoformat(date_time["value"]).replace(
-                tzinfo=ZoneInfo("Europe/Rome")
-            )
-            assert abs(
-                (datetime.now(ZoneInfo("Europe/Rome")) - implicit_departure).total_seconds()
-            ) < 90
-            assert payload["prioritize_bidirectional"] is True
-            assert payload["costing_options"] == {
-                "auto": {
-                    "speed_types": ["current", "predicted", "constrained", "freeflow"]
-                }
-            }
-        else:
-            assert "prioritize_bidirectional" not in payload
-        return httpx.Response(200, json=fixture)
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(adapter.route(_request()))
-    finally:
-        asyncio.run(client.aclose())
-
-    assert route.duration_seconds == 320
-    assert route.traffic_aware is True
-    assert route.traffic_delay_seconds == 0
-
-
-def test_traffic_aware_route_preserves_scheduled_departure_time() -> None:
-    fixture = json.loads(FIXTURE.read_text())
-    departure_at = datetime(2026, 8, 30, 10, 0, tzinfo=ZoneInfo("Europe/Rome"))
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        if "date_time" in payload:
-            assert payload["date_time"] == {
-                "type": 1,
-                "value": "2026-08-30T10:00",
-            }
-            assert payload["prioritize_bidirectional"] is True
-        return httpx.Response(200, json=fixture)
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(
-            adapter.route(
-                RouteRequest(
-                    origin=Coordinate(45.4642, 9.19),
-                    destination=Coordinate(44.4949, 11.3426),
-                    departure_at=departure_at,
-                )
-            )
-        )
-    finally:
-        asyncio.run(client.aclose())
-
-    assert route.provider == "valhalla"
-
-
-def test_traffic_aware_route_calculates_delay_against_graph_speed_baseline() -> None:
-    traffic_fixture = json.loads(FIXTURE.read_text())
-    traffic_fixture["trip"]["summary"]["time"] = 440
-    traffic_fixture["trip"]["legs"][0]["summary"]["time"] = 440
-    baseline_fixture = json.loads(FIXTURE.read_text())
-    payloads: list[dict[str, object]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        payloads.append(payload)
-        return httpx.Response(
-            200,
-            json=traffic_fixture if "date_time" in payload else baseline_fixture,
-        )
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(adapter.route(_request()))
-    finally:
-        asyncio.run(client.aclose())
-
-    assert len(payloads) == 2
-    assert route.duration_seconds == 440
-    assert route.traffic_aware is True
-    assert route.traffic_delay_seconds == 120
-    assert route.traffic_fallback_used is False
-
-
-def test_traffic_aware_route_retries_with_graph_speeds_after_no_path() -> None:
-    fixture = json.loads(FIXTURE.read_text())
-    payloads: list[dict[str, object]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        payloads.append(payload)
-        if "date_time" in payload:
-            return httpx.Response(400, json={"error_code": 442, "error": "No path"})
-        return httpx.Response(200, json=fixture)
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(adapter.route(_request()))
-    finally:
-        asyncio.run(client.aclose())
-
-    assert route.provider == "valhalla"
-    assert len(payloads) == 2
-    assert payloads[0]["date_time"]["type"] == 1
-    assert "costing_options" in payloads[0]
-    assert "date_time" not in payloads[1]
-    assert "costing_options" not in payloads[1]
-    assert "prioritize_bidirectional" not in payloads[1]
-    assert route.traffic_aware is False
-    assert route.traffic_delay_seconds is None
-    assert route.traffic_fallback_used is True
-
-
-def test_traffic_aware_route_preserves_no_path_when_graph_speed_retry_also_fails() -> None:
-    request_count = 0
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        request_count += 1
-        return httpx.Response(400, json={"error_code": 442, "error": "No path"})
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        with pytest.raises(NoRouteError):
-            asyncio.run(adapter.route(_request()))
-    finally:
-        asyncio.run(client.aclose())
-
-    assert request_count == 2
-
-
-def test_scheduled_departure_is_converted_to_valhalla_local_time() -> None:
-    fixture = json.loads(FIXTURE.read_text())
-    departure_at = datetime(2026, 8, 30, 8, 0, tzinfo=ZoneInfo("UTC"))
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        if "date_time" in payload:
-            assert payload["date_time"] == {
-                "type": 1,
-                "value": "2026-08-30T10:00",
-            }
-        return httpx.Response(200, json=fixture)
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(
-            adapter.route(
-                RouteRequest(
-                    origin=Coordinate(45.4642, 9.19),
-                    destination=Coordinate(44.4949, 11.3426),
-                    departure_at=departure_at,
-                )
-            )
-        )
-    finally:
-        asyncio.run(client.aclose())
-
-    assert route.provider == "valhalla"
-
-
-def test_traffic_aware_matrix_is_time_dependent() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        assert payload["date_time"]["type"] == 1
-        assert "value" in payload["date_time"]
-        assert payload["costing_options"]["auto"]["speed_types"][0] == "current"
-        return httpx.Response(
-            200,
-            json={
-                "algorithm": "costmatrix",
-                "units": "kilometers",
-                "sources_to_targets": [
-                    [{"from_index": 0, "to_index": 0, "distance": 1.0, "time": 90}]
-                ],
-            },
-        )
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        result = asyncio.run(
-            adapter.matrix(
-                MatrixRequest(
-                    sources=(Coordinate(45.4642, 9.19),),
-                    targets=(Coordinate(45.4, 9.3),),
-                )
-            )
-        )
-    finally:
-        asyncio.run(client.aclose())
-
-    assert result.costs[0][0] is not None
-    assert result.costs[0][0].duration_seconds == 90
-
-
 def test_waypoint_route_preserves_leg_boundaries() -> None:
     fixture = json.loads(FIXTURE.read_text())
     first_leg = fixture["trip"]["legs"][0]
@@ -728,83 +471,6 @@ def test_waypoint_route_enriches_each_leg_with_its_own_speed_profile() -> None:
     assert route.legs[0].distance_meters == 2500
     assert route.legs[1].distance_meters == 2500
     assert route.legs[1].encoded_polyline == "second-leg-polyline"
-
-
-def test_traffic_aware_waypoint_route_retries_with_graph_speeds_after_no_path() -> None:
-    fixture = json.loads(FIXTURE.read_text())
-    first_leg = fixture["trip"]["legs"][0]
-    second_leg = json.loads(json.dumps(first_leg))
-    fixture["trip"]["summary"] = {"length": 5.0, "time": 640}
-    fixture["trip"]["legs"] = [first_leg, second_leg]
-    payloads: list[dict[str, object]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        payloads.append(payload)
-        if "date_time" in payload:
-            return httpx.Response(400, json={"error_code": 442, "error": "No path"})
-        return httpx.Response(200, json=fixture)
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(
-            adapter.route_with_waypoints(
-                WaypointRouteRequest(
-                    origin=Coordinate(45.4642, 9.19),
-                    destination=Coordinate(44.4949, 11.3426),
-                    waypoints=(Coordinate(45.2, 9.7),),
-                )
-            )
-        )
-    finally:
-        asyncio.run(client.aclose())
-
-    assert len(route.legs) == 2
-    assert len(payloads) == 2
-    assert "date_time" in payloads[0]
-    assert "date_time" not in payloads[1]
-    assert "costing_options" not in payloads[1]
-    assert route.traffic_fallback_used is True
-
-
-def test_traffic_aware_waypoint_route_calculates_delay_baseline() -> None:
-    traffic_fixture = json.loads(FIXTURE.read_text())
-    traffic_first_leg = traffic_fixture["trip"]["legs"][0]
-    traffic_second_leg = json.loads(json.dumps(traffic_first_leg))
-    traffic_second_leg["shape"] = "traffic-second"
-    traffic_second_leg["summary"]["time"] = 400
-    traffic_fixture["trip"]["summary"] = {"length": 6.0, "time": 800}
-    traffic_fixture["trip"]["legs"] = [traffic_first_leg, traffic_second_leg]
-
-    baseline_fixture = json.loads(json.dumps(traffic_fixture))
-    baseline_fixture["trip"]["summary"]["time"] = 650
-    baseline_fixture["trip"]["legs"][0]["summary"]["time"] = 300
-    baseline_fixture["trip"]["legs"][1]["summary"]["time"] = 350
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        return httpx.Response(
-            200,
-            json=traffic_fixture if "date_time" in payload else baseline_fixture,
-        )
-
-    adapter, client = _traffic_adapter(httpx.MockTransport(handler))
-    try:
-        route = asyncio.run(
-            adapter.route_with_waypoints(
-                WaypointRouteRequest(
-                    origin=Coordinate(45.4642, 9.19),
-                    destination=Coordinate(44.4949, 11.3426),
-                    waypoints=(Coordinate(45.2, 9.7),),
-                )
-            )
-        )
-    finally:
-        asyncio.run(client.aclose())
-
-    assert route.traffic_aware is True
-    assert route.traffic_delay_seconds == 150
-    assert route.traffic_fallback_used is False
 
 
 def test_waypoint_route_rejects_wrong_leg_count() -> None:
@@ -920,6 +586,7 @@ def test_matrix_translates_request_and_preserves_unreachable_pairs() -> None:
                 {"lat": 44.9, "lon": 10.1},
             ],
             "costing": "auto",
+            "costing_options": {"auto": {"speed_types": ["constrained", "freeflow"]}},
             "units": "kilometers",
             "verbose": True,
             "shape_format": "no_shape",
@@ -973,7 +640,8 @@ def test_matrix_applies_hard_highway_exclusion() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["costing_options"] == {
-            "auto": {"use_highways": 0.0, "exclude_highways": True}
+            "auto": {"use_highways": 0.0, "exclude_highways": True,
+                     "speed_types": ["constrained", "freeflow"]}
         }
         return httpx.Response(
             200,

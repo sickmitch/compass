@@ -21,9 +21,7 @@ CNG refuelling is modeled as waypoint dwell/service time. The server configurati
 driving plus accumulated dwell. Each later stop ETA, destination ETA and opening-hours evaluation
 uses prior dwell. The dwell is not added to detour cost.
 
-Traffic delay has an explicit state and nullable value. When Compass cannot separate a live overlay
-delay from Valhalla's route duration it reports `unavailable` and no numeric delay instead of
-inventing one.
+
 
 ## Consequences
 

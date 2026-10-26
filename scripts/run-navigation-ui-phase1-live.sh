@@ -126,7 +126,7 @@ grep -q 'surface=driving visible=true' "$ui_event_dump" || {
 echo
 echo "DEVICE ACTION B — EXPANDABLE TRIP DETAILS"
 echo
-echo "  1. Tap 'Dettagli viaggio'. Verify the sheet contains trip status, traffic/connectivity state,"
+echo "  1. Tap 'Dettagli viaggio'. Verify the sheet contains trip status, connectivity state,"
 echo "     and planned CNG stops. Take screenshot B and keep the top of the sheet visible."
 read -r -p "When screenshot B is ready, press ENTER: "
 capture_ui "$ui_details_dump"

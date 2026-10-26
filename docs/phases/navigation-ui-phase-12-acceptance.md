@@ -18,9 +18,6 @@ confirmation. Routing, station selection and the configured CNG plan remain unch
 - A reliable matched fix within the centralized station-arrival threshold enters `AT_FUEL_STOP`
   with lifecycle `REFUELING`. A normal GPS step that crosses the waypoint is captured too, avoiding
   missed arrivals between sparse fixes.
-- While the visit is active, raw fix freshness continues to update, but matched route progress,
-  maneuver and authoritative puck position stay at the station. Off-route and traffic rerouting are
-  suppressed, so stationary noise or a replay step cannot advance the trip behind the driver.
 - The engine reduces remaining dwell against wall-clock time. During the planned dwell the final
   ETA remains stable; finishing early removes unused dwell. Once the planned duration is exceeded,
   Compass still waits for confirmation and the excess delay pushes final ETA forward.

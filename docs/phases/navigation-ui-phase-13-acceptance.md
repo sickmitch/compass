@@ -29,9 +29,6 @@ This record is for **Navigation UI Phase 13**. The older backend/mobile delivery
   Compass route recalculator. That path preserves destination, remaining fuel stops and the original
   CNG range/detour policy. A failed recovery remains on the downloaded route and retries with bounded
   backoff; only a successful replacement returns to `ONLINE`/live route state.
-- While offline/recovering, the UI labels traffic as not refreshable, keeps local ETA/progress, and
-  suppresses opening/price claims whose freshness cannot be established. Route, maneuver, voice and
-  CNG waypoint guidance continue from local state.
 - MapLibre keeps the existing bounded ambient cache for already visited resources. Compass does not
   promise that an arbitrary uncached map region is available offline, and routing remains server-side.
 - The debug replay position source is part of the checkpoint. After process recreation it resumes
@@ -53,8 +50,7 @@ small input to `NavigationEngine.restore`; the engine reconstructs fuel progress
 map matching on the next accepted location.
 
 Connectivity is modeled separately from GPS and route source. A network callback is only an early
-availability signal: HTTP/server failures can still produce `REROUTING_UNAVAILABLE`, and no Google,
-TomTom or Valhalla request is required for local guidance. Recovery is a real, explicit route-update
+availability signal: HTTP/server failures can still produce `REROUTING_UNAVAILABLE`, and no remote routing request is required for local guidance. Recovery is a real, explicit route-update
 reason rather than an unconditional UI refresh.
 
 ## Repository-local validation

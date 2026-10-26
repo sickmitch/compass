@@ -13,8 +13,7 @@ road test:
   distance, following maneuver, speech staging, approach phase and camera no longer remain one
   maneuver behind the matched position.
 
-Android version is `0.19.2` (`versionCode=22`). No backend, API, database, traffic or route-document
-contract changed.
+Android version is `0.19.2` (`versionCode=22`).
 
 ## Automated validation
 

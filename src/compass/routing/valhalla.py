@@ -1,10 +1,8 @@
 import logging
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime
 from math import isfinite
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -31,13 +29,10 @@ from compass.routing.domain import (
 
 VALHALLA_NO_ROUTE_ERROR_CODES = {442}
 VALHALLA_MATRIX_LOCATION_ERROR_CODES = {171}
-DEFAULT_DEPARTURE_TIMEZONE = ZoneInfo("Europe/Rome")
 LOGGER = logging.getLogger("compass.routing.valhalla")
 
 
 def _use_graph_speeds(payload: dict[str, Any]) -> None:
-    payload.pop("date_time", None)
-    payload.pop("prioritize_bidirectional", None)
     payload.setdefault("costing_options", {}).setdefault("auto", {})["speed_types"] = [
         "constrained", "freeflow",
     ]
@@ -54,15 +49,6 @@ class ValhallaRoutingAdapter:
         read_timeout_seconds: float,
         user_agent: str,
         speed_limits_enabled: bool = False,
-        traffic_aware: bool = False,
-        traffic_alert_only: bool = False,
-        traffic_speed_types: tuple[str, ...] = (
-            "current",
-            "predicted",
-            "constrained",
-            "freeflow",
-        ),
-        departure_timezone: str = "Europe/Rome",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -74,134 +60,36 @@ class ValhallaRoutingAdapter:
         )
         self._headers = {"User-Agent": user_agent}
         self._speed_limits_enabled = speed_limits_enabled
-        self._traffic_aware = traffic_aware
-        self._traffic_alert_only = traffic_alert_only
-        self._traffic_speed_types = traffic_speed_types
-        self._departure_timezone = ZoneInfo(departure_timezone)
         self._client = client
 
     async def route(self, request: RouteRequest) -> BaseRoute:
-        traffic_aware = (
-            self._traffic_aware and not self._traffic_alert_only and request.costing == "auto"
-        )
+        locations = (request.origin, request.destination)
         payload = _route_payload(
-            (request.origin, request.destination),
-            costing=request.costing,
-            language=request.language,
-            departure_at=request.departure_at,
-            traffic_aware=traffic_aware,
-            traffic_speed_types=self._traffic_speed_types,
-            departure_timezone=self._departure_timezone,
-            origin_direction=request.origin_direction,
-            allow_highways=request.allow_highways,
+            locations, costing=request.costing, language=request.language,
+            origin_direction=request.origin_direction, allow_highways=request.allow_highways,
         )
-        if self._traffic_alert_only and request.costing == "auto":
-            _use_graph_speeds(payload)
         response = await self._request("POST", "/route", json=payload)
-        if traffic_aware and _is_no_route_response(response):
-            LOGGER.warning(
-                "time-dependent route found no path; retrying with Valhalla graph speeds",
-                extra={"routing_fallback": "valhalla_graph_speeds"},
-            )
-            response = await self._request(
-                "POST",
-                "/route",
-                json=_without_time_dependent_costing(payload),
-            )
-            _raise_route_http_error(response)
-            route = await self._with_base_speed_limits(
-                _parse_route(_json_mapping(response)),
-                costing=request.costing,
-            )
-            _require_highway_policy(route, allow_highways=request.allow_highways)
-            return replace(route, traffic_fallback_used=True)
         _raise_route_http_error(response)
         route = await self._with_base_speed_limits(
-            _parse_route(_json_mapping(response)),
-            costing=request.costing,
+            _parse_route(_json_mapping(response)), costing=request.costing,
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
-        if self._traffic_alert_only:
-            delay = await self._detect_traffic(payload, route)
-            return replace(route, traffic_detected=delay is not None and delay > 0,
-                           traffic_delay_seconds=delay)
-        if not traffic_aware:
-            return route
-        baseline = await self._route_baseline(payload, expected_leg_count=1)
-        return replace(
-            route,
-            traffic_aware=True,
-            traffic_delay_seconds=(
-                max(0.0, route.duration_seconds - baseline.duration_seconds)
-                if isinstance(baseline, BaseRoute)
-                else None
-            ),
-        )
+        return route
 
     async def route_with_waypoints(self, request: WaypointRouteRequest) -> WaypointRoute:
-        traffic_aware = (
-            self._traffic_aware and not self._traffic_alert_only and request.costing == "auto"
-        )
         locations = (request.origin, *request.waypoints, request.destination)
         payload = _route_payload(
-            locations,
-            costing=request.costing,
-            language=request.language,
-            departure_at=request.departure_at,
-            traffic_aware=traffic_aware,
-            traffic_speed_types=self._traffic_speed_types,
-            departure_timezone=self._departure_timezone,
-            origin_direction=request.origin_direction,
-            allow_highways=request.allow_highways,
+            locations, costing=request.costing, language=request.language,
+            origin_direction=request.origin_direction, allow_highways=request.allow_highways,
         )
-        if self._traffic_alert_only and request.costing == "auto":
-            _use_graph_speeds(payload)
         response = await self._request("POST", "/route", json=payload)
-        if traffic_aware and _is_no_route_response(response):
-            LOGGER.warning(
-                "time-dependent waypoint route found no path; retrying with Valhalla graph speeds",
-                extra={"routing_fallback": "valhalla_graph_speeds"},
-            )
-            response = await self._request(
-                "POST",
-                "/route",
-                json=_without_time_dependent_costing(payload),
-            )
-            _raise_route_http_error(response)
-            route = await self._with_waypoint_speed_limits(
-                _parse_waypoint_route(
-                    _json_mapping(response), expected_leg_count=len(locations) - 1
-                ),
-                costing=request.costing,
-            )
-            _require_highway_policy(route, allow_highways=request.allow_highways)
-            return replace(route, traffic_fallback_used=True)
         _raise_route_http_error(response)
         route = await self._with_waypoint_speed_limits(
-            _parse_waypoint_route(
-                _json_mapping(response), expected_leg_count=len(locations) - 1
-            ),
+            _parse_waypoint_route(_json_mapping(response), expected_leg_count=len(locations) - 1),
             costing=request.costing,
         )
         _require_highway_policy(route, allow_highways=request.allow_highways)
-        if self._traffic_alert_only:
-            delay = await self._detect_traffic(payload, route)
-            return replace(route, traffic_detected=delay is not None and delay > 0,
-                           traffic_delay_seconds=delay)
-        if not traffic_aware:
-            return route
-        baseline = await self._route_baseline(
-            payload, expected_leg_count=len(locations) - 1
-        )
-        return replace(
-            route,
-            traffic_aware=True,
-            traffic_delay_seconds=(
-                max(0.0, route.duration_seconds - baseline.duration_seconds)
-                if isinstance(baseline, WaypointRoute)
-                else None
-            ),
-        )
+        return route
 
     async def matrix(self, request: MatrixRequest) -> MatrixResult:
         payload = {
@@ -218,22 +106,13 @@ class ValhallaRoutingAdapter:
             "verbose": True,
             "shape_format": "no_shape",
         }
-        _apply_time_dependent_costing(
-            payload,
-            costing=request.costing,
-            departure_at=request.departure_at,
-            traffic_aware=(
-                self._traffic_aware and not self._traffic_alert_only and request.costing == "auto"
-            ),
-            traffic_speed_types=self._traffic_speed_types,
-            departure_timezone=self._departure_timezone,
-        )
+
         _apply_highway_policy(
             payload,
             costing=request.costing,
             allow_highways=request.allow_highways,
         )
-        if self._traffic_alert_only and request.costing == "auto":
+        if request.costing == "auto":
             _use_graph_speeds(payload)
         response = await self._request("POST", "/sources_to_targets", json=payload)
         if response.status_code >= 500:
@@ -264,35 +143,6 @@ class ValhallaRoutingAdapter:
             target_count=len(request.targets),
         )
 
-    async def _detect_traffic(
-        self, payload: dict[str, Any], route: BaseRoute | WaypointRoute
-    ) -> float | None:
-        """Optional congestion probe: never replace baseline geometry, legs or times."""
-        if not self._traffic_aware or payload["costing"] != "auto":
-            return None
-        from copy import deepcopy
-
-        probe = deepcopy(payload)
-        _apply_time_dependent_costing(
-            probe, costing="auto", departure_at=None, traffic_aware=True,
-            traffic_speed_types=self._traffic_speed_types,
-            departure_timezone=self._departure_timezone,
-        )
-        probe["prioritize_bidirectional"] = True
-        try:
-            response = await self._request("POST", "/route", json=probe)
-            _raise_route_http_error(response)
-            value = _json_mapping(response)
-            live = (
-                _parse_route(value) if isinstance(route, BaseRoute)
-                else _parse_waypoint_route(value, expected_leg_count=len(route.legs))
-            )
-            delay = live.duration_seconds - route.duration_seconds
-            return delay if delay > 1.0 else 0.0
-        except (RoutingUnavailableError, RoutingProviderError, NoRouteError):
-            LOGGER.warning("traffic alert unavailable; graph-speed route preserved")
-            return None
-
     async def is_ready(self) -> bool:
         try:
             response = await self._request("GET", "/status")
@@ -302,29 +152,6 @@ class ValhallaRoutingAdapter:
         except (RoutingUnavailableError, RoutingProviderError):
             return False
         return True
-
-    async def _route_baseline(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        expected_leg_count: int,
-    ) -> BaseRoute | WaypointRoute | None:
-        """Calculate a graph-speed baseline without invalidating a valid live route."""
-        try:
-            response = await self._request(
-                "POST", "/route", json=_without_time_dependent_costing(payload)
-            )
-            _raise_route_http_error(response)
-            value = _json_mapping(response)
-            if expected_leg_count == 1:
-                return _parse_route(value)
-            return _parse_waypoint_route(value, expected_leg_count=expected_leg_count)
-        except (RoutingUnavailableError, RoutingProviderError, NoRouteError):
-            LOGGER.warning(
-                "traffic route succeeded but graph-speed delay baseline was unavailable",
-                extra={"routing_fallback": "traffic_delay_unavailable"},
-            )
-            return None
 
     async def _with_base_speed_limits(
         self,
@@ -519,15 +346,6 @@ def _route_payload(
     *,
     costing: str,
     language: str,
-    departure_at: datetime | None = None,
-    traffic_aware: bool = False,
-    traffic_speed_types: tuple[str, ...] = (
-        "current",
-        "predicted",
-        "constrained",
-        "freeflow",
-    ),
-    departure_timezone: ZoneInfo = DEFAULT_DEPARTURE_TIMEZONE,
     origin_direction: RouteOriginDirection | None = None,
     allow_highways: bool = True,
 ) -> dict[str, Any]:
@@ -553,42 +371,14 @@ def _route_payload(
                 "heading_tolerance": origin_direction.heading_tolerance_degrees,
             }
         )
-    _apply_time_dependent_costing(
-        payload,
-        costing=costing,
-        departure_at=departure_at,
-        traffic_aware=traffic_aware,
-        traffic_speed_types=traffic_speed_types,
-        departure_timezone=departure_timezone,
-    )
+    if costing == "auto":
+        _use_graph_speeds(payload)
     _apply_highway_policy(
         payload,
         costing=costing,
         allow_highways=allow_highways,
     )
-    if traffic_aware:
-        # Valhalla's bidirectional mode consumes current traffic close to the
-        # departure and fades it along the route. It avoids the convergence
-        # limits of single-direction time-dependent A* on long road routes.
-        payload["prioritize_bidirectional"] = True
     return payload
-
-
-def _apply_time_dependent_costing(
-    payload: dict[str, Any],
-    *,
-    costing: str,
-    departure_at: datetime | None,
-    traffic_aware: bool,
-    traffic_speed_types: tuple[str, ...],
-    departure_timezone: ZoneInfo,
-) -> None:
-    if not traffic_aware:
-        return
-    payload["date_time"] = _date_time_payload(departure_at, departure_timezone)
-    if costing == "auto":
-        costing_options = payload.setdefault("costing_options", {})
-        costing_options.setdefault("auto", {})["speed_types"] = list(traffic_speed_types)
 
 
 def _apply_highway_policy(
@@ -605,26 +395,6 @@ def _apply_highway_policy(
     auto_options.update({"use_highways": 0.0, "exclude_highways": True})
 
 
-def _date_time_payload(
-    departure_at: datetime | None,
-    departure_timezone: ZoneInfo,
-) -> dict[str, Any]:
-    if departure_at is None:
-        # Valhalla 3.8.3 can return an immediate 442 for long current-time
-        # routes forced through bidirectional A*. An explicit depart-at value
-        # for the current local minute has the same traffic semantics and is
-        # the mode for which prioritize_bidirectional provides time-aware
-        # forward costing with a recosted reverse search.
-        departure_at = datetime.now(departure_timezone)
-    if departure_at.tzinfo is None or departure_at.utcoffset() is None:
-        raise ValueError("departure_at must include a UTC offset")
-    local_departure = departure_at.astimezone(departure_timezone)
-    return {
-        "type": 1,
-        "value": local_departure.replace(tzinfo=None).isoformat(timespec="minutes"),
-    }
-
-
 def _raise_route_http_error(response: httpx.Response) -> None:
     if response.status_code >= 500:
         raise RoutingUnavailableError(f"Valhalla returned HTTP {response.status_code}")
@@ -637,39 +407,6 @@ def _raise_route_http_error(response: httpx.Response) -> None:
         )
     if response.status_code >= 300:
         raise RoutingProviderError(f"Valhalla returned unexpected HTTP {response.status_code}")
-
-
-def _is_no_route_response(response: httpx.Response) -> bool:
-    if response.status_code < 400:
-        return False
-    try:
-        return _optional_int(_json_mapping(response).get("error_code")) in (
-            VALHALLA_NO_ROUTE_ERROR_CODES
-        )
-    except RoutingProviderError:
-        return False
-
-
-def _without_time_dependent_costing(payload: Mapping[str, Any]) -> dict[str, Any]:
-    fallback = dict(payload)
-    fallback.pop("date_time", None)
-    fallback.pop("prioritize_bidirectional", None)
-    raw_options = fallback.get("costing_options")
-    if isinstance(raw_options, Mapping):
-        costing_options = {
-            key: dict(value) if isinstance(value, Mapping) else value
-            for key, value in raw_options.items()
-        }
-        auto_options = costing_options.get("auto")
-        if isinstance(auto_options, dict):
-            auto_options.pop("speed_types", None)
-            if not auto_options:
-                costing_options.pop("auto", None)
-        if costing_options:
-            fallback["costing_options"] = costing_options
-        else:
-            fallback.pop("costing_options", None)
-    return fallback
 
 
 def _require_highway_policy(

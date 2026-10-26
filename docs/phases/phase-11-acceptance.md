@@ -90,7 +90,6 @@ Repository-local validation passed before the live gate:
 The operator then ran `bash scripts/run-phase11-live.sh` against the live backend/device. The runner
 reported:
 
-- `/health/ready` returned ready database/routing, degraded data and `traffic=not_configured`;
 - the generated Rome-to-Florence API preflight returned Valhalla distance `273804.0` metres,
   duration `8776.295` seconds and 21 maneuvers;
 - Android unit tests, lint and debug APK assembly passed;

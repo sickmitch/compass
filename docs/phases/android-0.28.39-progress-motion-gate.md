@@ -3,9 +3,7 @@
 ## Changes
 
 The ETA ring is now pastel green. Its progress belongs to the navigation engine and is
-checkpointed with the session, rather than being a UI-only maximum keyed by route ID.
-Traffic refreshes replace the residual route: its local progress starts at zero, while
-journey progress continues from the fraction already completed. Repeated refreshes and
+checkpointed with the session, rather than being a UI-only maximum keyed by route ID. Repeated refreshes and
 on-route connectivity recovery preserve that fraction. Off-route, manual and fuel-stop
 replacement recalculations start a new progress baseline. Reliable fixes advance the ring
 monotonically; unreliable fixes do not advance it. Existing checkpoints default to their
@@ -27,9 +25,6 @@ From `android/`, with JDK 17 and Android SDK configured:
 ./gradlew --no-daemon testDebugUnitTest assembleDebug
 ```
 
-Regression coverage includes repeated traffic-refresh progress preservation, subsequent
-advancement, off-route reset, checkpoint serialization, duplicate timestamp handling,
-500 ms interpolation and shortest-path bearing interpolation across north.
 
 Local result: 280 Android unit tests passed; debug APK assembled and signature verified.
 Python non-integration regression suite: 446 passed, five PostGIS tests excluded.
@@ -48,8 +43,6 @@ adb shell am start -n org.compass.cng.debug/org.compass.cng.MainActivity
 No new settings or secrets are required; retain the existing server configuration.
 Test safely, with a passenger observing or using a replay:
 
-1. Follow a route through several turns and for longer than five minutes. The green
-   ring must not reset at turns or the periodic traffic refresh.
 2. Open/close details and the action menu while moving. Puck motion should continue
    without jumping to the most recent fix when panels update.
 3. Verify PiP/resume and restoration retain journey progress.

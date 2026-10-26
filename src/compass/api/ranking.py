@@ -26,7 +26,7 @@ from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.candidates.geometry import waypoint_route_as_base_route
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
-from compass.detours.domain import NetworkDetourPolicy, NetworkDetourRequest
+from compass.detours.domain import NetworkCostBasis, NetworkDetourPolicy, NetworkDetourRequest
 from compass.ranking.domain import RankedCandidate, RankedCandidatesRequest, RankingPolicy
 from compass.ranking.service import rank_cng_candidates
 from compass.routing.dependencies import get_routing_provider
@@ -39,7 +39,6 @@ from compass.routing.domain import (
     RoutingUnavailableError,
     WaypointRouteRequest,
 )
-from compass.traffic.service import network_cost_basis_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["ranking"])
 
@@ -244,7 +243,7 @@ async def ranked_candidates(
             ),
             ranking_policy=ranking_policy,
             max_route_geometry_points=settings.route_geometry_max_points,
-            cost_basis=network_cost_basis_from_settings(settings),
+            cost_basis=NetworkCostBasis(),
             base_route=base_route,
         )
     except NoRouteError:

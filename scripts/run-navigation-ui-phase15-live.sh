@@ -191,7 +191,7 @@ cat <<'CHECKS'
 OPERATOR CHECK D — COMMON SUMMARY EDITOR AND WAYPOINT LIFECYCLE
 
 In the common summary confirm destination, distance, driving/total time, CNG stop count/dwell,
-traffic and warnings are visible without route IDs or cache internals. Modifica must expand inline:
+status warnings are visible without route IDs or cache internals. Modifica must expand inline:
 endpoints and each ordinary/CNG stop are selectable, with Modifica/Elimina only for the selected
 row. Delete one stop and confirm Compass recalculates then returns to the updated summary.
 
@@ -199,7 +199,7 @@ Start demo guidance on an accepted ordinary-waypoint route. At “Tappa intermed
 and replay pause with no dwell; explicit completion resumes the second leg and recomputes ETA. If a
 safe real GPS pass is practical, stationary noise must not complete the visit and moving away must
 resume after the established confirmation fixes. Also confirm the zoom-dependent puck lower bound,
-voice/traffic/offline guidance and guarded navigation termination remain unchanged.
+voice/offline guidance and guarded navigation termination remain unchanged.
 
 No automated visual inspection is performed; your report is the acceptance evidence.
 Press ENTER when complete.

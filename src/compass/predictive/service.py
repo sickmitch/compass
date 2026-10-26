@@ -256,8 +256,6 @@ async def evaluate_predictive_cng_candidates(
             remaining_route_distance_km=remaining_route_km,
             range_shortfall_to_destination_km=max(0.0, remaining_route_km - first_usable_range_km),
             destination_reachable_with_reserve=destination_reachable,
-            traffic_state=configured_cost_basis.traffic_state,
-            traffic_adjusted=configured_cost_basis.traffic_aware,
         ),
         reachability=PredictiveReachabilityMetrics(
             detour_eligible_candidate_count=len(network.candidates),

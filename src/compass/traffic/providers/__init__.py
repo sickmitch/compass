@@ -1,2 +1,0 @@
-"""Traffic provider adapters."""
-

@@ -24,8 +24,6 @@ optional fields. Keep the existing database, Valhalla tiles and Android profiles
    in order, after the directional reroute.
 5. Repeat with a CNG-aware route. Remaining mandatory fuel stops, range/reserve constraints and the
    final destination must remain present after the directional reroute.
-6. Trigger a traffic refresh or connectivity recovery without leaving the route. It must still
-   refresh normally and must not become over-constrained by an old heading.
 7. If a deviation is confirmed while nearly stationary, routing must still complete. Compass
    deliberately omits the heading constraint below 4 m/s because GPS bearing is unstable there.
 

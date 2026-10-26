@@ -113,9 +113,7 @@ Phase 3 uses OpenStreetMap extracts from Geofabrik as the default Valhalla graph
 the downloaded PBF/hash or using an immutable operator-controlled URL. The named Valhalla volume
 retains build inputs and metadata separately from application images.
 
-Routing graph data derives from OSM and remains subject to ODbL attribution obligations. The graph
-is not treated as a source of live traffic. Phase 3 exposes provider identity but makes no traffic
-freshness or traffic-aware routing claim.
+Routing graph data derives from OSM and remains subject to ODbL attribution obligations.
 
 ## Opening-hours interpretation data and software
 
@@ -145,8 +143,3 @@ operational policy and can be changed with `MIMIT_DATA_FRESHNESS_HOURS`,
 reported data state but does not conceal or delete the last successfully normalized records. Missing
 required MIMIT or reconciliation data prevents readiness. Missing/stale OSM affects optional
 enrichment and does not invalidate authoritative MIMIT station identity or prices.
-
-Traffic is a separate provider domain. Its default state remains explicitly `not_configured`, and
-Valhalla graph speeds are not presented as live traffic. The live-traffic architecture is documented
-in `docs/traffic.md`; production traffic must enter through the provider-independent traffic
-subsystem and Valhalla's native traffic overlay.

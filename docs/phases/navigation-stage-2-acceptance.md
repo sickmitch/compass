@@ -48,6 +48,6 @@ screenshots on 2026-09-02. The evidence confirms:
 - an active foreground location service and persistent Android notification;
 - background/resume without restarting the navigation session or producing a fatal exception.
 
-The backend reported traffic as unavailable during this gate. This does not invalidate Stage 2:
+This does not invalidate Stage 2:
 the route was downloaded successfully and live progress continued locally, which is the intended
 network-independent navigation boundary.

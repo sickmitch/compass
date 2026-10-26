@@ -3,7 +3,6 @@
 ## Scope
 
 This gate validates route-biased Google Places Text Search only for an ordinary intermediate stop.
-It does not alter CNG candidate selection, generic destination search, traffic, MapLibre or follow.
 
 ## Server configuration
 

@@ -79,7 +79,6 @@ data class RankedCngStations(
     val departureAt: OffsetDateTime,
     val maximumDetourMinutes: Double,
     val baseRoute: RoutePreview,
-    val trafficState: String,
     val candidates: List<RankedCngStation>,
 )
 
@@ -131,8 +130,6 @@ data class PredictiveRangeBasis(
     val rangeShortfallToDestinationKm: Double,
     val destinationReachableWithReserve: Boolean,
     val consumptionModel: String,
-    val trafficState: String,
-    val trafficAdjusted: Boolean,
 ) {
     init {
         require(effectiveCngRangeKm > 0) { "effective range must be positive" }
@@ -340,7 +337,6 @@ data class PredictiveCngSuggestion(
         departureAt = departureAt,
         maximumDetourMinutes = maximumDetourMinutes,
         baseRoute = baseRoute,
-        trafficState = rangeBasis.trafficState,
         candidates = candidates.map(PredictiveCngStation::station),
     )
 }

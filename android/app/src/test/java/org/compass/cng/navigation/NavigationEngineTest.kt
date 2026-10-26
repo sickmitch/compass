@@ -13,7 +13,7 @@ import org.junit.Test
 
 class NavigationEngineTest {
     @Test
-    fun journeyProgressSurvivesRepeatedTrafficRefreshButResetsForDeviation() {
+    fun journeyProgressSurvivesRepeatedRecoveryButResetsForDeviation() {
         val engine = testEngine()
         val original = route()
         engine.preview(original)
@@ -22,7 +22,7 @@ class NavigationEngineTest {
         val progress = engine.state.value.journeyProgressFraction
         assertTrue(progress > 0.1)
         repeat(3) { index ->
-            engine.beginRouteUpdate(RouteUpdateReason.TRAFFIC_REFRESH)
+            engine.beginRouteUpdate(RouteUpdateReason.CONNECTIVITY_RECOVERY)
             engine.replaceRoute(
                 original.copy(routeId = "refresh-$index"), 3_000L + index, null,
             )
@@ -434,7 +434,7 @@ class NavigationEngineTest {
         assertEquals(NavigationPhase.AT_FUEL_STOP, waiting.phase)
         assertTrue(requireNotNull(waiting.totalDurationRemainingSeconds) < totalAtArrival - 590.0)
         assertEquals(false, requireNotNull(waiting.activeFuelStopVisit).plannedDurationElapsed)
-        engine.beginRouteUpdate(RouteUpdateReason.TRAFFIC_REFRESH)
+        engine.beginRouteUpdate(RouteUpdateReason.CONNECTIVITY_RECOVERY)
         assertEquals(ReroutingStatus.IDLE, engine.state.value.reroutingStatus)
         assertEquals(NavigationPhase.AT_FUEL_STOP, engine.state.value.phase)
 

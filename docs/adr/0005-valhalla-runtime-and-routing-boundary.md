@@ -7,8 +7,7 @@
 
 Compass needs reproducible road-routing data for Italy, but application code must not leak
 Valhalla-specific HTTP fields into the mobile contract. Tile construction is large, changes on a
-different cadence from application images and must survive ordinary container rebuilds. Phase 3
-requires only a normal A-to-B route; corridor searches, station detours and traffic are later work.
+different cadence from application images and must survive ordinary container rebuilds.
 
 ## Decision
 
@@ -56,8 +55,7 @@ or internal exception details.
 - Mobile clients do not depend on Valhalla's `trip`, `legs`, kilometre or error response shapes.
 - The changing default Italy extract is operationally refreshable, while exact replay requires an
   immutable input URL or retained PBF and hash.
-- Multi-waypoint routing, candidate matrices, traffic, corridor pruning and station ranking remain
-  deliberately deferred.
+
 
 ## References
 

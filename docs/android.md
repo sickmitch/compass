@@ -13,32 +13,22 @@ and recalculates the route through a selected official MIMIT station.
 
 Phase 10 adds a separate predictive flow driven by a user-supplied remaining-range estimate and
 safety reserve. It shows a complete ordered reserve-preserving refuelling itinerary or an explicit
-no-refill/no-safe-itinerary state. Each planned stop assumes a full refill to the effective range.
-Phase 11 adds editable coordinates. Navigation Stage 1 then introduces the server-backed
-`NavigationRoute`, explicit navigation-session boundary and the `Avvia navigazione` route handoff.
-Navigation Stage 2 adds foreground location, local route matching/progress and the MapLibre
-navigation renderer. Navigation Stage 3 adds speed-aware Italian voice guidance, dynamic camera
-follow/remaining-route overview, confirmed off-route rerouting through Compass, five-minute traffic
-route refresh and in-place route replacement. After the physical-device gate passed on 2026-09-02,
+no-refill/no-safe-itinerary state. Each planned stop assumes a full refill to the effective range. Phase 11 adds editable coordinates. Navigation Stage 1 then introduces the server-backed
+`NavigationRoute`, explicit navigation-session boundary and the `Avvia navigazione` route handoff. Navigation Stage 2 adds foreground location, local route matching/progress and the MapLibre
+navigation renderer. After the physical-device gate passed on 2026-09-02,
 the debug replay was slowed from eight geometry points per second to one point every 1.5 seconds;
-the simulated fix still reports road speed independently for maneuver timing.
-Debug API calls emit bounded `CompassApi` logcat events containing endpoint, outcome, duration and
-exception classes. Payloads and response bodies are deliberately excluded from these diagnostics.
-Search workflow transitions and route-context cardinalities use the separate `CompassPlanner` tag;
+the simulated fix still reports road speed independently for maneuver timing. Debug API calls emit bounded `CompassApi` logcat events containing endpoint, outcome, duration and
+exception classes. Payloads and response bodies are deliberately excluded from these diagnostics. Search workflow transitions and route-context cardinalities use the separate `CompassPlanner` tag;
 they likewise omit queries, coordinates, Place IDs and encoded polylines. Backend request-validation
-logs contain only the rejected field path and validation category.
-Ordinary calls retain the short global network limits. Predictive candidate evaluation alone uses a
+logs contain only the rejected field path and validation category. Ordinary calls retain the short global network limits. Predictive candidate evaluation alone uses a
 240-second read/call limit because a bounded full-range itinerary may require multiple sequential
-Valhalla matrix batches; its actual elapsed time is recorded in the same event stream.
-Navigation Stage 4 adds an explicit next-stop skip/replacement confirmation. It replans from the
+Valhalla matrix batches; its actual elapsed time is recorded in the same event stream. Navigation Stage 4 adds an explicit next-stop skip/replacement confirmation. It replans from the
 snapped position with the unavailable MIMIT ID excluded and commits only a complete range-safe
 itinerary. Its physical-device gate passed on 2026-09-02.
 
 Android 0.27.3 constrains a confirmed off-route recalculation to the raw GPS direction of travel
 when speed is at least 4 m/s. The request carries a 45-degree origin tolerance through every direct,
-ordinary-waypoint and CNG-aware reroute path. Traffic refreshes, connectivity recovery and manual
-route updates do not add this constraint, and low-speed fixes deliberately fall back to normal
-Valhalla origin snapping because their bearing is not reliable enough.
+ordinary-waypoint and CNG-aware reroute path.
 
 Android 0.28.0 activates `Posizioni preferite` for partenza, destinazione and ordinary intermediate
 stops. Favorites live in app-private `SharedPreferences`, survive process restarts and can be
@@ -78,23 +68,16 @@ available GPS/network fix and writes it into the visible origin fields; the driv
 route-dependent planning state. Navigation startup independently requires the Android notification
 permission on API 33+, even when location was already granted. A debug off-route injection pauses
 demo fixes only while rerouting and resumes replay on the committed replacement route. Zero-cost
-routing responses are rejected as non-navigable. The
-navigation preview separately shows driving time, traffic-delay availability, cumulative CNG dwell
-and total trip duration.
+routing responses are rejected as non-navigable.
 
 Phase 13 adds durable, versioned private-device caching for the active route, geometry, maneuvers,
 planned CNG waypoints and range policy. A process restart restores an explicitly cached preview;
 `Termina navigazione` clears it. Exact recent place queries can fall back to one of the ten cached
-result sets only after a network/server failure. The active screen distinguishes local cached-route
-guidance, unavailable rerouting, unavailable traffic and cached CNG data. MapLibre's configurable
-ambient cache retains resources already viewed but does not guarantee an arbitrary offline region.
-Android version is `0.28.33` (`versionCode=79`).
+result sets only after a network/server failure. MapLibre's configurable
+ambient cache retains resources already viewed but does not guarantee an arbitrary offline region. Android version is `0.28.33` (`versionCode=79`).
 
 The global Options screen persists a system/light/dark theme choice, the default voice-guidance
-state and whether new route calculations may use motorways. It reuses the existing private
-favourites and encrypted server-connection stores, and loads
-backend/traffic diagnostics from `/health/live` and `/api/v1/traffic/health` only while its Info
-panel is open. Form screens share one title-only header. The explicit back arrow is displayed for
+state and whether new route calculations may use motorways. Form screens share one title-only header. The explicit back arrow is displayed for
 three-button/two-button system navigation and hidden when Android reports gestural navigation;
 system Back remains available in either mode.
 
@@ -174,10 +157,7 @@ Navigation UI Phase 12.
 
 Navigation UI Phase 13 upgrades the private route cache to an active-session checkpoint. It restores
 the last matched pose/progress, maneuver state, remaining values, voice preference and CNG stop or
-refuelling lifecycle, then automatically resumes the foreground service after process recreation.
-Normal progress writes are throttled to five seconds; critical transitions are immediate. Android
-network loss is independent of GPS: downloaded route, local ETA, maneuver/voice and waypoint
-guidance continue, while traffic and dynamic CNG evidence are explicitly unavailable. On network
+refuelling lifecycle, then automatically resumes the foreground service after process recreation. Normal progress writes are throttled to five seconds; critical transitions are immediate. On network
 return a `CONNECTIVITY_RECOVERY` update re-enters the existing CNG-aware route recalculator. Failed
 recovery attempts keep the local route and retry after 5, 15 and then 60 seconds. An active debug
 replay is persisted as the position source and resumes from its saved segment after process
@@ -215,10 +195,7 @@ from the completion time and remaining driving/CNG dwell.
 
 Trip creation now follows one animated endpoint → personalization → common-summary flow. Ordinary
 stops are reordered by long-press drag, vehicle list/form replace the lower CNG planning panel, and
-the common summary edits or removes individual planned stops inline. Manual and predictive CNG
-selections enter that overview directly; it presents distance,
-driving/total duration, fuel-stop dwell, traffic and warnings without route IDs or internal cache
-diagnostics. Puck icon size interpolates with MapLibre zoom from the established full size to a
+the common summary edits or removes individual planned stops inline. Puck icon size interpolates with MapLibre zoom from the established full size to a
 lower bound of exactly 50%. Android `0.25.3` (`versionCode=35`) adds a uniform branded Material 3
 presentation across every non-map phase and dedicated day/night Material puck artwork, without
 changing the accepted route-creation or navigation behavior. The operator reported the
@@ -350,10 +327,7 @@ roundabouts and arrival points at their routed shape coordinate.
 Android `0.28.32` (`versionCode=78`) adds **Bici** alongside Auto and A piedi in the same compact
 selector. Bicycle routes use dedicated `bicycle` costing for initial calculation, ordered stops,
 along-route detours and reroutes; saved navigation preserves the mode. Cycling has GPS/off-route
-thresholds, a speed-adaptive 45-degree camera and countdown announcements at 250/100/50/10 m.
-The summary labels cycling duration as **Pedalata**. CNG and automotive traffic/speed-limit UI remain
-automobile-only, and walking/cycling no longer trigger periodic traffic-refresh route queries.
-No new preference or server variable is needed. Rebuild the existing API container before testing
+thresholds, a speed-adaptive 45-degree camera and countdown announcements at 250/100/50/10 m. The summary labels cycling duration as **Pedalata**. No new preference or server variable is needed. Rebuild the existing API container before testing
 the APK; see [the single cycling live gate](phases/android-0.28.32-cycling-navigation-gate.md).
 
 Android `0.28.33` (`versionCode=79`) centers compact pending-CNG cards at their content width,
@@ -425,9 +399,7 @@ preserves remaining CNG stops or replans them through the established predictive
 A successful off-route replacement records the previous remaining trip duration and the new route
 duration. Compose presents `Prima`, `Ora` and their signed `Differenza` in an accessible bottom card,
 slides it into the same layout family as the trip panel, includes its measured height in camera
-padding and removes it ten seconds after the server commit. Traffic/manual refreshes do not create
-this notice, and speed-limit presentation becomes unavailable while the position is suspected or
-confirmed off-route.
+padding and removes it ten seconds after the server commit.
 
 The final `0.19.3` increment makes the no-route state explicit. On a fresh launch, the foreground
 Activity subscribes directly to GPS updates and renders the raw device position on a dedicated
@@ -483,9 +455,7 @@ rebuild. HTTPS is accepted directly. HTTP requires the user to acknowledge the c
 warning explicitly and is intended only as a fallback on a trusted private network.
 
 Navigation UI Phase 1 makes the active MapLibre view a full-screen driving surface. The primary
-overlays contain only the current/following maneuver, remaining trip values and next CNG stop.
-Traffic, GPS, cache/connectivity state, planned stops and trip actions are available in an
-expandable bottom sheet. Debug-build simulation controls and raw state have a separate
+overlays contain only the current/following maneuver, remaining trip values and next CNG stop. Debug-build simulation controls and raw state have a separate
 `Strumenti sviluppatore` screen and are not composed into the normal driving interface. The UI
 derives its display model from the existing authoritative `NavigationState`; routing and navigation
 logic remain outside Compose. The operator accepted the Phase 1 device gate on 2026-09-03 after
@@ -503,11 +473,8 @@ releases only a deliberate single-finger pan, exposing a contrasting `Ricentra`;
 without a pan restore follow automatically. Overview remains
 north-up and uses only untravelled geometry. Name-bearing style layers prefer Italian labels, map
 waypoints and the optional trip summary use CNG-specific markers, and the summary is hidden until
-the driver taps `Viaggio`. During active navigation, generic basemap POIs are filtered out while
-fuel/charging stations, toll booths, border control and available traffic signals are retained;
-Compass CNG waypoints are unaffected. This reuses the existing matched position and MapLibre APIs without
-adding a navigation SDK. The device gate is `bash scripts/run-navigation-ui-phase2-live.sh`.
-The operator accepted this gate on 2026-09-04, including the final navigation-only POI filter.
+the driver taps `Viaggio`. This reuses the existing matched position and MapLibre APIs without
+adding a navigation SDK. The device gate is `bash scripts/run-navigation-ui-phase2-live.sh`. The operator accepted this gate on 2026-09-04, including the final navigation-only POI filter.
 
 Navigation UI Phase 3 formalizes the location-to-puck pipeline without adding another navigation
 engine. `NavigationLocation` remains the raw fix. `LocationFilter` rejects inaccurate,
@@ -531,22 +498,12 @@ curved-route point, top padding is increased, and maneuver-aware zoom has a stro
 approach range before the close-turn boost. These remain centralized camera policy values.
 
 The same gate later exposed a server-side Valhalla time-dependent no-route before the Android route
-preview could load. The routing adapter performs one graph-speed retry only for a traffic-aware
-error 442. Independent Valhalla reproduction showed that the old Bologna city-centre fixture is
-temporally restricted; the startup preview and traffic gate now terminate at drive-reachable
-Bologna Centrale.
+preview could load.
 
-Navigation UI Phase 4 makes the existing live-traffic route lifecycle visible and testable. The
-backend exposes provider state, whether the returned duration actually used traffic, the provider
-observation timestamp and a delay calculated against a second Valhalla graph-speed route. Android
-shows `Traffico live incluso` only when all of that evidence is present. A fresh feed combined with
-a route fallback is shown separately as standard-speed routing, never as zero traffic delay.
 
 The same metadata is decoded and retained in the versioned route cache, preview, selected CNG route,
 multi-stop itinerary and active navigation updates. Debug route-commit logs contain only bounded
-state/delay metadata and no provider payload or credential. The Phase 4 gate is
-`bash scripts/run-navigation-ui-phase4-live.sh`; it refuses to install Android until the server
-reports fresh TomTom data, managed overlay edges and a non-fallback traffic route.
+state/delay metadata and no provider payload or credential.
 
 Navigation UI Phase 5 replaces the Liberty development baseline with two Style Specification v8
 documents included in the APK. Both use flat buildings and a restrained OpenMapTiles hierarchy;

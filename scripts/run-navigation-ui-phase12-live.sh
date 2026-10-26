@@ -100,7 +100,7 @@ OPERATOR VISUAL CHECK — NAVIGATION UI PHASE 12
    “Rifornimento completato. Riprendi il percorso.” exactly once.
 6. If the route has another CNG stop, confirm it becomes the next planned stop. Otherwise confirm
    ordinary guidance continues toward the final destination. Existing route/CNG constraints,
-   traffic state, map camera and puck behavior must remain unchanged.
+   route state, map camera and puck behavior must remain unchanged.
 
 The automated suite covers a visit that exceeds its planned duration: Compass waits for explicit
 confirmation and pushes final ETA by the excess time. The live gate does not require waiting twenty

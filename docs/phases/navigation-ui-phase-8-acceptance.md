@@ -64,15 +64,6 @@ export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
 
 ## Live gate
 
-After repository synchronization, rebuild only the API; there is no migration and the accepted
-traffic overlay must not be reset:
-
-```bash
-cd ~/docker/compass
-docker compose --profile traffic up -d --build --no-deps api
-docker compose --profile traffic ps api valhalla traffic-updater
-curl --fail --silent http://127.0.0.1:8000/health/ready
-```
 
 With the backend tunnel open, run on the workstation attached to Android:
 

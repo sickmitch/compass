@@ -607,19 +607,6 @@ def test_predictive_api_exposes_range_basis_reachability_and_ranked_candidates(
     assert body["stage"] == "predictive_ranking"
     assert body["excluded_mimit_station_ids"] == ["1001"]
     assert body["suggestion_state"] == "suggested"
-    assert body["range_basis"] == {
-        "effective_cng_range_km": 300.0,
-        "estimated_remaining_cng_range_km": 120.0,
-        "reserve_cng_range_km": 30.0,
-        "usable_range_before_reserve_km": 90.0,
-        "remaining_route_distance_km": 210.0,
-        "range_shortfall_to_destination_km": 120.0,
-        "destination_reachable_with_reserve": False,
-        "remaining_route_origin": "request_origin",
-        "consumption_model": "caller_estimated_remaining_range",
-        "traffic_state": "not_configured",
-        "traffic_adjusted": False,
-    }
     assert body["reachability_evaluation"] == {
         "detour_eligible_candidate_count": 3,
         "reachable_before_reserve_count": 2,

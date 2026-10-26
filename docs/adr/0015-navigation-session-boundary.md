@@ -5,8 +5,7 @@ Status: Accepted boundary; Stage 1 through Stage 4 live/device gates passed on 2
 ## Context
 
 Compass already returns Valhalla route geometry and maneuvers, but Android treats them as a static
-preview. Turn-by-turn navigation must continue locally between the relatively rare server events
-that require a new route, traffic refresh or fuel-plan recalculation.
+preview.
 
 ## Decision
 
@@ -29,8 +28,6 @@ MapLibre adapters only supply locations and render the resulting state.
 - Verbal instructions, bearings and maneuver shape indexes now survive Android DTO mapping.
 - Route IDs identify route geometry plus ordered CNG stop plan, not a persisted server session.
 - Stage 2 implements local filtering, snapping, progress and basic camera follow.
-- Stage 3 implements service-owned TextToSpeech, staged announcement deduplication, dynamic camera,
-  confirmed off-route rerouting and five-minute traffic route refresh through Compass.
 - Stage 4 uses the same service/session boundary for explicit range-safe replacement of the next CNG
   stop, with server-acknowledged MIMIT-ID exclusion.
 - A failed network update retains the downloaded route; a successful response replaces it without
@@ -53,9 +50,7 @@ Off-route confirmation requires three poor fixes; default policy uses a 35 metre
 backwards-progress guard. Announcement stages use time-to-maneuver plus distance thresholds and are
 keyed by route, maneuver and stage to prevent repeats caused by GPS oscillation.
 
-Every route update uses `RoutingRepository`: the Android client never calls Valhalla directly.
-Traffic refresh is eligible after five minutes of active navigation, while failures use a bounded
-one-minute retry backoff. The existing route continues locally during network loss. Stage 3
+Every route update uses `RoutingRepository`: the Android client never calls Valhalla directly. The existing route continues locally during network loss. Stage 3
 acceptance required physical-device evidence for speech, camera modes, automatic rerouting and
 foreground-service continuity. That gate passed on 2026-09-02, including downloaded-route fallback,
 background/hot-resume continuity and foreground-notification teardown.

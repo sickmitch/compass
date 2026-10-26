@@ -268,7 +268,7 @@ echo "  1. Force-close Compass from recents and reopen it to restore the default
 echo "  2. Tap 'Crea viaggio'. Enter residual 65 km, reserve 30 km, full range"
 echo "     100 km and maximum detour 30 minutes. Calculate the complete itinerary and route."
 echo "  3. Before starting, verify the navigation preview separately reports driving time,"
-echo "     20 minutes per CNG stop, cumulative refuelling time, total duration and traffic"
+echo "     20 minutes per CNG stop, cumulative refuelling time, total duration"
 echo "     delay availability. Take screenshot E."
 echo "  4. Start demo guidance. Note the first 'Prossimo rifornimento', then immediately tap"
 echo "     'Simula deviazione (debug)' before reaching that stop. Wait for automatic rerouting. The same first stop"

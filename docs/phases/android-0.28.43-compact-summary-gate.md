@@ -6,7 +6,7 @@
   Pressing it again closes the panel and restores the list icon.
 - Removed the separate general trip-details view. CNG-specific information/actions remain
   reachable by tapping the CNG card, without repeating the general trip summary.
-- Important traffic/GPS warning messages remain visible in the compact panel.
+
 
 No backend change is required. Build from `android/`:
 

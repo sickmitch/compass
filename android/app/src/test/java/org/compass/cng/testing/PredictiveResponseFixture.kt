@@ -44,8 +44,6 @@ internal fun predictiveResponseFixture(
                 put("destination_reachable_with_reserve", notNeeded)
                 put("remaining_route_origin", "request_origin")
                 put("consumption_model", "caller_estimated_remaining_range")
-                put("traffic_state", "not_configured")
-                put("traffic_adjusted", false)
             },
         )
         put(

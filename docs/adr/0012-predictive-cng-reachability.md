@@ -62,8 +62,6 @@ draws all stop markers and separates maneuvers by leg. The manual single-stop fl
 - A first reachable station is never sufficient to return `suggested`.
 - The reported 65/30/100 profile requires a multi-stop chain on Milan–Bologna; the live validator
   requires at least three refuelling stops and checks every arithmetic margin twice.
-- The plan assumes a full refill at each station. Partial fills, refill duration, queues, variable
-  consumption, traffic-adjusted consumption and telemetry remain future work.
 - The detour threshold remains a per-station eligibility rule, not a global sum over all stops.
 - Search is bounded by the already-pruned candidate set and batched matrices; it never performs one
   route request per station.

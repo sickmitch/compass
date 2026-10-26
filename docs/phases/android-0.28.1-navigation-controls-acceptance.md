@@ -4,7 +4,6 @@
 
 This increment reserves red for actual errors, makes the trip and voice controls compact icon-only
 actions, and keeps the operator's voice choice across route preview and live route replacement.
-It does not change routing, traffic, CNG planning or MapLibre rendering.
 
 ## Device checks
 
@@ -22,8 +21,7 @@ It does not change routing, traffic, CNG planning or MapLibre rendering.
    spoken.
 6. With navigation still active and muted, force-stop and reopen Compass. Restored guidance remains
    muted. Explicitly unmute and confirm voice announcements resume.
-7. Verify degraded traffic/cache, closed-station and positive added-time indications use warning or
-   neutral colors rather than red. A failed reroute and inline validation/provider errors remain red.
+
 
 Return pass/fail for all seven checks. If mute changes without operator input, also return the
 bounded `CompassNavigation` logcat output printed by the gate script and identify whether it

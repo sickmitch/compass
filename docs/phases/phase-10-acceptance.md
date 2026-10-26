@@ -3,8 +3,7 @@
 Status: accepted on 2026-08-30.
 
 Phase 10 implements caller-estimated, reserve-aware CNG planning for the fixed accepted
-Milan-to-Bologna device scenario. It does not claim telemetry, live traffic, active navigation,
-background location or consumption prediction.
+Milan-to-Bologna device scenario.
 
 ## Corrected implementation gate
 
@@ -24,8 +23,6 @@ background location or consumption prediction.
   `no_complete_itinerary` are distinct machine states.
 - Every itinerary stop exposes previous-leg road distance/duration, ETA, opening state at that ETA,
   price/freshness, available/remaining range and a non-negative reserve margin.
-- The response explicitly declares `full_effective_range_after_each_stop`, `road_network`,
-  `request_origin`, `caller_estimated_remaining_range` and no configured live traffic.
 - `POST /api/v1/routes/with-cng-itinerary` resolves ordered MIMIT IDs in one query, requests one
   Valhalla multi-waypoint route and revalidates every actual leg. A range violation returns HTTP 409
   `cng_itinerary_out_of_range`.

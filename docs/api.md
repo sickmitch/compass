@@ -170,8 +170,6 @@ adds `CNG_REFUEL_DWELL_SECONDS` for every CNG stop (1,200 seconds by default), w
 `navigation.total_refueling_dwell_seconds` exposes that non-driving component explicitly. Route
 IDs are derived from the returned geometry and ordered fuel-stop IDs; they change when the route or
 fuel plan changes. Selected stops expose `expected_arrival_at` and `dwell_time_seconds`.
-`traffic_delay_state=unavailable` pairs with a null delay when no defensible separate live-delay
-estimate exists; the client must not turn that into zero delay.
 
 Route requests optionally accept `origin_heading_degrees` in `[0, 360)` together with
 `origin_heading_tolerance_degrees` in `[0, 180]`. Compass uses these fields only for a moving
@@ -189,7 +187,7 @@ contains a motorway.
 
 Base routes and ordinary intermediate-waypoint routes accept `costing="auto"` (default) or
 `costing="pedestrian"` or `costing="bicycle"`. Walking/cycling requests do not use live automotive
-traffic, motorway policy or
+motorway policy or
 graph speed-limit enrichment. CNG corridor, candidate, selected-station and predictive-planning
 operations remain strictly `auto`: fuel-range semantics do not apply to walking or cycling.
 The selected costing is also accepted in along-route search context and used to verify stop detours;
@@ -204,8 +202,7 @@ named `driving_duration_seconds` denote travel duration for the requested mode.
 waypoints and destination. It asks the existing Valhalla adapter for one waypoint route and returns
 one sequenced leg more than the stop count. The outer kinds are `origin_to_intermediate_stop` and
 `intermediate_stop_to_destination`; inner legs are `intermediate_stop_to_intermediate_stop`.
-Navigation timing has `refueling_stop_count=0` and no added dwell. Automotive traffic refresh is
-performed only for `auto`, including on waypoint routes. The singular endpoint remains for older clients.
+Navigation timing has `refueling_stop_count=0` and no added dwell. The singular endpoint remains for older clients.
 
 ```json
 {
@@ -246,16 +243,9 @@ separately from `excluded_by_detour_count`.
 
 Candidate detour time and extra distance use a direct origin-to-destination comparison cell from
 the same Valhalla matrix request as the origin-to-station cells. This keeps the base and constrained
-costs on the same routing algorithm, departure instant and traffic model. The `/route` result remains
+costs on the same routing algorithm, nominal speed model. The `/route` result remains
 authoritative for preview geometry and maneuvers, but is not mixed arithmetically with matrix costs.
 
-When a current provider snapshot and native Valhalla overlay are both usable, `navigation` also
-contains `traffic_state=fresh`, `traffic_aware=true`, `traffic_observed_at` and
-`traffic_delay_state=estimated`. The numeric `traffic_delay_seconds` is the non-negative difference
-between the successful Valhalla traffic duration and a separate Valhalla graph-speed route for the
-same ordered locations and costing. The driving duration already includes traffic; clients must not
-add the delay to it again. A fresh provider combined with an error-442 graph-speed fallback remains
-`traffic_state=fresh` but reports `traffic_aware=false`, a null delay and no observation timestamp.
 
 ## Route through a predictive CNG itinerary
 
@@ -323,7 +313,7 @@ remaining range; subsequent legs start with the effective full range. Each stop 
 leg expose road distance, ETA, remaining range and non-negative reserve margin. Stops also expose
 opening state at their own ETA, price/freshness and contact enrichment. `range_basis` exposes the
 input arithmetic, remaining road distance, shortfall, `remaining_route_origin=request_origin`,
-`consumption_model=caller_estimated_remaining_range`, and explicit non-traffic-adjusted state.
+`consumption_model=caller_estimated_remaining_range`.
 `reachability_evaluation` and the existing spatial/network/ranking metrics make all pruning stages
 auditable. The exact required fields and nested schemas are authoritative in
 [openapi.json](openapi.json).
@@ -359,8 +349,7 @@ GET /api/v1/data-freshness
     {"source_name": "mimit_cng", "state": "stale", "source_observed_at": "2026-08-25T06:00:00Z", "completed_at": "2026-08-27T05:39:20Z", "age_seconds": 345600, "freshness_threshold_seconds": 172800},
     {"source_name": "osm_cng", "state": "fresh", "source_observed_at": "2026-08-27T05:43:42Z", "completed_at": "2026-08-27T05:46:20Z", "age_seconds": 173778, "freshness_threshold_seconds": 604800},
     {"source_name": "reconciliation", "state": "fresh", "source_observed_at": "2026-08-27T06:40:00Z", "completed_at": "2026-08-27T06:40:00Z", "age_seconds": 170400, "freshness_threshold_seconds": 172800}
-  ],
-  "traffic_state": "not_configured"
+  ]
 }
 ```
 

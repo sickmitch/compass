@@ -6,8 +6,7 @@ Status: accepted after repository-local validation and operator-assisted device 
 
 This phase replaces the general-purpose development cartography with purpose-built low-noise
 Compass day/night presentation. It covers every route preview and active-navigation map, automatic
-theme selection, deployment overrides and map-owned route/marker contrast. It does not change
-routing, live traffic, location filtering, route matching, camera policy or CNG planning.
+theme selection, deployment overrides and map-owned route/marker contrast.
 
 ## Design contract
 

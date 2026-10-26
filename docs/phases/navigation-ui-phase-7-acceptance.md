@@ -5,10 +5,7 @@ Status: accepted on backend and physical Android device on 2026-09-06.
 ## Scope
 
 This phase carries Valhalla's structured junction signs and roundabout exit count from the routing
-adapter through the public API, Android domain/cache boundary and active guidance overlay. It is a
-small continuation of Phase 6 iconography: it does not infer signs from localized instructions and
-does not add lane guidance, speed limits, route calculation changes, traffic changes or a second
-navigation engine.
+adapter through the public API, Android domain/cache boundary and active guidance overlay.
 
 ## Design contract
 
@@ -73,17 +70,8 @@ mirrored/tangent-aligned geometry for slight-left/right maneuvers.
 
 ## Live/backend and device gate
 
-After synchronizing the repository on the live server, rebuild only the API container; this phase
-has no migration and must not reset the accepted traffic overlay:
 
-```bash
-cd ~/docker/compass
-docker compose --profile traffic up -d --build --no-deps api
-docker compose --profile traffic ps api valhalla traffic-updater
-curl --fail --silent http://127.0.0.1:8000/health/ready
-```
-
-The existing Valhalla and private on-demand traffic updater must remain healthy. The real
+The real
 uncommitted `.env`, including the persisted tileset identity, remains operator-owned and unchanged.
 
 If the backend is remote, keep this tunnel open separately:

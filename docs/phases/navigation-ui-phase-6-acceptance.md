@@ -8,8 +8,7 @@ Status: accepted after repository-local validation and operator-assisted device 
 This phase replaces the provisional text-character maneuver symbols introduced in Navigation UI
 Phase 1 with a complete vector visual system over Valhalla maneuver types 0–36. It covers the
 current and following maneuver, accessibility labels, a debug-only visual catalog and the device
-gate needed to inspect rare families. It does not change route calculation, maneuver progression,
-voice guidance, traffic, CNG planning, map matching, puck motion, camera behavior or cartography.
+gate needed to inspect rare families.
 
 ## Design contract
 

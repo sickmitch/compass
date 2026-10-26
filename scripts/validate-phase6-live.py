@@ -39,8 +39,6 @@ def close(left: float, right: float, tolerance: float = 0.000005) -> bool:
 def validate_payload(payload: dict[str, Any]) -> None:
     check(payload.get("stage") == "ranking", "stage must be ranking")
     cost_basis = payload["cost_basis"]
-    check(cost_basis["traffic_state"] == "not_configured", "traffic state must be explicit")
-    check(cost_basis["traffic_aware"] is False, "traffic_aware must be false")
     check(cost_basis["distance_model"] == "road_network", "distance model must be road_network")
 
     policy = payload["ranking_policy"]

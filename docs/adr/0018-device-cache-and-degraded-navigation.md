@@ -4,8 +4,7 @@ Status: accepted; live validation completed on 2026-09-03.
 
 ## Context
 
-Mobile connectivity can disappear while guidance is active, the Compass API or geocoder can fail,
-and traffic, MIMIT price or OSM enrichment can be unavailable or stale independently. A navigation
+A navigation
 client must preserve a safe downloaded route without implying that cached dynamic information is
 current. It must also avoid moving routing intelligence into Android.
 
@@ -35,7 +34,6 @@ route and reroute.
 
 - downloaded route and local navigation available;
 - rerouting unavailable after a failed Compass update;
-- traffic delay unavailable when no defensible live delay exists;
 - restored CNG waypoint data cached, with price/opening/live enrichment explicitly not current;
 - MIMIT price timestamps/freshness and OSM opening validation remain visible in planning cards;
 - successful reconnect removes cached/rerouting warnings only after a live route commits.

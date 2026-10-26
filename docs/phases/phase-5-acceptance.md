@@ -1,8 +1,6 @@
 # Phase 5 acceptance criteria
 
 Phase 5 adds batched road-network detour eligibility over Phase 4's spatially pruned CNG stations.
-It does not evaluate opening hours, rank by price or station quality, ingest traffic, calculate fuel
-reachability, or recompute a selected multi-waypoint route.
 
 ## Implemented gate
 
@@ -18,8 +16,6 @@ reachability, or recompute a selected multi-waypoint route.
 - The response exposes road distance/duration from the previous waypoint, the onward leg, total
   route-via-station cost, extra cost and timezone-aware station/destination ETAs.
 - Metrics reconcile spatial, evaluated, reachable, unreachable, eligible and excluded counts.
-- Cost metadata explicitly states that external traffic is not configured and durations are not
-  traffic-aware.
 - `POST /api/v1/cng/detour-candidates` is strict and requires a timezone-aware `departure_at`.
 
 ## Local validation required
@@ -61,11 +57,7 @@ attempted in the repository environment.
 
 ## Live gate
 
-Follow the Phase 5 section of `docs/deployment.md`. Acceptance requires operator evidence that the
-known Milan-to-Bologna route returns deterministic, internally consistent detour results; evaluates
-only Phase 4's returned candidates; makes the expected number of matrix calls; makes no full route
-call per station; respects the inclusive ten-minute maximum; independently confirms the known San
-Zenone Ovest candidate with ordinary route calls; and labels traffic as not configured.
+Follow the Phase 5 section of `docs/deployment.md`.
 
 ## Live validation result
 
@@ -85,8 +77,6 @@ Accepted on the operator's full-Italy test server on 2026-08-28:
 - an independent three-route validation of MIMIT station `43690` (San Zenone Ovest) agreed with
   the batched result within 1 metre and approximately 1.2 seconds, comfortably inside the stated
   tolerances;
-- cost metadata reported graph speeds with traffic not configured and not traffic-aware;
 - Alembic reported `0002 (head)`.
 
-All Phase 5 acceptance criteria are satisfied. Opening-hours evaluation, multi-factor ranking,
-selected-stop route recomputation, traffic ingestion and predictive refuelling remain later gates.
+All Phase 5 acceptance criteria are satisfied.

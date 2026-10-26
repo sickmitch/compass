@@ -21,12 +21,6 @@ data class NavigationTiming(
     val departureAt: OffsetDateTime?,
     val drivingArrivalAt: OffsetDateTime?,
     val tripArrivalAt: OffsetDateTime?,
-    val trafficDelaySeconds: Double? = null,
-    val trafficDelayState: String = "unavailable",
-    val trafficState: String = "not_configured",
-    val trafficAware: Boolean = false,
-    val trafficObservedAt: OffsetDateTime? = null,
-    val trafficDetected: Boolean = false,
 ) {
     init {
         require(routeId.isNotBlank()) { "route identity must not be blank" }
@@ -39,27 +33,6 @@ data class NavigationTiming(
         require(totalRefuelingDwellSeconds >= 0) { "total dwell must not be negative" }
         require(totalTripDurationSeconds >= drivingDurationSeconds) {
             "trip duration must include driving duration"
-        }
-        require(trafficDelaySeconds == null || trafficDelaySeconds >= 0) {
-            "traffic delay must not be negative"
-        }
-        require(trafficDelayState in setOf("unavailable", "estimated")) {
-            "unsupported traffic delay state"
-        }
-        require(
-            trafficState in setOf(
-                "not_configured", "configured", "mock", "fresh", "stale", "unavailable",
-            ),
-        ) { "unsupported traffic state" }
-        require(
-            !trafficAware || (
-                trafficDelayState == "estimated" &&
-                    trafficDelaySeconds != null &&
-                    trafficState in setOf("fresh", "mock") &&
-                    trafficObservedAt != null
-            ),
-        ) {
-            "traffic-aware timing requires current, observed delay evidence"
         }
     }
 

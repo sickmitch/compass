@@ -21,7 +21,6 @@ server-side.
 - Up to ten recent successful non-empty normalized search result sets are stored. An exact query can
   fall back on network/server failure and displays the cache timestamp/source.
 - Invalid search requests/responses never fall back silently.
-- Missing traffic is labelled and route duration remains a no-live-traffic estimate.
 - Cached CNG waypoints are identified as cached; their prices/opening/live enrichment are not
   presented as current. Planning cards retain source timestamps, stale-price labels and distinct
   missing/invalid opening-hours states.
@@ -67,9 +66,7 @@ export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
 bash scripts/run-phase13-live.sh
 ```
 
-For a remote backend, keep the SSH tunnel printed by the script open. The deterministic gate
-requires readiness to report `traffic=unavailable` and uses `adb reverse` removal to interrupt only
-Compass access, without disabling the device's general network.
+For a remote backend, keep the SSH tunnel printed by the script open.
 
 Return complete output and screenshots A–G: cached search; explicit stale/unknown station data;
 continued downloaded-route navigation; foreground notification during outage; route/CNG/maneuver

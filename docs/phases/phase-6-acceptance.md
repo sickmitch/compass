@@ -1,8 +1,7 @@
 # Phase 6 acceptance criteria
 
 Phase 6 adds station-ETA opening evaluation and an explainable ranking stage over Phase 5 eligible
-candidates. It does not add traffic, station selection/route recomputation, the Phase 7 public mobile
-contract, predictive reachability or Android UI work.
+candidates.
 
 ## Implemented gate
 

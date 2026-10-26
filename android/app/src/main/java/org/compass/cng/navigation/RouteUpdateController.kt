@@ -1,9 +1,7 @@
 package org.compass.cng.navigation
 
-import org.compass.cng.domain.model.RouteTravelMode
 
 data class RouteUpdatePolicy(
-    val trafficRefreshIntervalMillis: Long = 5 * 60 * 1_000L,
     val failedAttemptBackoffMillis: Long = 60_000L,
     val connectivityRecoveryBackoffMillis: List<Long> = listOf(5_000L, 15_000L, 60_000L),
 ) {
@@ -18,14 +16,12 @@ class RouteUpdateController(
     private val policy: RouteUpdatePolicy = RouteUpdatePolicy(),
 ) {
     private var lastAttemptAtMillis: Long? = null
-    private var lastSuccessfulUpdateAtMillis: Long? = null
     private var offRouteEpisodeRequested = false
     private var connectivityRecoveryRequested = false
     private var connectivityRecoveryFailureCount = 0
 
-    fun navigationStarted(nowEpochMillis: Long) {
+    fun navigationStarted() {
         lastAttemptAtMillis = null
-        lastSuccessfulUpdateAtMillis = nowEpochMillis
         offRouteEpisodeRequested = false
         connectivityRecoveryRequested = false
         connectivityRecoveryFailureCount = 0
@@ -64,12 +60,6 @@ class RouteUpdateController(
             return RouteUpdateReason.OFF_ROUTE
         }
         if (state.offRouteStatus != OffRouteStatus.ON_ROUTE) return null
-        val lastSuccess = lastSuccessfulUpdateAtMillis ?: nowEpochMillis
-        if (state.route.travelMode == RouteTravelMode.DRIVING &&
-            nowEpochMillis - lastSuccess >= policy.trafficRefreshIntervalMillis
-        ) {
-            return RouteUpdateReason.TRAFFIC_REFRESH
-        }
         return null
     }
 
@@ -77,8 +67,7 @@ class RouteUpdateController(
         lastAttemptAtMillis = nowEpochMillis
     }
 
-    fun updateSucceeded(nowEpochMillis: Long) {
-        lastSuccessfulUpdateAtMillis = nowEpochMillis
+    fun updateSucceeded() {
         lastAttemptAtMillis = null
         connectivityRecoveryRequested = false
         connectivityRecoveryFailureCount = 0

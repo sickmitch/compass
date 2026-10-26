@@ -26,7 +26,6 @@ from compass.api.routes import router as routes_router
 from compass.api.search import router as search_router
 from compass.api.stations import router as stations_router
 from compass.api.system import router as system_router
-from compass.api.traffic import router as traffic_router
 from compass.config import Settings, get_api_settings, get_settings
 from compass.db import get_session
 from compass.freshness.service import load_data_freshness
@@ -34,8 +33,6 @@ from compass.logging import configure_logging
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import RoutingProvider
 from compass.search.dependencies import close_destination_search_runtime
-from compass.traffic.domain import TrafficHealthState
-from compass.traffic.service import traffic_health_from_settings
 
 configure_logging(get_settings().log_level)
 validation_logger = logging.getLogger("compass.api.validation")
@@ -96,11 +93,6 @@ app.include_router(
     dependencies=protected_api_dependencies,
     responses=protected_api_responses,
 )
-app.include_router(
-    traffic_router,
-    dependencies=protected_api_dependencies,
-    responses=protected_api_responses,
-)
 
 
 @app.exception_handler(RequestValidationError)
@@ -149,7 +141,6 @@ class HealthResponse(BaseModel):
     database: Literal["not_checked", "ready", "unavailable"]
     routing: Literal["not_checked", "ready", "unavailable"]
     data: Literal["not_checked", "ready", "degraded", "unavailable"]
-    traffic: Literal["not_checked"] | TrafficHealthState
 
 
 @app.get("/health/live", response_model=HealthResponse, tags=["health"])
@@ -159,7 +150,6 @@ async def live() -> HealthResponse:
         database="not_checked",
         routing="not_checked",
         data="not_checked",
-        traffic="not_checked",
     )
 
 
@@ -180,7 +170,6 @@ async def ready(
         "ready" if await routing_provider.is_ready() else "unavailable"
     )
     data_state: Literal["ready", "degraded", "unavailable"] = "unavailable"
-    traffic_state = traffic_health_from_settings(settings).provider_status
     if database_state == "ready":
         try:
             freshness = load_data_freshness(
@@ -205,12 +194,10 @@ async def ready(
             database=database_state,
             routing=routing_state,
             data=data_state,
-            traffic=traffic_state,
         )
     return HealthResponse(
         status="ok",
         database="ready",
         routing="ready",
         data=data_state,
-        traffic=traffic_state,
     )

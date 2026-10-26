@@ -2,8 +2,7 @@
 
 Phase 7 stabilizes the versioned public API around the accepted Phase 3–6 domain behavior. It adds
 station detail, route recomputation through an explicitly selected CNG stop, data freshness,
-consistent machine errors and a maintained OpenAPI artifact. It does not add predictive refuelling,
-traffic ingestion, navigation sessions or Android UI work.
+consistent machine errors and a maintained OpenAPI artifact.
 
 ## Implemented gate
 
@@ -20,8 +19,6 @@ traffic ingestion, navigation sessions or Android UI work.
 - Unknown, inactive and ungeocoded stations produce distinct 404/409 machine errors.
 - MIMIT, OSM and reconciliation freshness expose observation/completion time, age, threshold and
   `fresh`/`stale`/`future_observation`/`missing` state.
-- Missing required normalized data makes readiness 503; stale-but-present data is declared degraded
-  and remains queryable with readiness HTTP 200. Traffic remains `not_configured`.
 - `docs/openapi.json` is generated from FastAPI and a test prevents contract drift.
 - A checked-in live runner creates unambiguous request files and invokes the verifier for success
   contracts, error envelopes, leg sums, freshness and required OpenAPI paths.

@@ -45,7 +45,7 @@ maximum-detour guarantee.
   explicit confirmation remains the only commit point.
 - Page tokens never reach Android. A short opaque Compass cursor is bound to owner, session, query,
   query revision and route fingerprint and is consumed only by an explicit “Carica altri” action.
-- TomTom destination search/fallback remains disabled. TomTom traffic configuration is independent.
+
 
 ## Policy boundary
 

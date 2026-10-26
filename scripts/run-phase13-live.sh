@@ -100,15 +100,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/9] Checking backend readiness and explicit no-traffic state"
+echo "[1/9] Checking backend readiness and nominal route timing"
 readiness="$(curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 30 \
     "${api_base_url}health/ready")"
 echo "$readiness"
 grep -q '"routing":"ready"' <<<"$readiness"
-grep -q '"traffic":"unavailable"' <<<"$readiness" || {
-    echo "ERROR: this deterministic degraded-traffic gate expects traffic=unavailable." >&2
-    exit 1
-}
+
 
 echo "[2/9] Preparing Android device, clean app data and connectivity"
 "$adb_binary" "${adb_args[@]}" get-state >/dev/null
@@ -176,7 +173,7 @@ set_disconnected
 echo "Compass is unreachable from the device."
 echo "  4. Tap 'Ricalcola percorso (debug)'. The downloaded route, maneuver, local progress and"
 echo "     CNG waypoint must remain. Verify the separate navigation-local/rerouting-unavailable and"
-echo "     traffic-unavailable warnings. Take screenshot C."
+echo "     connectivity warnings. Take screenshot C."
 echo "  5. Press Home and take screenshot D of the foreground navigation notification."
 read -r -p "When screenshots C and D are ready, press ENTER: "
 grep -q 'navigation degraded: cached_route_active=true rerouting_available=false' "$event_dump" || {
@@ -203,7 +200,7 @@ echo "     saved route, maneuvers and CNG waypoints plus the cache/stale-data wa
 echo "  2. Temporarily disable Wi-Fi/mobile data (or enable airplane mode), then start demo navigation"
 echo "     from the recovered route. Verify local progress works and the previously visited map area"
 echo "     remains rendered from ambient resources. Take screenshot F with the explicit cached-route,"
-echo "     traffic-unavailable and cached-CNG labels. Restore normal device connectivity afterwards;"
+echo "     cached-CNG labels. Restore normal device connectivity afterwards;"
 echo "     Compass remains isolated until this runner restores adb reverse."
 read -r -p "When recovered-cache screenshots E and F are ready, press ENTER: "
 grep -q 'navigation route restored from cache: active=true' "$event_dump" || {

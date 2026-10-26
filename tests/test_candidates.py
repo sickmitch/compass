@@ -176,8 +176,6 @@ def test_waypoint_route_joins_legs_through_selected_stop() -> None:
             ),
         ),
         provider="valhalla",
-        traffic_aware=True,
-        traffic_delay_seconds=45,
     )
 
     base_route = waypoint_route_as_base_route(route, max_points=10)
@@ -189,7 +187,6 @@ def test_waypoint_route_joins_legs_through_selected_stop() -> None:
     )
     assert base_route.distance_meters == 8_500
     assert base_route.duration_seconds == 720
-    assert base_route.traffic_aware is True
 
 
 def test_polyline6_decodes_checked_in_valhalla_shape() -> None:

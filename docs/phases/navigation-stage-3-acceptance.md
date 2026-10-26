@@ -10,8 +10,6 @@ Status: accepted from physical-device evidence on 2026-09-02.
 - Fuel-stop approach/arrival and final arrival are first-class spoken events.
 - Off-route confirmation combines route distance, GPS accuracy, heading conflict, backwards
   progress and three consecutive poor fixes. One noisy sample cannot reroute the trip.
-- Every reroute and five-minute traffic refresh goes through the Compass repository/API. Android
-  never contacts Valhalla directly.
 - A route request failure leaves the downloaded route, local progress, maneuvers and voice guidance
   active. A success replaces the route in the existing navigation session.
 - Remaining selected CNG stops and the multi-stop fuel-range plan are carried into recalculation.
@@ -23,7 +21,6 @@ Status: accepted from physical-device evidence on 2026-09-02.
 
 ## Default policies
 
-- Traffic route refresh: every 300 seconds of active GPS navigation.
 - Failed update retry backoff: 60 seconds.
 - Off-route distance floor: 35 metres, increased to 1.5 times reported GPS accuracy.
 - Heading conflict: at least 110 degrees while moving at least 4 m/s.

@@ -2,8 +2,6 @@
 
 ## Scope
 
-Conservative cleanup of verified unused code, without changing navigation policies,
-traffic refresh, routing APIs or persisted data formats.
 
 - Removed the unreachable private `ActiveNavigationContent` implementation from
   `RoutePlannerScreen.kt`; the active navigation UI remains `ActiveNavigationScreen`.

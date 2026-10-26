@@ -34,7 +34,7 @@ from compass.candidates.domain import CorridorCandidateRequest, CorridorPolicy
 from compass.candidates.geometry import waypoint_route_as_base_route
 from compass.config import Settings, get_api_settings
 from compass.db import get_session
-from compass.detours.domain import NetworkDetourPolicy, NetworkDetourRequest
+from compass.detours.domain import NetworkCostBasis, NetworkDetourPolicy, NetworkDetourRequest
 from compass.predictive.domain import (
     GasolineFallback,
     PredictiveCandidatesRequest,
@@ -54,8 +54,6 @@ from compass.routing.domain import (
     RoutingUnavailableError,
     WaypointRouteRequest,
 )
-from compass.traffic.domain import TrafficHealthState
-from compass.traffic.service import network_cost_basis_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["predictive-refuelling"])
 
@@ -131,8 +129,6 @@ class PredictiveRangeBasisResponse(StrictModel):
     destination_reachable_with_reserve: bool
     remaining_route_origin: Literal["request_origin"]
     consumption_model: Literal["caller_estimated_remaining_range"]
-    traffic_state: TrafficHealthState
-    traffic_adjusted: bool
 
 
 class PredictiveReachabilityMetricsResponse(StrictModel):
@@ -326,7 +322,7 @@ async def predictive_candidates(
             ),
             ranking_policy=ranking_policy,
             max_route_geometry_points=settings.route_geometry_max_points,
-            cost_basis=network_cost_basis_from_settings(settings),
+            cost_basis=NetworkCostBasis(),
             dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
             base_route=base_route,
             waypoint_route=waypoint_route,

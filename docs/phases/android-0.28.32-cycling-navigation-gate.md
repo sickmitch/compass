@@ -29,8 +29,6 @@ può produrre HTTP 422, perché il precedente contratto non accetta `bicycle`.
 1. **Crea viaggio → Bici**: Auto/A piedi/Bici devono rimanere sulla stessa riga compatta.
    Calcolare una tratta breve in un'area nota con piste ciclabili. Controllare geometria e indicazioni
    rispetto alla segnaletica reale; non deve essere una rotta auto con il solo tempo modificato.
-2. In personalizzazione/riepilogo devono comparire Bici/Pedalata, senza Piano CNG, Sosta CNG,
-   conferma autostrade o stato traffico automobilistico.
 3. Aggiungere due tappe ordinarie (ricerca e mappa), riordinarle e calcolare. Destinazione e ordine
    devono restare corretti. Il tempo aggiunto nella ricerca deve usare il percorso ciclistico.
 4. Avviare la navigazione e provare a velocità di pedalata in condizioni sicure. La camera deve
@@ -56,8 +54,7 @@ curl --fail-with-body --silent --show-error \
   "${COMPASS_API_BASE_URL}api/v1/routes"
 ```
 
-Atteso: HTTP 200, geometria e manovre coerenti con bici, `navigation.traffic_aware=false`, nessun
-rifornimento o limite di velocità auto. L'accessibilità dipende dai dati OSM presenti nelle tile;
+L'accessibilità dipende dai dati OSM presenti nelle tile;
 non viene promesso un itinerario esclusivamente su piste ciclabili. Il profilo usa i default bici
 ibrida/città di Valhalla, senza profili MTB/e-bike in questo incremento.
 

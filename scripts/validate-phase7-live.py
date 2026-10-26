@@ -42,7 +42,6 @@ def main() -> int:
     assert health["database"] == "ready"
     assert health["routing"] == "ready"
     assert health["data"] in {"ready", "degraded"}
-    assert health["traffic"] == "not_configured"
 
     assert base_route["provider"] == "valhalla"
     assert float(base_route["distance_meters"]) > 0
@@ -106,7 +105,6 @@ def main() -> int:
         assert leg["maneuvers"]
 
     assert freshness["overall_state"] in {"ready", "degraded"}
-    assert freshness["traffic_state"] == "not_configured"
     sources = {item["source_name"]: item for item in freshness["sources"]}
     assert set(sources) == {"mimit_cng", "osm_cng", "reconciliation"}
     assert sources["mimit_cng"]["state"] != "missing"

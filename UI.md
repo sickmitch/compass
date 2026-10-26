@@ -42,7 +42,7 @@ Compass currently includes or is expected to include:
 - cached routes
 - offline route availability
 - rerouting/recalculation infrastructure
-- traffic integration where available
+
 
 Do not replace working infrastructure unnecessarily.
 
@@ -167,7 +167,6 @@ Detailed information should live in an expandable bottom sheet containing items 
 
 - all planned CNG stops
 - route details
-- traffic status
 - connectivity/cache state
 - skip CNG stop
 - replace CNG stop
@@ -659,7 +658,6 @@ Expose a single observable navigation state containing appropriate data such as:
 - next CNG stop
 - distance to CNG stop
 - ETA at CNG stop
-- traffic status
 - connectivity/cache status
 - camera/follow state
 
@@ -877,7 +875,7 @@ When connectivity returns:
 
 - refresh information safely;
 - do not abruptly replace the active route without reason;
-- refresh traffic/CNG freshness according to existing backend behavior.
+
 
 ---
 
@@ -956,7 +954,7 @@ Show useful information before starting:
 - number of CNG stops
 - cumulative refueling duration
 - major warnings
-- traffic availability
+
 
 Avoid showing internal route IDs or cache diagnostics in the primary UX.
 

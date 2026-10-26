@@ -847,49 +847,7 @@ private fun OptionsContent(
                 SettingsInfoRow("Server", serverBaseUrl.ifBlank { "Non configurato" })
                 SettingsInfoRow("Backend", backendInfo?.version ?: "Non disponibile")
                 SettingsInfoRow("Stato backend", backendInfo?.status ?: "Non disponibile")
-                SettingsInfoRow(
-                    "Traffico",
-                    backendInfo?.let {
-                        if (it.trafficEnabled) "${it.trafficProvider} · ${it.trafficStatus}" else "Disattivato"
-                    } ?: "Non disponibile",
-                )
-                SettingsInfoRow(
-                    "Routing con traffico",
-                    backendInfo?.trafficAwareRouting?.let { if (it) "Disponibile" else "Non disponibile" }
-                        ?: "Non disponibile",
-                )
-                SettingsInfoRow(
-                    "Tileset Valhalla",
-                    backendInfo?.valhallaTilesetVersion ?: "Non disponibile",
-                )
-                SettingsInfoRow(
-                    "Mappatura traffico",
-                    backendInfo?.trafficMappingVersion ?: "Non disponibile",
-                )
-                SettingsInfoRow("Provider route", routeProvider ?: "Nessun percorso")
-                SettingsInfoRow(
-                    "Posizione attuale",
-                    currentCoordinate?.let {
-                        "%.6f, %.6f".format(Locale.US, it.latitude, it.longitude)
-                    } ?: "GPS non disponibile",
-                )
-                SettingsInfoRow(
-                    "Stile mappa",
-                    if (BuildConfig.COMPASS_MAP_DAY_STYLE_URL.startsWith("asset://") &&
-                        BuildConfig.COMPASS_MAP_NIGHT_STYLE_URL.startsWith("asset://")) {
-                        "Integrato · chiaro/scuro"
-                    } else {
-                        "Server personalizzato"
-                    },
-                )
-                if (backendInfoLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    backendInfoError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
-                    CompassTextButton(onClick = onRefreshInfo) { Text("Aggiorna info") }
-                }
+
             }
         }
     }
@@ -1767,20 +1725,10 @@ private fun NavigationPreviewContent(
                         }
                         SummaryValue("Totale", formatDuration(route.totalTripDurationSeconds))
                     }
-                    if (route.travelMode == RouteTravelMode.DRIVING) {
-                        Text(
-                            trafficTimingText(route.timing),
+                    if (route.travelMode != RouteTravelMode.DRIVING) {
+                        Text("Percorso ${route.travelMode.navigationLabel}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (route.timing.trafficDetected) {
-                                androidx.compose.ui.graphics.Color(0xFFFFBE8A)
-                            } else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Text(
-                            "Percorso ${route.travelMode.navigationLabel}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (
                         route.fuelStops.isNotEmpty() &&
@@ -3289,7 +3237,7 @@ private fun CandidateContent(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "Deviazione ≤ ${formatMinutesLimit(rankedStations.maximumDetourMinutes)} · traffico ${trafficLabel(rankedStations.trafficState)}",
+                    "Deviazione ≤ ${formatMinutesLimit(rankedStations.maximumDetourMinutes)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -3512,7 +3460,7 @@ private fun PredictiveItineraryContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "Distanze stradali · deviazione per stazione ≤ ${formatMinutesLimit(suggestion.maximumDetourMinutes)} · traffico ${trafficLabel(suggestion.rangeBasis.trafficState)}",
+                        "Distanze stradali · deviazione per stazione ≤ ${formatMinutesLimit(suggestion.maximumDetourMinutes)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -3684,7 +3632,7 @@ private fun PredictiveStatusContent(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        "Stima fornita dal conducente · traffico ${trafficLabel(suggestion.rangeBasis.trafficState)}",
+                        "Stima fornita dal conducente",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -3748,11 +3696,6 @@ private fun RouteSummary(route: RoutePreview, modifier: Modifier = Modifier) {
             SummaryValue(label = "Durata", value = formatDuration(route.durationSeconds))
             if (route.travelMode != RouteTravelMode.DRIVING) {
                 SummaryValue(label = "Modalità", value = route.travelMode.label)
-            } else {
-                SummaryValue(
-                    label = "Traffico",
-                    value = trafficPreviewText(route.navigation),
-                )
             }
         }
     }
@@ -3978,15 +3921,6 @@ private fun formatPrice(price: CngPrice): String = String.format(
     price.unit,
 )
 
-private fun trafficLabel(trafficState: String): String = when (trafficState) {
-    "not_configured" -> "live non configurato"
-    "configured" -> "configurato, non attivo"
-    "mock" -> "mock"
-    "fresh" -> "live attivo"
-    "stale" -> "live non recente"
-    "unavailable" -> "non disponibile"
-    else -> trafficState
-}
 
 private fun predictiveStatusCopy(state: PredictiveSuggestionState): Pair<String, String> = when (state) {
     PredictiveSuggestionState.NOT_NEEDED -> Pair(

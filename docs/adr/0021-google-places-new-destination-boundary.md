@@ -16,10 +16,6 @@ Places-content restriction for use with a map, while Google business names and a
 
 ## Decision
 
-- `google_places_new` is the only registered destination-search provider during this test phase.
-  Legacy adapters remain packaged but `GEOCODING_PROVIDER=none`, `TOMTOM_SEARCH_ENABLED=false` and
-  `DESTINATION_SEARCH_FALLBACK_ENABLED=false` keep them outside the active flow. TomTom traffic has
-  independent settings and remains available.
 - Typing calls Places Autocomplete (New). Selection calls Place Details (New) once for the selected
   Place ID and reuses the same UUID-v4 Google session token.
 - Suggestions, names, addresses and provider payloads stay in transient search/configuration UI

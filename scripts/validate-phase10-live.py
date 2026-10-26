@@ -164,8 +164,6 @@ def _validate_common(
     cost_basis = value.get("cost_basis")
     _require(isinstance(cost_basis, dict), "cost_basis must be an object")
     _require(cost_basis.get("provider") == "valhalla", "provider must be valhalla")
-    _require(cost_basis.get("traffic_state") == "not_configured", "traffic state must be explicit")
-    _require(cost_basis.get("traffic_aware") is False, "live traffic must not be claimed")
 
     range_basis = value.get("range_basis")
     _require(isinstance(range_basis, dict), "range_basis must be an object")
@@ -197,7 +195,6 @@ def _validate_common(
         range_basis.get("consumption_model") == "caller_estimated_remaining_range",
         "consumption model is not explicit",
     )
-    _require(range_basis.get("traffic_adjusted") is False, "range must not claim live traffic")
 
     network = value.get("network_evaluation")
     _require(isinstance(network, dict), "network_evaluation must be an object")
@@ -525,7 +522,6 @@ def validate_all(
                 "range_validation": "all_legs_preserve_reserve",
                 "not_needed_state": "not_needed",
                 "unreachable_state": "no_reachable_station",
-                "traffic_state": "not_configured",
             },
             indent=2,
         )

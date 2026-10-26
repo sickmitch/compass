@@ -33,7 +33,7 @@ Unknown station identity is 404. An inactive station or one without usable coord
 reconciliation against configurable thresholds. Source observation time is preferred to ingestion
 completion. Missing required MIMIT/reconciliation state makes readiness unavailable; stale or
 future-observed data produces a degraded but HTTP-200 readiness state because the last successful
-dataset remains explicitly usable. Traffic remains `not_configured`.
+dataset remains explicitly usable.
 
 FastAPI remains the schema source. `scripts/export-openapi.py` generates `docs/openapi.json`; a
 contract test fails if the checked artifact diverges from runtime OpenAPI.
@@ -46,8 +46,7 @@ contract test fails if the checked artifact diverges from runtime OpenAPI.
 - Operators and clients can distinguish dependency failure, missing data and stale-but-usable data.
 - Adding another stop class later can reuse the waypoint-route boundary without changing CNG
   candidate selection internals.
-- Predictive fuel reachability, route alternatives, traffic providers and Android presentation remain
-  later phases.
+
 
 ## References
 

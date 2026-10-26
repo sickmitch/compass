@@ -23,8 +23,6 @@ a limit when Valhalla has none, change routing cost, report an offence, or add l
   accessibility description containing both current speed and limit.
 - The warning is visual only. Audible or haptic warnings require an explicit user preference and a
   later phase.
-- Camera, puck, traffic, route progress, CNG controls and foreground-service ownership are
-  unchanged.
 - Android version is `0.19.0` (`versionCode=20`).
 
 ## Repository-local validation

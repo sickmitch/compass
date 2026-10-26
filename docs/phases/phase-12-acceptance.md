@@ -28,7 +28,6 @@ fuel plan is retained while an invalid one is safely replanned.
   failure keeps the downloaded route and exposes the error.
 - Activity recreation/backgrounding retains the application-scoped session while the foreground
   service owns location and guidance. Durable process-death caching is Phase 13 scope.
-- Driving time, nullable traffic delay, stop dwell and total trip duration remain distinct.
 - `CNG_REFUEL_DWELL_SECONDS` defaults to 1,200 and is configurable through Docker/API settings.
 - One stop adds 20 minutes; multiple stops add it once per stop.
 - Later stop/destination ETAs and opening-hours checks include all prior dwell; detour cost does not.

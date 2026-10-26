@@ -34,7 +34,7 @@ class NavigationStage3Test {
     }
 
     @Test
-    fun activeTravelSkipsTrafficRefreshButStillReroutesAfterDeviation() {
+    fun activeTravelDoesNotPollButStillReroutesAfterDeviation() {
         listOf(RouteTravelMode.WALKING, RouteTravelMode.CYCLING).forEach { mode ->
             val controller = RouteUpdateController()
             val route = route("active-travel-update").copy(travelMode = mode)
@@ -43,7 +43,7 @@ class NavigationStage3Test {
                 route = route,
                 navigationPosition = position(route.origin),
             )
-            controller.navigationStarted(1_000)
+            controller.navigationStarted()
             assertNull(controller.nextUpdate(state, 301_000))
             assertEquals(RouteUpdateReason.OFF_ROUTE,
                 controller.nextUpdate(state.copy(offRouteStatus = OffRouteStatus.OFF_ROUTE), 302_000))
@@ -233,7 +233,7 @@ class NavigationStage3Test {
     }
 
     @Test
-    fun updateControllerRefreshesAtFiveMinutesAndDeduplicatesOffRouteEpisode() {
+    fun updateControllerDoesNotPollAndDeduplicatesOffRouteEpisode() {
         val controller = RouteUpdateController()
         val route = route("route_stage_3_refresh")
         val onRoute = NavigationState(
@@ -241,12 +241,12 @@ class NavigationStage3Test {
             route = route,
             navigationPosition = position(route.origin),
         )
-        controller.navigationStarted(1_000)
+        controller.navigationStarted()
 
         assertNull(controller.nextUpdate(onRoute, 300_999))
-        assertEquals(RouteUpdateReason.TRAFFIC_REFRESH, controller.nextUpdate(onRoute, 301_000))
+        assertNull(controller.nextUpdate(onRoute, 301_000))
         controller.attemptStarted(301_000)
-        controller.updateSucceeded(302_000)
+        controller.updateSucceeded()
 
         val offRoute = onRoute.copy(offRouteStatus = OffRouteStatus.OFF_ROUTE)
         assertEquals(RouteUpdateReason.OFF_ROUTE, controller.nextUpdate(offRoute, 303_000))
@@ -257,7 +257,7 @@ class NavigationStage3Test {
     }
 
     @Test
-    fun suspectedDeviationDefersTrafficRefreshUntilPositionIsReliable() {
+    fun onRouteAndSuspectedDeviationDoNotPoll() {
         val controller = RouteUpdateController()
         val route = route("route_stage_3_suspected")
         val base = NavigationState(
@@ -265,7 +265,7 @@ class NavigationStage3Test {
             route = route,
             navigationPosition = position(route.origin),
         )
-        controller.navigationStarted(1_000)
+        controller.navigationStarted()
 
         assertNull(
             controller.nextUpdate(
@@ -273,7 +273,7 @@ class NavigationStage3Test {
                 301_000,
             ),
         )
-        assertEquals(RouteUpdateReason.TRAFFIC_REFRESH, controller.nextUpdate(base, 301_000))
+        assertNull(controller.nextUpdate(base, 301_000))
     }
 
     @Test
@@ -286,7 +286,7 @@ class NavigationStage3Test {
             navigationPosition = position(route.origin),
             connectivity = NavigationConnectivity.OFFLINE,
         )
-        controller.navigationStarted(1_000L)
+        controller.navigationStarted()
 
         assertNull(controller.nextUpdate(localState, 901_000L))
 
@@ -352,7 +352,7 @@ class NavigationStage3Test {
         assertEquals(ReroutingStatus.FAILED, engine.state.value.reroutingStatus)
         assertEquals(progressBefore, engine.state.value.routeProgressFraction, 0.0)
 
-        engine.beginRouteUpdate(RouteUpdateReason.TRAFFIC_REFRESH)
+        engine.beginRouteUpdate(RouteUpdateReason.CONNECTIVITY_RECOVERY)
         engine.replaceRoute(replacement, refreshedAtEpochMillis = 3_000, currentLocation = fix)
         assertEquals(replacement.routeId, engine.state.value.route?.routeId)
         assertEquals(ReroutingStatus.IDLE, engine.state.value.reroutingStatus)

@@ -21,9 +21,6 @@ Crea viaggio
   selection on a MapLibre map. Favorite-place creation and editing were completed in Android
   0.28.0 without changing the accepted creation flow.
 - `Calcola percorso` immediately opens route personalization. There is no second continue action.
-- The personalization map is followed by distance, duration and traffic. Single CNG stop and full
-  CNG planning are side by side; ordinary stops are a separate full-width choice; the direct-route
-  action is compact and centred.
 - These planning modes are intentionally alternative. Compass does not combine an ordinary stop
   with a CNG plan until the backend fuel-reachability planner can validate both stop classes in one
   authoritative itinerary.
@@ -31,9 +28,6 @@ Crea viaggio
   reordered by long-press drag. Android 0.28.2 replaces the original distance gate with a maximum
   total added driving time: one third of the direct Valhalla duration by default, editable in
   minutes.
-- `POST /api/v1/routes/with-intermediate-stops` sends all ordered coordinates to the existing
-  Valhalla waypoint route path and returns one sequenced leg more than the stop count. Traffic
-  refresh and navigation timing are retained; CNG stop count and dwell remain zero.
 - Each ordinary stop can use current GPS position, local favorites, Google search or map
   selection. A Google result is resolved once, then shown as an exact highlighted point on a route
   preview; `Scegli` is the commit action.
@@ -50,8 +44,6 @@ Crea viaggio
   saving a profile returns to the updated list. Residual autonomy and maximum deviation are still
   explicit trip inputs.
 - Direct, ordinary-stop, single-CNG and predictive-CNG routes converge on one final summary.
-- The summary shows destination, distance, driving duration, total duration, cumulative CNG dwell,
-  traffic availability and relevant warnings. It does not show route IDs or cache internals.
 - `Modifica` expands an inline editor. Endpoints and every ordinary/CNG stop are selectable; only
   the selected row exposes modify/delete actions. Deleting a stop recalculates and returns to the
   common summary. Removing one stop from a multi-stop CNG plan reuses its autonomy/reserve inputs.
@@ -135,8 +127,6 @@ It performs no UIAutomator or screenshot inspection; the operator report is the 
 4. Vehicle list and form replace the lower CNG-planning panel instead of opening unrelated screens.
 5. Every planning mode reaches the same summary; inline editing and deletion return there after
    recalculation.
-6. Ordinary-stop arrival/resume, puck scaling, voice, traffic, offline guidance and guarded
-   termination remain operational.
 7. Every non-map surface uses the same Material 3 color, type, shape and control hierarchy in both
    system themes. The route-creation layout keeps the previously accepted flow and visually matches
    the large-title, icon-led, two-column reference.

@@ -88,7 +88,6 @@ class NavigationDrivingUiModelTest {
         assertEquals(null, ui.nextCngStop?.availabilityLabel)
         assertEquals(null, ui.nextCngStop?.price)
         assertTrue(ui.statusMessages.any { "guida locale attiva" in it.text })
-        assertTrue(ui.statusMessages.any { "Traffico non aggiornabile" in it.text })
     }
 
     @Test
@@ -277,7 +276,6 @@ class NavigationDrivingUiModelTest {
 
         assertEquals("81,5 km", ui.remainingDistance)
         assertTrue(messages.any { "rotta salvata" in it })
-        assertTrue(messages.any { "Traffico non aggiornabile" in it })
         assertTrue(messages.any { "ricalcolo non disponibile" in it })
         assertTrue(messages.any { "Dati CNG in cache" in it })
         assertTrue(messages.any { "continuo sulla rotta scaricata" in it })
@@ -301,46 +299,11 @@ class NavigationDrivingUiModelTest {
     }
 
     @Test
-    fun exposesTrafficAlertWithoutDelayMinutes() {
-        val observedAt = OffsetDateTime.of(2026, 9, 5, 7, 52, 0, 0, ZoneOffset.UTC)
-        val state = sampleState().let { sample ->
-            sample.copy(
-                route = sample.route?.copy(
-                    timing = requireNotNull(sample.route).timing.copy(
-                        trafficDelaySeconds = 480.0,
-                        trafficDelayState = "estimated",
-                        trafficState = "fresh",
-                        trafficAware = false,
-                        trafficDetected = true,
-                        trafficObservedAt = observedAt,
-                    ),
-                ),
-            )
-        }
-
-        val message = state.toDrivingUiModel().statusMessages.single {
-            "Traffico rilevato" in it.text
-        }
-
-        assertEquals(NavigationStatusLevel.WARNING, message.level)
-        assertTrue(state.toDrivingUiModel().trafficDetected)
-        assertEquals(
-            "Traffico rilevato ma non conteggiabile nell'ETA",
-            message.text,
-        )
-    }
-
-    @Test
-    fun convertsBackendUtcStopAndTrafficInstantsToTheDeviceZone() {
+    fun convertsBackendUtcStopInstantsToTheDeviceZone() {
         val state = sampleState().let { sample ->
             sample.copy(
                 route = requireNotNull(sample.route).copy(
                     timing = sample.route.timing.copy(
-                        trafficDelaySeconds = 0.0,
-                        trafficDelayState = "estimated",
-                        trafficState = "fresh",
-                        trafficAware = true,
-                        trafficObservedAt = OffsetDateTime.parse("2026-09-03T06:10:00Z"),
                     ),
                 ),
             )
@@ -351,53 +314,6 @@ class NavigationDrivingUiModelTest {
         assertEquals("22:45", ui.nextCngStop?.arrivalTime)
         assertEquals("22:45", ui.arrivalTime)
         assertTrue(ui.statusMessages.none { "ritardo" in it.text || "aggiornato" in it.text })
-    }
-
-    @Test
-    fun reportsNoTrafficForFreshFeedWithoutCongestion() {
-        val state = sampleState().let { sample ->
-            sample.copy(
-                route = sample.route?.copy(
-                    timing = requireNotNull(sample.route).timing.copy(
-                        trafficState = "fresh", trafficDelaySeconds = 0.0,
-                    ),
-                ),
-            )
-        }
-
-        assertTrue(
-            state.toDrivingUiModel().statusMessages.any {
-                it.text == "Non c'è traffico al momento."
-            },
-        )
-        assertEquals(false, state.toDrivingUiModel().trafficDetected)
-    }
-
-    @Test
-    fun clearsEtaTrafficHighlightAfterRouteUpdateAndDoesNotCallStaleDataZeroTraffic() {
-        val sample = sampleState()
-        val route = requireNotNull(sample.route)
-        val congested = sample.copy(route = route.copy(
-            timing = route.timing.copy(trafficState = "fresh", trafficDetected = true),
-        ))
-        assertTrue(congested.toDrivingUiModel().trafficDetected)
-        val updated = congested.copy(route = route.copy(
-            timing = route.timing.copy(trafficState = "stale", trafficDetected = false),
-        )).toDrivingUiModel()
-        assertEquals(false, updated.trafficDetected)
-        assertTrue(updated.statusMessages.none { it.text == "Non c'è traffico al momento." })
-    }
-
-    @Test
-    fun previewShowsMeasuredMinutesOnlyForFreshSuccessfulProbes() {
-        val timing = requireNotNull(sampleState().route).timing.copy(
-            trafficState = "fresh", trafficDelaySeconds = 125.0,
-        )
-        assertEquals("2 min", trafficPreviewText(timing))
-        assertEquals("<1 min", trafficPreviewText(timing.copy(trafficDelaySeconds = 20.0)))
-        assertEquals("0 min", trafficPreviewText(timing.copy(trafficDelaySeconds = 0.0)))
-        assertEquals("Non live", trafficPreviewText(timing.copy(trafficState = "stale")))
-        assertEquals("Non live", trafficPreviewText(timing.copy(trafficDelaySeconds = null)))
     }
 
     @Test

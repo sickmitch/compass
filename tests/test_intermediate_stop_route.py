@@ -14,8 +14,6 @@ from compass.routing.domain import (
     WaypointRoute,
     WaypointRouteRequest,
 )
-from compass.traffic.dependencies import get_traffic_route_refresher
-from compass.traffic.route_refresh import DisabledTrafficRouteRefresher
 
 
 class _WaypointProvider:
@@ -78,15 +76,10 @@ def test_intermediate_stop_route_has_two_legs_and_no_dwell(costing) -> None:
 
     async def override_settings():
         return get_settings().model_copy(
-            update={"api_auth_enabled": False, "traffic_enabled": False}
         )
-
-    async def override_refresher() -> DisabledTrafficRouteRefresher:
-        return DisabledTrafficRouteRefresher()
 
     app.dependency_overrides[get_routing_provider] = override_provider
     app.dependency_overrides[get_api_settings] = override_settings
-    app.dependency_overrides[get_traffic_route_refresher] = override_refresher
 
     async def request() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
@@ -132,15 +125,10 @@ def test_multiple_intermediate_stops_preserve_order_and_have_no_dwell(costing) -
 
     async def override_settings():
         return get_settings().model_copy(
-            update={"api_auth_enabled": False, "traffic_enabled": False}
         )
-
-    async def override_refresher() -> DisabledTrafficRouteRefresher:
-        return DisabledTrafficRouteRefresher()
 
     app.dependency_overrides[get_routing_provider] = override_provider
     app.dependency_overrides[get_api_settings] = override_settings
-    app.dependency_overrides[get_traffic_route_refresher] = override_refresher
 
     stops = [
         {"latitude": 45.1, "longitude": 10.2},

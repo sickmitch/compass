@@ -695,7 +695,6 @@ class NavigationEngine(
     ) {
         val previousState = mutableState.value
         val progressOffset = if (
-            previousState.routeUpdateReason == RouteUpdateReason.TRAFFIC_REFRESH ||
             (previousState.routeUpdateReason == RouteUpdateReason.CONNECTIVITY_RECOVERY &&
                 previousState.offRouteStatus == OffRouteStatus.ON_ROUTE)
         ) previousState.journeyProgressFraction else 0.0

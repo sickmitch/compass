@@ -10,7 +10,7 @@ from compass.config import Settings, get_settings
 
 @pytest.fixture(autouse=True)
 def isolated_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # Test-specific overrides can still enable auth/traffic or select a test DB.
+    # Test-specific overrides can still enable auth or select a test DB.
     # Never inherit credentials, provider flags or endpoints from a local .env.
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     for name in tuple(os.environ):

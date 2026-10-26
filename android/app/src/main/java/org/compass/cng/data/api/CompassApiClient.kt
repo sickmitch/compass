@@ -76,17 +76,10 @@ class CompassApiClient(
 
     suspend fun getBackendSystemInfo(): ApiBackendSystemInfo {
         val health = get<HealthResponseDto>(resolve("health/live"))
-        val traffic = get<TrafficHealthResponseDto>(resolve("api/v1/traffic/health"))
         return ApiBackendSystemInfo(
             service = health.service,
             version = health.version,
             status = health.status,
-            trafficEnabled = traffic.enabled,
-            trafficProvider = traffic.provider,
-            trafficStatus = traffic.providerStatus,
-            trafficAwareRouting = traffic.trafficAwareRouting,
-            valhallaTilesetVersion = traffic.valhallaTilesetVersion,
-            trafficMappingVersion = traffic.mappingVersion,
         )
     }
 
@@ -210,10 +203,7 @@ class CompassApiClient(
                 eventLogger(
                     "route decoded: distance_meters=${route.distanceMeters.toLong()} " +
                         "duration_seconds=${route.durationSeconds.toLong()} " +
-                        "maneuvers=${route.maneuvers.size} " +
-                        "traffic_state=${route.navigation.trafficState} " +
-                        "traffic_aware=${route.navigation.trafficAware} " +
-                        "traffic_delay_seconds=${route.navigation.trafficDelaySeconds?.toLong()}",
+                        "maneuvers=${route.maneuvers.size}",
                 )
             }
         } catch (error: IllegalArgumentException) {
@@ -552,12 +542,6 @@ data class ApiBackendSystemInfo(
     val service: String,
     val version: String,
     val status: String,
-    val trafficEnabled: Boolean,
-    val trafficProvider: String,
-    val trafficStatus: String,
-    val trafficAwareRouting: Boolean,
-    val valhallaTilesetVersion: String?,
-    val trafficMappingVersion: String?,
 )
 
 @Serializable
@@ -568,32 +552,6 @@ private data class HealthResponseDto(
     val database: String,
     val routing: String,
     val data: String,
-    val traffic: String,
-)
-
-@Serializable
-private data class TrafficHealthResponseDto(
-    val enabled: Boolean,
-    val provider: String,
-    @SerialName("provider_status") val providerStatus: String,
-    @SerialName("traffic_aware_routing") val trafficAwareRouting: Boolean,
-    @SerialName("last_fetch_started_at") val lastFetchStartedAt: String?,
-    @SerialName("last_fetch_completed_at") val lastFetchCompletedAt: String?,
-    @SerialName("last_success_at") val lastSuccessAt: String?,
-    @SerialName("provider_segments_received") val providerSegmentsReceived: Int,
-    @SerialName("segments_normalized") val segmentsNormalized: Int,
-    @SerialName("segments_matched") val segmentsMatched: Int,
-    @SerialName("segments_unmatched") val segmentsUnmatched: Int,
-    @SerialName("edges_updated") val edgesUpdated: Int,
-    @SerialName("edges_expired") val edgesExpired: Int,
-    @SerialName("provider_api_errors") val providerApiErrors: Int,
-    @SerialName("updater_consecutive_failures") val updaterConsecutiveFailures: Int,
-    @SerialName("managed_edge_count") val managedEdgeCount: Int,
-    @SerialName("feed_age_seconds") val feedAgeSeconds: Double?,
-    @SerialName("mapping_version") val mappingVersion: String?,
-    @SerialName("valhalla_tileset_version") val valhallaTilesetVersion: String?,
-    @SerialName("traffic_extract_path") val trafficExtractPath: String?,
-    val message: String?,
 )
 
 @Serializable
@@ -1091,12 +1049,6 @@ private data class NavigationTimingDto(
     @SerialName("departure_at") val departureAt: String?,
     @SerialName("driving_arrival_at") val drivingArrivalAt: String?,
     @SerialName("trip_arrival_at") val tripArrivalAt: String?,
-    @SerialName("traffic_delay_seconds") val trafficDelaySeconds: Double? = null,
-    @SerialName("traffic_delay_state") val trafficDelayState: String = "unavailable",
-    @SerialName("traffic_state") val trafficState: String = "not_configured",
-    @SerialName("traffic_aware") val trafficAware: Boolean = false,
-    @SerialName("traffic_observed_at") val trafficObservedAt: String? = null,
-    @SerialName("traffic_detected") val trafficDetected: Boolean = false,
 )
 
 @Serializable
@@ -1124,8 +1076,6 @@ private data class SpatialPruningMetricsDto(
 @Serializable
 private data class NetworkCostBasisDto(
     val provider: String,
-    @SerialName("traffic_state") val trafficState: String,
-    @SerialName("traffic_aware") val trafficAware: Boolean,
     @SerialName("duration_model") val durationModel: String,
     @SerialName("distance_model") val distanceModel: String,
 )
@@ -1284,8 +1234,6 @@ private data class PredictiveRangeBasisDto(
     val destinationReachableWithReserve: Boolean,
     @SerialName("remaining_route_origin") val remainingRouteOrigin: String,
     @SerialName("consumption_model") val consumptionModel: String,
-    @SerialName("traffic_state") val trafficState: String,
-    @SerialName("traffic_adjusted") val trafficAdjusted: Boolean,
 )
 
 @Serializable
@@ -1753,7 +1701,6 @@ private fun RankedCandidatesResponseDto.toApiRankedCandidates(): ApiRankedCandid
         departureAt = departureAt,
         maximumDetourMinutes = maximumDetourMinutes,
         baseRoute = baseRoute.toApiRoute(),
-        trafficState = costBasis.trafficState,
         candidates = candidates.map(RankedCandidateDto::toApiRankedCandidate),
     )
 }
@@ -1761,9 +1708,6 @@ private fun RankedCandidatesResponseDto.toApiRankedCandidates(): ApiRankedCandid
 private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPredictiveCandidates {
     require(stage == "predictive_ranking") { "unsupported predictive response stage" }
     require(costBasis.provider == "valhalla") { "unsupported routing provider" }
-    require(costBasis.trafficAware == rangeBasis.trafficAdjusted) {
-        "predictive traffic flags disagree"
-    }
     require(rangeBasis.remainingRouteOrigin == "request_origin") {
         "unsupported remaining-route origin"
     }
@@ -1813,7 +1757,6 @@ private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPred
         maximumDetourMinutes = maximumDetourMinutes,
         excludedMimitStationIds = excludedMimitStationIds,
         baseRoute = baseRoute.toApiRoute(),
-        trafficState = rangeBasis.trafficState,
         rangeBasis = ApiPredictiveRangeBasis(
             effectiveCngRangeKm = rangeBasis.effectiveCngRangeKm,
             estimatedRemainingCngRangeKm = rangeBasis.estimatedRemainingCngRangeKm,
@@ -1823,8 +1766,6 @@ private fun PredictiveCandidatesResponseDto.toApiPredictiveCandidates(): ApiPred
             rangeShortfallToDestinationKm = rangeBasis.rangeShortfallToDestinationKm,
             destinationReachableWithReserve = rangeBasis.destinationReachableWithReserve,
             consumptionModel = rangeBasis.consumptionModel,
-            trafficState = rangeBasis.trafficState,
-            trafficAdjusted = rangeBasis.trafficAdjusted,
         ),
         candidates = candidates.map { predictive ->
             ApiPredictiveRankedCandidate(
@@ -2203,27 +2144,6 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
                 drivingDurationSeconds - totalRefuelingDwellSeconds,
         ) <= 0.001,
     ) { "navigation trip duration does not reconcile" }
-    require(trafficDelaySeconds == null || trafficDelaySeconds >= 0) {
-        "navigation traffic delay must not be negative"
-    }
-    require(trafficDelayState in setOf("unavailable", "estimated")) {
-        "unsupported navigation traffic delay state"
-    }
-    require(
-        trafficState in setOf(
-            "not_configured", "configured", "mock", "fresh", "stale", "unavailable",
-        ),
-    ) { "unsupported navigation traffic state" }
-    require(
-        !trafficAware || (
-            trafficDelayState == "estimated" &&
-                trafficDelaySeconds != null &&
-                trafficState in setOf("fresh", "mock") &&
-                trafficObservedAt != null
-        ),
-    ) {
-        "traffic-aware navigation timing requires current, observed delay evidence"
-    }
     return ApiNavigationTiming(
         routeId = routeId,
         drivingDurationSeconds = drivingDurationSeconds,
@@ -2235,12 +2155,6 @@ private fun NavigationTimingDto?.toApiNavigationTiming(
         departureAt = departureAt,
         drivingArrivalAt = drivingArrivalAt,
         tripArrivalAt = tripArrivalAt,
-        trafficDelaySeconds = trafficDelaySeconds,
-        trafficDelayState = trafficDelayState,
-        trafficState = trafficState,
-        trafficAware = trafficAware,
-        trafficObservedAt = trafficObservedAt,
-        trafficDetected = trafficDetected,
     )
 }
 

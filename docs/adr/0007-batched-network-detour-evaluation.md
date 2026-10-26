@@ -11,8 +11,6 @@ visiting it satisfies a caller's maximum detour. Calling the full route endpoint
 station would make request cost proportional to the national inventory and discard Valhalla's
 matrix capabilities.
 
-The current routing graph has no historical, predicted or live traffic overlay. Phase 5 must not
-describe graph-speed estimates as traffic-aware or silently invent traffic freshness.
 
 ## Decision
 
@@ -56,9 +54,7 @@ The caller must supply a timezone-aware `departure_at`. Compass derives station 
 ETAs by adding graph travel durations while preserving the supplied offset. This is elapsed-time
 arithmetic, not opening-hours evaluation.
 
-The response reports `traffic_state=not_configured`, `traffic_aware=false`, graph-speed duration
-semantics, matrix counts, unreachable and threshold-excluded counts, one base-route call and zero
-per-candidate route calls. Eligible candidates are ordered deterministically by detour duration,
+Eligible candidates are ordered deterministically by detour duration,
 extra distance, road distance from the previous waypoint and station ID. This is not the
 multi-factor station ranking planned for a later phase.
 
@@ -75,8 +71,7 @@ multi-factor station ranking planned for a later phase.
   semantics.
 - An uncorrelatable station cannot discard valid results from the same initial batch; fallback work
   remains bounded by the already-pruned candidate tuple and is observable.
-- Opening status, price, multi-factor ranking, route recomputation with a selected stop and traffic
-  ingestion remain outside Phase 5.
+
 
 ## References
 

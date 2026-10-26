@@ -82,38 +82,14 @@ class CompassApiClientTest {
     }
 
     @Test
-    fun loadsBackendAndTrafficDiagnosticsWithoutExposingCredentials() = runTest {
-        server.enqueue(
-            successResponse(
-                """{"status":"ok","service":"compass-api","version":"0.1.0","database":"not_checked","routing":"not_checked","data":"not_checked","traffic":"not_checked"}""",
-            ),
-        )
-        server.enqueue(
-            successResponse(
-                """
-                {
-                  "enabled":true,"provider":"tomtom","provider_status":"available",
-                  "traffic_aware_routing":true,"last_fetch_started_at":null,
-                  "last_fetch_completed_at":null,"last_success_at":null,
-                  "provider_segments_received":2,"segments_normalized":2,
-                  "segments_matched":2,"segments_unmatched":0,"edges_updated":2,
-                  "edges_expired":0,"provider_api_errors":0,
-                  "updater_consecutive_failures":0,"managed_edge_count":2,
-                  "feed_age_seconds":10.0,"mapping_version":"openlr-v1",
-                  "valhalla_tileset_version":"valhalla-3.8.3:test",
-                  "traffic_extract_path":"/custom_files/traffic.tar","message":null
-                }
-                """.trimIndent(),
-            ),
-        )
-
+    fun loadsBackendDiagnosticsWithOneRequest() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"status":"ok","service":"compass-api","version":"0.1.0","database":"not_checked","routing":"not_checked","data":"not_checked"}""",
+        ))
         val info = client().getBackendSystemInfo()
-
         assertEquals("0.1.0", info.version)
-        assertEquals("available", info.trafficStatus)
-        assertEquals("valhalla-3.8.3:test", info.valhallaTilesetVersion)
         assertEquals("/health/live", server.takeRequest().path)
-        assertEquals("/api/v1/traffic/health", server.takeRequest().path)
+        assertEquals(1, server.requestCount)
     }
 
     @Test
@@ -142,9 +118,6 @@ class CompassApiClientTest {
         assertEquals("Parti verso sud.", route.maneuvers.single().instruction)
         assertEquals("route_1234567890abcdef1234567890abcdef", route.navigation.routeId)
         assertEquals(6_773.406, route.navigation.totalTripDurationSeconds, 0.0)
-        assertEquals(420.0, route.navigation.trafficDelaySeconds)
-        assertEquals("fresh", route.navigation.trafficState)
-        assertTrue(route.navigation.trafficAware)
         assertEquals(181, route.maneuvers.single().bearingAfter)
         assertEquals("1", route.maneuvers.single().sign?.exitNumberElements?.single()?.text)
         assertEquals(2, route.maneuvers.single().roundaboutExitCount)
@@ -646,8 +619,7 @@ class CompassApiClientTest {
                     "call_timeout_ms=0 read_timeout_ms=10000",
                 "request completed: method=POST endpoint=/api/v1/routes status=200 " +
                     "duration_ms=125",
-                "route decoded: distance_meters=210925 duration_seconds=6773 maneuvers=1 " +
-                    "traffic_state=fresh traffic_aware=true traffic_delay_seconds=420",
+                "route decoded: distance_meters=210925 duration_seconds=6773 maneuvers=1",
             ),
             events,
         )
@@ -805,7 +777,6 @@ class CompassApiClientTest {
             departureAt = "2026-08-30T10:00:00+02:00",
         )
 
-        assertEquals("not_configured", result.trafficState)
         assertEquals(1, result.candidates.size)
         val station = result.candidates.single()
         assertEquals("43690", station.mimitStationId)
@@ -892,7 +863,6 @@ class CompassApiClientTest {
         assertEquals("suggested", result.suggestionState)
         assertEquals(listOf("1001"), result.excludedMimitStationIds)
         assertEquals(90.0, result.rangeBasis.usableRangeBeforeReserveKm, 0.0)
-        assertFalse(result.rangeBasis.trafficAdjusted)
         assertEquals("43690", result.candidates.single().candidate.mimitStationId)
         assertEquals(96.894, result.candidates.single().estimatedRemainingRangeAtArrivalKm, 0.0)
         assertEquals(66.894, result.candidates.single().reserveMarginAtArrivalKm, 0.0)
@@ -1153,12 +1123,7 @@ class CompassApiClientTest {
                 "total_trip_duration_seconds": 6773.406,
                 "departure_at": "2026-09-02T08:00:00+02:00",
                 "driving_arrival_at": "2026-09-02T09:52:53.406+02:00",
-                "trip_arrival_at": "2026-09-02T09:52:53.406+02:00",
-                "traffic_delay_seconds": 420.0,
-                "traffic_delay_state": "estimated",
-                "traffic_state": "fresh",
-                "traffic_aware": true,
-                "traffic_observed_at": "2026-09-02T07:59:30+02:00"
+                "trip_arrival_at": "2026-09-02T09:52:53.406+02:00"
               }
             }
         """.trimIndent()
@@ -1195,10 +1160,7 @@ class CompassApiClientTest {
                 "dwell_seconds_per_refueling_stop":1200,
                 "total_refueling_dwell_seconds":0.0,
                 "total_trip_duration_seconds":200.0,
-                "departure_at":null,"driving_arrival_at":null,"trip_arrival_at":null,
-                "traffic_delay_seconds":null,"traffic_delay_state":"unavailable",
-                "traffic_state":"not_configured","traffic_aware":false,
-                "traffic_observed_at":null
+                "departure_at":null,"driving_arrival_at":null,"trip_arrival_at":null
               }
             }
         """.trimIndent()
@@ -1246,10 +1208,7 @@ class CompassApiClientTest {
                 "dwell_seconds_per_refueling_stop":1200,
                 "total_refueling_dwell_seconds":0.0,
                 "total_trip_duration_seconds":300.0,
-                "departure_at":null,"driving_arrival_at":null,"trip_arrival_at":null,
-                "traffic_delay_seconds":null,"traffic_delay_state":"unavailable",
-                "traffic_state":"not_configured","traffic_aware":false,
-                "traffic_observed_at":null
+                "departure_at":null,"driving_arrival_at":null,"trip_arrival_at":null
               }
             }
         """.trimIndent()

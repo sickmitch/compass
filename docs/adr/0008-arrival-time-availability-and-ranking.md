@@ -69,8 +69,7 @@ contribution and the multiplier, so no UI needs to reverse-engineer an opaque va
 - An unmatched or incomplete OSM record remains a usable station with explicit unknown availability.
 - Missing price does not exclude a station, while stale/future data cannot gain freshness value.
 - Changes to weights or freshness horizon are deployment policy changes visible in every response.
-- Traffic ingestion, personalization, selected-stop route recomputation and predictive fuel
-  reachability remain later phases.
+
 
 ## References
 

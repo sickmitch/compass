@@ -9,7 +9,6 @@ from compass.candidates.domain import (
     SpatialCandidate,
 )
 from compass.routing.domain import BaseRoute, MatrixCost
-from compass.traffic.domain import TrafficHealthState
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,11 +42,8 @@ class NetworkDetourPolicy:
 @dataclass(frozen=True, slots=True)
 class NetworkCostBasis:
     provider: Literal["valhalla"] = "valhalla"
-    traffic_state: TrafficHealthState = "not_configured"
-    traffic_aware: bool = False
     duration_model: Literal[
         "valhalla_graph_speeds",
-        "valhalla_time_dependent_traffic",
     ] = "valhalla_graph_speeds"
     distance_model: Literal["road_network"] = "road_network"
 

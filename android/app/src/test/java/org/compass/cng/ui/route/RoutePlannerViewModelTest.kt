@@ -132,12 +132,6 @@ class RoutePlannerViewModelTest {
             service = "compass-api",
             version = "0.1.0",
             status = "ok",
-            trafficEnabled = true,
-            trafficProvider = "tomtom",
-            trafficStatus = "available",
-            trafficAwareRouting = true,
-            valhallaTilesetVersion = "valhalla-3.8.3:test",
-            trafficMappingVersion = "test-v1",
         )
         val viewModel = RoutePlannerViewModel(
             routingRepository = FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
@@ -2893,7 +2887,6 @@ class RoutePlannerViewModelTest {
             departureAt = OffsetDateTime.parse("2026-08-30T10:00:00+02:00"),
             maximumDetourMinutes = 10.0,
             baseRoute = sampleRoute(),
-            trafficState = "not_configured",
             candidates = listOf(
                 RankedCngStation(
                     stationId = 716,
@@ -3046,8 +3039,6 @@ class RoutePlannerViewModelTest {
                 rangeShortfallToDestinationKm = if (isNotNeeded) 0.0 else 120.925,
                 destinationReachableWithReserve = isNotNeeded,
                 consumptionModel = "caller_estimated_remaining_range",
-                trafficState = "not_configured",
-                trafficAdjusted = false,
             ),
             candidates = candidates,
             itinerary = itinerary,
@@ -3119,8 +3110,6 @@ class RoutePlannerViewModelTest {
                 rangeShortfallToDestinationKm = 175.0,
                 destinationReachableWithReserve = false,
                 consumptionModel = "caller_estimated_remaining_range",
-                trafficState = "not_configured",
-                trafficAdjusted = false,
             ),
             candidates = listOf(
                 PredictiveCngStation(

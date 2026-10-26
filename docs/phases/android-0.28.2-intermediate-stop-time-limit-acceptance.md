@@ -22,6 +22,4 @@ stops keep zero dwell; CNG detour limits and Search Along Route behavior are unc
 5. Open `Sosta CNG` or `Piano CNG` and verify their existing maximum-detour input remains expressed
    in minutes and behaves as before; this increment must not alter CNG planning.
 
-Return pass/fail for all five checks and the complete live-gate output. A difference caused by live
-traffic is acceptable only when both direct and waypoint routes visibly use the same current
-traffic state; return screenshots and route summaries if the threshold result appears inconsistent.
+Return pass/fail for all five checks and the complete live-gate output.

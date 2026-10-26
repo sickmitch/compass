@@ -85,7 +85,7 @@ raw tables but produce a null normalized geography and an explicit unmatched out
 - OSM data never overwrites MIMIT source data; only accepted links expose enrichment.
 - Reconciliation uses conservative deterministic proximity/name rules, not address geocoding or an
   opaque fuzzy model.
-- No route, detour, opening-hours evaluation, ranking, traffic or predictive logic exists yet.
+
 
 ## Phase 3 base-routing flow
 
@@ -100,7 +100,7 @@ Geofabrik Italy/regional PBF ─> one-shot tile build ─> named volume ─> Val
 The public base-route operation supports exactly two coordinates with automobile, pedestrian or bicycle
 costing. Ordinary waypoint routes support the same modes; every CNG operation remains automobile
 only. Mode propagates through search detour verification, route identity, Android persisted sessions,
-and direct/waypoint rerouting. Non-automotive routes skip traffic overlay refresh and speed-limit
+and direct/waypoint rerouting. Non-automotive routes skip speed-limit
 enrichment. Bicycle access, geometry and estimated travel duration are delegated to Valhalla's
 `bicycle` costing with its hybrid/city defaults; this is not a car route with a reduced speed.
 See the [Valhalla bicycle costing reference](https://valhalla.github.io/valhalla/api/route/api-reference/#bicycle-costing-options).
@@ -111,7 +111,6 @@ domain objects. No source station model is consulted in this phase.
 ## Deliberate Phase 3 limits
 
 - No route corridor, CNG candidate selection, matrix call or detour calculation.
-- No traffic input or claim of traffic-aware routing.
 - No opening-hours evaluation, ranking, predictive range model or multi-waypoint public API.
 - Tile refresh remains an explicit operator job; application startup never erases the tile volume.
 
@@ -169,8 +168,6 @@ batch/call/fallback counts and the absence of per-candidate route calls.
 
 ## Deliberate Phase 5 limits
 
-- Graph speeds are used without an external traffic overlay; responses explicitly report
-  `traffic_state=not_configured` and `traffic_aware=false`.
 - ETAs are elapsed-time projections only. Opening-hours parsing and status at ETA are later work.
 - Eligibility ordering by detour cost is deterministic but is not price/opening/quality ranking.
 - Refuelling dwell time is not included in detour duration.
@@ -217,7 +214,6 @@ tie-breakers are detour duration, price presence/value and internal station ID.
 - The ranking weights are a transparent baseline policy, not a personalized model or opaque score.
 - Current MIMIT prices are ranked as unit prices; refill quantity/cost requires a future vehicle and
   tank-state model.
-- Graph-speed durations still have no external traffic overlay and remain explicitly non-traffic-aware.
 - Selecting a candidate and recomputing the route through it remains outside this phase.
 
 ## Phase 7 public contract boundary
@@ -244,10 +240,7 @@ provider response shape to clients. Inactive stations and missing station coordi
 409 domain conflicts; an unknown ID is 404.
 
 Freshness compares source observation time (or completion time where no source observation exists)
-with configurable thresholds. Missing required MIMIT or reconciliation data makes readiness 503.
-Present but stale/future data is explicitly `degraded` and remains queryable with readiness HTTP 200.
-OSM freshness can degrade enrichment quality without erasing authoritative MIMIT data. Traffic has a
-separate health state and is never inferred from graph speeds.
+with configurable thresholds. Missing required MIMIT or reconciliation data makes readiness 503. Present but stale/future data is explicitly `degraded` and remains queryable with readiness HTTP 200. OSM freshness can degrade enrichment quality without erasing authoritative MIMIT data.
 
 All public request models reject unknown fields. Validation and operational failures use a shared
 `{code,message}` JSON envelope; health responses intentionally use their dependency-state schema.
@@ -261,68 +254,6 @@ semantic content to the runtime schema.
 - Data freshness is observed on request; no scheduler/alerting infrastructure is added without an
   operational requirement.
 - Stale data thresholds are operator policy, not claims about upstream publication guarantees.
-
-## Live traffic boundary
-
-The traffic subsystem is provider-independent and feeds Valhalla rather than replacing it:
-
-```text
-provider feed ─> normalized TrafficFlowSegment ─> directed-edge matching
-                                                                │
-                                                                v
-                                         deterministic edge update planner
-                                                                │
-                                                                v
-                                                Valhalla traffic.tar overlay
-                                                                │
-                                                                v
-                                   time-dependent Valhalla route/matrix requests
-                                                                │
-                                                                v
-                                  Compass CNG detour/ranking/predictive strategy
-```
-
-The current TomTom implementation targets the base Traffic Flow API `flowSegmentData` endpoint
-available to the project key. Probe points are sampled, with a strict configurable cap, from a
-route already calculated by Valhalla. A private on-demand updater deduplicates the same itinerary
-for five minutes; it does not poll TomTom while no route is being calculated. This is suitable for
-route-corridor coverage, but it is not a nationwide bulk feed. TomTom Intermediate Traffic / Orbis
-remains a future adapter option. In every mode, TomTom payloads stop at the adapter boundary.
-Compass domain code sees normalized speeds, confidence, congestion, closure flags, OpenLR and
-optional OSM way hints. OSM way IDs are never treated as Valhalla edge IDs.
-
-Traffic remains disabled by default. When `TRAFFIC_ENABLED=true` but the Valhalla overlay is not yet
-enabled, the API reports provider configuration without claiming traffic-aware routing. When both
-`TRAFFIC_ENABLED=true` and `TRAFFIC_VALHALLA_OVERLAY_ENABLED=true`, the Valhalla adapter sends
-time-dependent route/matrix requests with current/predicted/constrained/freeflow speed types.
-
-Routing tiles, `traffic.tar` and the provider-to-directed-edge mapping are a matched set. A tile
-rebuild invalidates old traffic edge mappings; operators must regenerate the traffic extract and
-mapping before enabling live traffic again.
-
-## Current live-traffic limits
-
-- The provider boundary, mock fixtures, TomTom HTTP adapter, dynamic health endpoint and hardened
-  Docker traffic-updater service exist.
-- The native `traffic.tar` writer supports transactional set/reset batches as well as operator
-  inspection and synthetic directed-edge updates.
-- Native OpenLR decoding verifies provider direction; Valhalla geometry tracing supplies ordered
-  directed GraphIds. Independent LRP-to-GraphId resolution is not implemented yet.
-- A provider-independent planner now creates deterministic whole-edge set/reset/expiry operations
-  and a tileset-bound state schema. The route-scoped updater applies native batches and saves state
-  only after success; failed fetches retain unexpired observations and reset expired owned edges.
-- API routing behavior remains backward-compatible while traffic is disabled.
-- Synthetic traffic has proven that time-dependent Valhalla ETA changes while a request without
-  `date_time` remains static. Live TomTom matching and direction checks have also passed read-only.
-- Synthetic, read-only matching/planning, controlled writer and periodic one-probe TomTom gates have
-  passed, including API `fresh`/fallback health. Nationwide production coverage remains blocked by
-  the point/probe nature of the base API.
-- Traffic-aware CNG eligibility and ranking use Valhalla duration outputs directly; there is no
-  parallel traffic penalty. Scheduled departure is propagated to base, selected-stop, itinerary,
-  detour and predictive pairwise routing boundaries.
-- Batched matrices do not yet model a distinct path-dependent departure instant for every later
-  candidate leg. The recomputed waypoint route is authoritative after selection; exact multi-stop
-  future-leg matrix semantics remain follow-up work.
 
 ## Phase 8 Android route-preview boundary
 
@@ -393,7 +324,6 @@ combined map line while retaining the two maneuver legs and their station bounda
 - Milan and Bologna remain the deterministic endpoint pair; endpoint search/editing is not bundled
   into the CNG workflow.
 - Manual Add Stop does not estimate remaining tank state or proactively suggest a reachable stop.
-- Traffic remains disabled by default; graph-speed duration is not presented as live traffic.
 - No location permission, navigation session, voice instruction, background tracking or rerouting
   service is introduced.
 
@@ -431,9 +361,7 @@ request origin + caller range/reserve
 ```
 
 `request_origin` is the current or previous waypoint for the remaining route. The caller supplies
-estimated remaining CNG range because no telemetry integration exists. Each response identifies this
-consumption model and reports whether the underlying Valhalla durations were traffic-aware; the
-system does not reinterpret graph speeds as live traffic.
+estimated remaining CNG range because no telemetry integration exists.
 
 The predictive API returns distinct `not_needed`, `suggested`, `gasoline_fallback`, `no_reachable_station`,
 `no_eligible_station` and `no_complete_itinerary` states. `suggested` means a complete ordered chain
@@ -466,8 +394,6 @@ those metrics across route preview and ordinary rerouting so the fallback stays 
 - The maximum-detour policy remains a per-station eligibility bound. It is not a promise that the
   sum of all refuelling deviations is below one global detour value.
 - The deterministic request origin replaces live navigation progress for this gate.
-- Traffic-adjusted consumption, route-progress updates and proactive background notifications remain
-  future work.
 - Active guidance, voice, rerouting and location permissions are not bundled into predictive
   reachability. Address search and current-location selection remain future route-input work.
 
@@ -526,8 +452,7 @@ that projection is treated as route truth.
 On confirmation, `RouteUpdateController` deduplicates the episode and
 `CompassNavigationRouteRecalculator` uses the raw GPS coordinate as the new origin. A successful
 replacement publishes a transient duration comparison in `NavigationState`; Compose alone owns its
-ten-second visibility timer and measured bottom obstruction. The event is not persisted and is not
-emitted for scheduled traffic or manual refreshes. The API remains authoritative for the alternate
+ten-second visibility timer and measured bottom obstruction. The API remains authoritative for the alternate
 route, so ADB loopback is unsuitable after a device is physically disconnected.
 
 The service and UI share the session through `AppContainer`, allowing Activity recreation,
@@ -579,11 +504,7 @@ neutral/local fallbacks, leaving route shields untouched. This is deliberately a
 not a mutation of OpenStreetMap or backend data.
 
 The active-navigation renderer also intersects every basemap `poi` symbol layer with a conservative
-driving whitelist while preserving that layer's original rank and geometry filter. Fuel/charging,
-toll booths, border control and traffic signals are eligible; transit, retail, tourism and civic
-POIs are suppressed. Traffic signals remain absent with the current OpenMapTiles schema rather than
-being inferred or fabricated. Compass-owned CNG waypoint sources are not part of this filtering.
-The combined Phase 2 camera, interaction, cartographic-context and lifecycle gate was accepted on
+driving whitelist while preserving that layer's original rank and geometry filter. Compass-owned CNG waypoint sources are not part of this filtering. The combined Phase 2 camera, interaction, cartographic-context and lifecycle gate was accepted on
 an Android device on 2026-09-04.
 
 Route previews and active guidance resolve a theme-specific `CompassMapAppearance`, which couples
@@ -628,41 +549,12 @@ the remaining geographic projection entirely: the target is the puck's exact int
 with the forward view created by asymmetric screen padding. This preserves the heading-up invariant
 at every zoom and prevents separately eased camera motion from advancing ahead of the puck.
 
-The repeated Phase 3 gate also exposed a Valhalla failure mode independent of Android: a
-time-dependent request may terminate with error 442 after reaching its convergence limit even when
-the graph-speed route is valid. For route and waypoint-route calls, the adapter makes one bounded,
-logged retry with `date_time` and traffic `speed_types` removed only after that exact no-path
-response. It never retries malformed input, provider outages or other error codes, and preserves a
-second no-path result. This implements the required no-traffic availability fallback without
-silently replacing ordinary traffic-aware successes.
+Automotive routing and matrices explicitly request `constrained` and `freeflow`
+speeds from Valhalla. A departure timestamp anchors station opening-hours evaluation
+and arrival-time calculations; it does not change the nominal route duration. No
+scheduled provider polling runs during navigation. Position updates continue locally,
+with backend rerouting for deviations, connectivity recovery and explicit user actions.
 
-Navigation UI Phase 4 closes the remaining traffic-timing ambiguity. An omitted public departure
-still means “now”, but Compass sends it to Valhalla as the current local minute with
-`date_time.type=1` and `prioritize_bidirectional=true`. This retains live-speed costing while using
-Valhalla's time-aware bidirectional path. An explicit caller departure remains an offset-aware
-instant converted to the configured routing timezone. The deterministic Android destination is
-Bologna Centrale rather than the former city-centre coordinate, because the latter is not
-automobile-reachable under the current temporal restrictions and correctly returns a time-dependent
-no-route response.
-
-For every successful traffic-aware route, the adapter performs one additional route calculation
-with `date_time`, traffic speed selection and bidirectional prioritization removed. The returned
-traffic delay is `max(0, traffic_duration - graph_speed_duration)` for the same ordered locations
-and costing. This comparison does not alter Valhalla's chosen live route and is not an independent
-penalty. If the traffic route falls back, the graph-speed comparison fails, or runtime traffic
-health is not current, the API reports no numeric delay and `traffic_aware=false`.
-
-```text
-current route request
-  -> Valhalla depart-at/current-speed bidirectional route
-  -> optional route-scoped TomTom refresh and native traffic.tar update
-  -> repeat traffic route when the overlay changed
-  -> separate graph-speed baseline
-  -> navigation timing + traffic freshness -> Android preview/navigation/cache
-```
-
-Confirmed deviations and five-minute active-navigation refreshes call Compass—not Valhalla
-directly—so Valhalla traffic costing and the remaining selected CNG itinerary stay authoritative.
 The current route remains active while the request is in flight and after a failure; a successful
 response atomically replaces the route inside the existing session. The current increment preserves
 remaining planned stations and fuel-range inputs.
@@ -718,8 +610,7 @@ mapless Compose search -> /destinations/suggest -> Google Autocomplete (New)
 The testing registry contains only `google_places_new`. Exact Place IDs are deduplicated without
 cross-ID merging; TomTom/Nominatim destination adapters remain dormant. Autocomplete serves the
 600 ms typing path, while explicit origin/destination submit uses Text Search and the ordinary-stop
-intent uses its separate Search Along Route service. The separate TomTom traffic provider is
-unaffected. Suggestion/resolution state is transient and the map-safe target is a distinct type that
+intent uses its separate Search Along Route service. Suggestion/resolution state is transient and the map-safe target is a distinct type that
 cannot carry Google name or address fields.
 
 For ordinary stops, Android sends the selected Valhalla legs plus direct/current durations and the
@@ -752,8 +643,7 @@ stop N ETA = departure + driving through leg N + dwell at stops before N
 
 The default dwell is 1,200 seconds and is injected from server configuration into predictive and
 selected-route responses. It changes later opening-hours evaluations and ETAs, but never the road
-detour comparison. Traffic delay remains a nullable, explicitly unavailable component unless an
-enabled provider can supply a defensible separate estimate.
+detour comparison.
 
 ## Runtime
 
@@ -779,11 +669,7 @@ process trusts and reuses the completed graph (`use_tiles_ignore_pbf=True`). Exa
 an explicit content SHA-256, because the image's internal registration hashes file paths.
 
 The migration, API and ETL workloads use the same configurable `COMPASS_IMAGE`. Only `api` declares
-that repository build, so one build produces the exact image used for those three workloads. The
-traffic updater deliberately uses `COMPASS_TRAFFIC_IMAGE`, built by `Dockerfile.traffic` from the
-same pinned Valhalla image as the router. That image packages Compass with the native OpenLR and
-traffic helper linked against the router's `libvalhalla`; it remains an internal, non-public
-service.
+that repository build, so one build produces the exact image used for those three workloads.
 
 Secrets are environment supplied. No host-specific paths or privileged containers are required.
 
@@ -811,8 +697,7 @@ or reroute continues to cross the Compass API and server-side Valhalla boundary.
 
 ## Navigation UI Phase 8 road-context boundary
 
-Speed limits are immutable attributes of the routed Valhalla graph snapshot, not traffic-provider
-speeds and not text parsed from maneuver instructions. After a successful route calculation the
+After a successful route calculation the
 routing adapter performs an `edge_walk` `/trace_attributes` request for only
 `edge.begin_shape_index`, `edge.end_shape_index`, and `edge.speed_limit`. Consecutive equal limits
 are compacted into a provider-independent shape profile. Enrichment failure is logged and degrades
@@ -839,8 +724,7 @@ segment. A five km/h entry buffer and two km/h exit buffer provide hysteresis; t
 UI stability values rather than legal tolerances. Missing GPS or limit data yields `UNAVAILABLE`
 instead of retaining an old warning.
 
-Compose owns the transient previous state and renders a second alert ring plus red limit number.
-The navigation engine, API schemas, traffic costing and route cache remain unchanged. Sound and
+Compose owns the transient previous state and renders a second alert ring plus red limit number. Sound and
 haptics are excluded until a later preference contract can make them explicitly opt-in.
 
 ## Android route-free startup boundary

@@ -158,12 +158,6 @@ data class ApiNavigationTiming(
     val departureAt: String?,
     val drivingArrivalAt: String?,
     val tripArrivalAt: String?,
-    val trafficDelaySeconds: Double? = null,
-    val trafficDelayState: String = "unavailable",
-    val trafficState: String = "not_configured",
-    val trafficAware: Boolean = false,
-    val trafficObservedAt: String? = null,
-    val trafficDetected: Boolean = false,
 )
 
 data class ApiManeuver(
@@ -201,7 +195,6 @@ data class ApiRankedCandidates(
     val departureAt: String,
     val maximumDetourMinutes: Double,
     val baseRoute: ApiRoute,
-    val trafficState: String,
     val candidates: List<ApiRankedCandidate>,
 )
 
@@ -211,7 +204,6 @@ data class ApiPredictiveCandidates(
     val maximumDetourMinutes: Double,
     val excludedMimitStationIds: List<String>,
     val baseRoute: ApiRoute,
-    val trafficState: String,
     val rangeBasis: ApiPredictiveRangeBasis,
     val candidates: List<ApiPredictiveRankedCandidate>,
     val itinerary: ApiPredictiveItinerary?,
@@ -237,8 +229,6 @@ data class ApiPredictiveRangeBasis(
     val rangeShortfallToDestinationKm: Double,
     val destinationReachableWithReserve: Boolean,
     val consumptionModel: String,
-    val trafficState: String,
-    val trafficAdjusted: Boolean,
 )
 
 data class ApiPredictiveRankedCandidate(

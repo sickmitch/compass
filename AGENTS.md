@@ -9,7 +9,6 @@ The end product is not a POI viewer. It is a navigation system that can:
 - calculate a normal A → B route;
 - insert CNG refuelling stops dynamically;
 - restrict candidates by a user-defined maximum detour time;
-- rank stations using route cost, opening status at estimated arrival time, CNG price, distance from the previous waypoint, and traffic;
 - proactively suggest refuelling stops based on remaining CNG range;
 - expose the entire experience through a first-class Android mobile client.
 
@@ -121,11 +120,9 @@ Why Valhalla is preferred:
 - dynamic costing;
 - time-dependent routing;
 - turn-by-turn maneuver generation;
-- support for externally supplied historical/predicted traffic;
-- support for live traffic overlays;
 - suitable APIs for matrices, route geometry and navigation.
 
-Do not replace Valhalla with GraphHopper, OSRM, or another engine casually. If a replacement is proposed, create an ADR comparing at minimum live traffic ingestion, time-dependent routing, maneuver generation, self-hosting, licensing, operational complexity, and detour/matrix performance.
+Do not replace Valhalla with GraphHopper, OSRM, or another engine casually.
 
 ---
 
@@ -175,24 +172,6 @@ The data model should support:
 
 Use deterministic matching where possible. Any fuzzy/spatial matching must have testable thresholds and must not silently create low-confidence joins.
 
-### Traffic
-
-Live traffic data is an external input to Valhalla, not something Valhalla magically supplies.
-
-Create a provider abstraction before binding the project to a commercial or public traffic source.
-
-The system must support:
-
-- no-traffic fallback;
-- test fixtures/synthetic traffic for deterministic tests;
-- future live-traffic provider(s);
-- source timestamp and freshness;
-- historical/predicted speed data if available.
-
-Do not fake live traffic in user-visible production responses.
-
----
-
 ## Opening-hours semantics
 
 Opening-hours logic is arrival-time-aware.
@@ -232,7 +211,7 @@ Given the remaining route from the previous waypoint/current origin to the desti
 6. query candidate stations using PostGIS spatial indexes;
 7. pre-rank/prune cheap spatial candidates;
 8. use Valhalla to compute real road-network detours only for the reduced candidate set;
-9. keep candidates whose **traffic-aware extra travel time** is within the user's maximum detour constraint.
+9. keep candidates whose **extra travel time** is within the user's maximum detour constraint.
 
 The 20% value is a default policy, not a hard-coded constant. Put it in configuration/domain policy and cover it with tests.
 
@@ -245,7 +224,6 @@ Use:
 - estimated remaining CNG range;
 - reserve/safety margin;
 - route progress;
-- traffic-adjusted consumption where the model supports it;
 - route segment reachable before the reserve threshold.
 
 Do not suggest a station that is spatially near the route but unreachable with the estimated remaining fuel.
@@ -282,7 +260,6 @@ compute at minimum:
 - ETA at station;
 - ETA at destination.
 
-When traffic is enabled, the primary detour value presented to the user must be traffic-aware.
 
 ---
 
@@ -300,7 +277,6 @@ Inputs may include:
 - open/closed/unknown at ETA;
 - CNG unit price;
 - price freshness;
-- traffic-adjusted travel time;
 - station-data confidence;
 - optional user preferences.
 
@@ -367,7 +343,6 @@ The API SHOULD return enough structured data to support:
 - phone number;
 - CNG unit price + freshness;
 - ranking components;
-- traffic status/freshness;
 - route recomputation after station selection;
 - turn-by-turn maneuvers when navigation is implemented.
 
@@ -486,7 +461,6 @@ Prioritize:
 
 External services must be mockable/fixture-driven for automated tests.
 
-Do not make the normal unit-test suite depend on live Overpass, MIMIT, traffic providers, or public routing endpoints.
 
 Live smoke tests are separate and are executed by the human operator when server/network access is required.
 
@@ -510,7 +484,6 @@ Measure:
 - routing calls per request;
 - API latency;
 - DB query latency;
-- traffic data age;
 - ETL duration;
 - source reconciliation counts.
 
@@ -530,7 +503,7 @@ Expose health endpoints that distinguish:
 - database ready;
 - routing engine ready;
 - latest successful data ingestion;
-- traffic provider status/freshness.
+
 
 Never log secrets.
 
@@ -576,7 +549,6 @@ Important ADR candidates:
 - Valhalla selection;
 - MIMIT + OSM source reconciliation;
 - Android/Kotlin/MapLibre choice;
-- traffic provider interface;
 - candidate-pruning policy;
 - predictive fuel model.
 

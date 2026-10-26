@@ -1,7 +1,6 @@
 # Phase 4 acceptance criteria
 
-Phase 4 adds autonomy-aware spatial CNG candidate pruning. It does not calculate station detours,
-road distance to a station, opening status, ranking, traffic or predictive fuel reachability.
+Phase 4 adds autonomy-aware spatial CNG candidate pruning.
 
 ## Implemented gate
 
@@ -76,7 +75,6 @@ The operator completed the full-Italy live gate on 2026-08-28:
 - returned candidate spatial distances were non-negative and projection fractions were within
   `[0, 1]` under the strict response schema;
 - API readiness was HTTP 200 immediately before the request, and Alembic remained at `0002 (head)`;
-- the expected missing `traffic.tar` warnings remained consistent with the explicit no-traffic
-  Phase 3/4 fallback and did not affect the route or pruning result.
+
 
 All Phase 4 acceptance criteria are satisfied. Phase 5 detour computation remains a separate gate.

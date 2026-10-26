@@ -60,8 +60,6 @@ maneuvers render correctly. Rotation/background/resume must not crash.
 Accepted from the operator's device run on 2026-08-29:
 
 - `bash scripts/run-phase8-live.sh` reached `AUTOMATED PHASE 8 DEVICE CHECKS COMPLETED`;
-- backend readiness returned HTTP success with database and routing `ready`, data explicitly
-  `degraded`, and traffic explicitly `not_configured`;
 - the Phase 8 Milan-to-Bologna base-route preflight succeeded and saved a real API response;
 - `adb reverse` connected device port 8000 to the build host, so no public development endpoint was
   required;

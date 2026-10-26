@@ -2,8 +2,7 @@
 
 ## Scope
 
-This device gate verifies Android-only fixes. It does not change backend search contracts,
-Search Along Route, traffic, routing or CNG planning.
+This device gate verifies Android-only fixes.
 
 ## Checks
 

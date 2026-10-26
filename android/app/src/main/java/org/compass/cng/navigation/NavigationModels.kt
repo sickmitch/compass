@@ -185,7 +185,7 @@ data class NavigationState(
     val nextManeuver: Maneuver? = null,
     val distanceToNextManeuverMeters: Double? = null,
     val routeProgressFraction: Double = 0.0,
-    // Separate journey progress from the residual route replaced by traffic refreshes.
+    // Keep journey progress stable when the residual route is replaced.
     val journeyProgressOffset: Double = 0.0,
     val journeyProgressFraction: Double = routeProgressFraction,
     val nextFuelStop: NavigationFuelStopProgress? = null,
@@ -262,7 +262,6 @@ enum class ReroutingStatus {
 
 enum class RouteUpdateReason {
     OFF_ROUTE,
-    TRAFFIC_REFRESH,
     CONNECTIVITY_RECOVERY,
     MANUAL_DEBUG,
     FUEL_STOP_UNAVAILABLE,

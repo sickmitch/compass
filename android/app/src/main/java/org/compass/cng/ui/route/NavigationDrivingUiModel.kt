@@ -19,7 +19,6 @@ import org.compass.cng.navigation.OffRouteStatus
 import org.compass.cng.navigation.ReroutingStatus
 import org.compass.cng.navigation.RouteUpdateFailure
 import org.compass.cng.navigation.RouteUpdateReason
-import org.compass.cng.domain.model.NavigationTiming
 
 internal data class NavigationDrivingUiModel(
     val maneuverVisual: ManeuverVisual,
@@ -39,7 +38,6 @@ internal data class NavigationDrivingUiModel(
     val cngStops: List<NavigationCngUiModel>,
     val isRouteRecalculationInProgress: Boolean,
     val statusMessages: List<NavigationStatusUiModel>,
-    val trafficDetected: Boolean = false,
 )
 
 internal data class NavigationJunctionSignUiModel(
@@ -100,7 +98,6 @@ internal fun NavigationState.toDrivingUiModel(
     val maneuverRoad = currentRoadName ?: maneuver?.streetNames?.firstOrNull()
     val refuellingVisit = activeFuelStopVisit
     return NavigationDrivingUiModel(
-        trafficDetected = activeRoute.timing.trafficDetected,
         maneuverVisual = if (refuellingVisit != null) {
             maneuverVisual(4, "Rifornimento CNG")
         } else {
@@ -180,18 +177,6 @@ internal fun NavigationState.toDrivingUiModel(
                     NavigationStatusUiModel(
                         "Navigazione disponibile sulla rotta salvata nel dispositivo.",
                         NavigationStatusLevel.POSITIVE,
-                    ),
-                )
-            }
-            if (activeRoute.travelMode == RouteTravelMode.DRIVING &&
-                connectivity == NavigationConnectivity.ONLINE
-            ) {
-                add(trafficStatusUiModel(activeRoute.timing, displayZone))
-            } else if (activeRoute.travelMode == RouteTravelMode.DRIVING) {
-                add(
-                    NavigationStatusUiModel(
-                        "Traffico non aggiornabile: durata ed ETA continuano dalla rotta locale.",
-                        NavigationStatusLevel.WARNING,
                     ),
                 )
             }
@@ -377,44 +362,6 @@ private fun List<org.compass.cng.domain.model.ManeuverSignElement>.joinSignText(
 
 internal fun NavigationFuelStop.displayName(): String = name ?: "MIMIT $mimitStationId"
 
-internal fun trafficPreviewText(timing: NavigationTiming): String {
-    if (timing.trafficState !in setOf("fresh", "mock")) return "Non live"
-    val seconds = timing.trafficDelaySeconds ?: return "Non live"
-    return when {
-        seconds <= 0 -> "0 min"
-        seconds < 60 -> "<1 min"
-        else -> "${(seconds / 60).roundToInt()} min"
-    }
-}
-
-internal fun trafficTimingText(
-    timing: NavigationTiming,
-    displayZone: ZoneId = ZoneId.systemDefault(),
-): String = when {
-    timing.trafficDetected ->
-        "Traffico rilevato ma non conteggiabile nell'ETA"
-    timing.trafficAware ->
-        "ETA dal server precedente: aggiorna il backend per escludere il traffico."
-    timing.trafficState in setOf("fresh", "mock") && timing.trafficDelaySeconds == 0.0 ->
-        "Non c'è traffico al momento."
-    timing.trafficState == "configured" ->
-        "Traffico configurato: attendo il primo aggiornamento."
-    timing.trafficState == "stale" ->
-        "Dati traffico scaduti: tempi di guida con velocità standard."
-    else -> "Traffico live non disponibile: tempi di guida con velocità standard."
-}
-
-private fun trafficStatusUiModel(
-    timing: NavigationTiming,
-    displayZone: ZoneId,
-) = NavigationStatusUiModel(
-    text = trafficTimingText(timing, displayZone),
-    level = if (timing.trafficDetected) {
-        NavigationStatusLevel.WARNING
-    } else {
-        NavigationStatusLevel.NORMAL
-    },
-)
 
 private fun gpsStatusText(status: GpsStatus): String = when (status) {
     GpsStatus.UNAVAILABLE -> "GPS non disponibile"

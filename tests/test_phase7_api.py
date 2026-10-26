@@ -288,9 +288,6 @@ def test_data_freshness_contract_is_explicit(monkeypatch: pytest.MonkeyPatch) ->
     async def override_settings():
         return get_settings().model_copy(
             update={
-                "traffic_enabled": False,
-                "traffic_provider": "none",
-                "traffic_valhalla_overlay_enabled": False,
             }
         )
 
@@ -308,7 +305,6 @@ def test_data_freshness_contract_is_explicit(monkeypatch: pytest.MonkeyPatch) ->
         "osm_cng",
         "reconciliation",
     ]
-    assert response.json()["traffic_state"] == "not_configured"
 
 
 def test_phase7_openapi_contains_public_paths_and_shared_error_schema() -> None:

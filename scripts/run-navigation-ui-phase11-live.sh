@@ -88,7 +88,7 @@ OPERATOR VISUAL CHECK — NAVIGATION UI PHASE 11
 1. Create a predictive CNG journey with a saved vehicle profile and start navigation or route replay.
    Confirm that the next CNG stop has a compact card directly under the maneuver card, without
    opening Viaggio, and that it shows station, road distance, ETA and lifecycle. The ETA and the
-   traffic-update time in Dettagli must use the phone's local timezone, not the backend UTC clock.
+   arrival time in Dettagli must use the phone's local timezone, not the backend UTC clock.
 2. Tap the CNG card. Confirm that Dettagli explains why the stop is planned and shows the configured
    dwell (normally 20 min). If valid opening evidence and a fresh price were present at selection,
    confirm they remain clearly visible. Missing, stale or cache-only evidence must not appear live.

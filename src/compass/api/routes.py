@@ -15,6 +15,7 @@ from compass.config import Settings, get_api_settings
 from compass.db import get_session
 from compass.detours.domain import (
     EligibleDetourCandidate,
+    NetworkCostBasis,
     NetworkDetourPolicy,
     NetworkDetourRequest,
 )
@@ -30,14 +31,8 @@ from compass.routing.domain import (
     RoutingProvider,
     RoutingProviderError,
     RoutingUnavailableError,
-    WaypointRoute,
     WaypointRouteRequest,
 )
-from compass.traffic.dependencies import get_traffic_route_refresher
-from compass.traffic.domain import TrafficHealthState
-from compass.traffic.route_refresh import TrafficRouteRefresher
-from compass.traffic.routing import refresh_base_route_traffic, refresh_waypoint_route_traffic
-from compass.traffic.service import network_cost_basis_from_settings, traffic_health_from_settings
 
 router = APIRouter(prefix="/api/v1", tags=["routing"])
 
@@ -61,8 +56,7 @@ class BaseRouteRequest(StrictModel):
     departure_at: datetime | None = Field(
         default=None,
         description=(
-            "Optional timezone-aware departure instant. When omitted, traffic-aware "
-            "routing departs now."
+            "Optional timezone-aware departure instant for arrival and opening-hours calculations."
         ),
     )
     language: str | None = Field(
@@ -201,19 +195,6 @@ class NavigationTimingResponse(StrictModel):
     departure_at: datetime | None
     driving_arrival_at: datetime | None
     trip_arrival_at: datetime | None
-    traffic_delay_seconds: float | None = Field(
-        default=None, ge=0,
-        description=(
-            "Diagnostic live-versus-baseline duration difference, in seconds. "
-            "Null means unavailable, zero means no detected delay. In alert-only mode "
-            "traffic_aware is false and this value is not added to duration or ETA."
-        ),
-    )
-    traffic_delay_state: Literal["unavailable", "estimated"] = "unavailable"
-    traffic_state: TrafficHealthState = "not_configured"
-    traffic_aware: bool = False
-    traffic_observed_at: datetime | None = None
-    traffic_detected: bool = False
 
 
 class BaseRouteResponse(StrictModel):
@@ -338,11 +319,8 @@ class CorridorCandidatesResponse(StrictModel):
 
 class NetworkCostBasisResponse(StrictModel):
     provider: Literal["valhalla"]
-    traffic_state: TrafficHealthState
-    traffic_aware: bool
     duration_model: Literal[
         "valhalla_graph_speeds",
-        "valhalla_time_dependent_traffic",
     ]
     distance_model: Literal["road_network"]
 
@@ -415,9 +393,6 @@ class DetourCandidatesResponse(StrictModel):
 async def base_route(
     request: BaseRouteRequest,
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
-    traffic_refresher: Annotated[
-        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
-    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> BaseRouteResponse | JSONResponse:
     domain_request = RouteRequest(
@@ -448,15 +423,6 @@ async def base_route(
             "The routing service returned an invalid response.",
         )
 
-    route = await refresh_base_route_traffic(
-        route=route,
-        request=domain_request,
-        provider=provider,
-        refresher=traffic_refresher,
-        current_departure_tolerance_seconds=(
-            settings.traffic_route_refresh_min_interval_seconds
-        ),
-    )
 
     return _base_route_response(route, settings=settings, departure_at=request.departure_at)
 
@@ -473,9 +439,6 @@ async def base_route(
 async def route_with_intermediate_stop(
     request: IntermediateStopRouteRequest,
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
-    traffic_refresher: Annotated[
-        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
-    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> RouteWithIntermediateStopResponse | JSONResponse:
     origin = Coordinate(request.origin.latitude, request.origin.longitude)
@@ -511,21 +474,11 @@ async def route_with_intermediate_stop(
             "The routing service returned an invalid response.",
         )
 
-    route = await refresh_waypoint_route_traffic(
-        route=route,
-        request=domain_request,
-        provider=provider,
-        refresher=traffic_refresher,
-        current_departure_tolerance_seconds=(
-            settings.traffic_route_refresh_min_interval_seconds
-        ),
-    )
     departure_at = request.departure_at or datetime.now(UTC)
     navigation = build_navigation_timing(
         encoded_polylines=(leg.encoded_polyline for leg in route.legs),
         driving_duration_seconds=route.duration_seconds,
         departure_at=departure_at,
-        **_navigation_traffic(route, settings),
     )
     coordinates = (origin, stop, destination)
     kinds = ("origin_to_intermediate_stop", "intermediate_stop_to_destination")
@@ -581,9 +534,6 @@ async def route_with_intermediate_stop(
 async def route_with_intermediate_stops(
     request: IntermediateStopsRouteRequest,
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
-    traffic_refresher: Annotated[
-        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
-    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> RouteWithIntermediateStopsResponse | JSONResponse:
     origin = Coordinate(request.origin.latitude, request.origin.longitude)
@@ -618,21 +568,11 @@ async def route_with_intermediate_stops(
             "The routing service returned an invalid response.",
         )
 
-    route = await refresh_waypoint_route_traffic(
-        route=route,
-        request=domain_request,
-        provider=provider,
-        refresher=traffic_refresher,
-        current_departure_tolerance_seconds=(
-            settings.traffic_route_refresh_min_interval_seconds
-        ),
-    )
     departure_at = request.departure_at or datetime.now(UTC)
     navigation = build_navigation_timing(
         encoded_polylines=(leg.encoded_polyline for leg in route.legs),
         driving_duration_seconds=route.duration_seconds,
         departure_at=departure_at,
-        **_navigation_traffic(route, settings),
     )
     coordinates = (origin, *stops, destination)
     last_leg_index = len(route.legs) - 1
@@ -808,7 +748,7 @@ async def detour_candidates(
                 matrix_batch_size=settings.valhalla_matrix_batch_size
             ),
             max_route_geometry_points=settings.route_geometry_max_points,
-            cost_basis=network_cost_basis_from_settings(settings),
+            cost_basis=NetworkCostBasis(),
         )
     except NoRouteError:
         return error_response(422, "route_not_found", "No route was found between the locations.")
@@ -846,12 +786,10 @@ def _base_route_response(
     settings: Settings,
     departure_at: datetime | None = None,
 ) -> BaseRouteResponse:
-    traffic = _navigation_traffic(route, settings)
     navigation = build_navigation_timing(
         encoded_polylines=(route.encoded_polyline,),
         driving_duration_seconds=route.duration_seconds,
         departure_at=departure_at,
-        **traffic,
     )
     return BaseRouteResponse(
         distance_meters=route.distance_meters,
@@ -875,40 +813,6 @@ def _base_route_response(
 
 def _navigation_timing_response(timing: NavigationTiming) -> NavigationTimingResponse:
     return NavigationTimingResponse.model_validate(asdict(timing))
-
-
-def _navigation_traffic(
-    route: BaseRoute | WaypointRoute,
-    settings: Settings,
-) -> dict[str, object]:
-    health = traffic_health_from_settings(settings)
-    delay = getattr(route, "traffic_delay_seconds", None)
-    route_is_traffic_aware = bool(getattr(route, "traffic_aware", False))
-    fallback_used = bool(getattr(route, "traffic_fallback_used", False))
-    current_data = health.provider_status in {"fresh", "mock"}
-    traffic_detected = (
-        current_data and route.traffic_detected
-        and health.last_success_at is not None and not fallback_used
-    )
-    traffic_aware = (
-        current_data
-        and route_is_traffic_aware
-        and not fallback_used
-        and delay is not None
-    )
-    return {
-        "traffic_delay_seconds": (
-            delay if current_data and not fallback_used and health.last_success_at is not None
-            else None
-        ),
-        "traffic_state": health.provider_status,
-        "traffic_aware": traffic_aware,
-        "traffic_observed_at": (
-            health.last_success_at if current_data and delay is not None and not fallback_used
-            else None
-        ),
-        "traffic_detected": traffic_detected,
-    }
 
 
 def _detour_candidate_response(

@@ -458,8 +458,6 @@ s = p["spatial_pruning"]
 n = p["network_evaluation"]
 candidates = p["candidates"]
 assert p["stage"] == "network_detour"
-assert p["cost_basis"]["traffic_state"] == "not_configured"
-assert p["cost_basis"]["traffic_aware"] is False
 assert p["cost_basis"]["distance_model"] == "road_network"
 assert n["spatial_candidate_count"] == s["corridor_candidate_count"]
 assert n["matrix_candidate_count"] == s["returned_candidate_count"]
@@ -499,7 +497,7 @@ def route(start, end):
         "locations": [start, end],
         "costing": "auto",
         "units": "kilometers",
-        "directions_type": "none",
+        "directions_type": "none"
     }).encode()
     request = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}
@@ -521,7 +519,7 @@ print(json.dumps({
     "route_via_station_distance_meters": via_distance,
     "route_via_station_duration_seconds": via_duration,
     "extra_distance_meters": max(0, via_distance - base["distance_meters"]),
-    "detour_duration_seconds": max(0, via_duration - base["duration_seconds"]),
+    "detour_duration_seconds": max(0, via_duration - base["duration_seconds"])
 }, indent=2))
 PY
 
@@ -560,7 +558,6 @@ Expected invariants:
   CostMatrix versus bidirectional A* path/snap differences;
 - distance from the previous waypoint is explicitly a road-network field;
 - station and destination ETA values retain a UTC offset;
-- cost metadata says traffic is not configured and not traffic-aware;
 - metrics prove the Compass request made one base `/route`, zero per-candidate route calls and only
   batched `/sources_to_targets` calls. The final filtered log also contains the three deliberately
   independent `/route` diagnostics above, so four route lines are expected in this procedure.
@@ -753,8 +750,6 @@ route responses are saved under `/tmp` instead of being printed.
 
 Expected invariants:
 
-- readiness is HTTP 200 with database/routing ready, data `ready` or explicitly `degraded`, and
-  traffic `not_configured`;
 - the normal and ranked route capabilities still work, with one base route and bounded matrices for
   ranking rather than per-candidate route calls;
 - station `43690` is active, geocoded and has explicit current EUR/kg price timestamps/freshness;
@@ -886,7 +881,6 @@ Expected automated invariants:
 - 300 km remaining with a 30 km reserve returns `not_needed`, one base route call, zero matrix calls
   and zero enrichment queries;
 - 31 km remaining with a 30 km reserve returns `no_reachable_station` for the accepted fixed route;
-- no response claims live traffic or telemetry-derived consumption;
 - 65 km remaining, 30 km reserve and 100 km full range produces at least three ordered CNG stops;
 - the 65/30/100 first leg is at most 35 road km, every later leg is at most 70 road km and every
   station/destination reserve margin is non-negative;
@@ -1091,14 +1085,12 @@ DESTINATION_ALONG_ROUTE_MAX_ENCODED_CHARS=100000
 ```
 
 This does not enable the legacy `/places/search` adapter: `GEOCODING_PROVIDER=none` keeps that path
-disabled. Search Along Route is accepted only through its dedicated authenticated endpoint and does
-not affect TomTom traffic.
+disabled.
 
 `GOOGLE_PLACES_CONTRACT_REGIME=unverified` is the safe default and prevents API startup when Google
 destination search is enabled. A verified `non_eea` value is also blocked pending a separate terms
 review; do not infer the regime from device position. Enable Places API (New), billing, quota and
-server-compatible key restrictions, then rebuild/recreate only the API. Traffic variables, including
-`TRAFFIC_PROVIDER=tomtom`, are independent.
+server-compatible key restrictions, then rebuild/recreate only the API.
 
 Autocomplete and Details share an ephemeral session token. The service rate limit, provider
 concurrency, timeout, query threshold and bias are controlled by the documented
@@ -1117,13 +1109,11 @@ build setting. Recreate the API after changing the configuration:
 cd ~/docker/compass
 docker compose build api
 docker compose up -d --force-recreate api
-docker compose exec -T api python -c 'from compass.config import get_settings; s=get_settings(); print({"providers": s.destination_search_providers, "legacy_geocoder": s.geocoding_provider, "google_enabled": s.google_places_enabled, "contract_regime": s.google_places_contract_regime, "tomtom_search": s.tomtom_search_enabled, "traffic_provider": s.traffic_provider, "google_key_configured": bool(s.google_places_api_key.get_secret_value())})'
 ```
 
 The command reports only whether the key exists, never its value. The expected active values are
 `providers=google_places_new`, `legacy_geocoder=none`, `google_enabled=true`,
-`contract_regime=eea` and `tomtom_search=false`. `traffic_provider=tomtom` remains valid because the
-destination-search and traffic flags are independent.
+`contract_regime=eea` and `tomtom_search=false`.
 
 ## Phase 13 degraded/offline navigation validation
 

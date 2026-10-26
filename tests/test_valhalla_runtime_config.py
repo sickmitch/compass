@@ -44,3 +44,14 @@ def test_hard_exclusion_configuration_is_idempotent(tmp_path: Path) -> None:
 def test_missing_valhalla_config_has_actionable_error(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="build the routing tiles first"):
         _module().enable_hard_exclusions(tmp_path / "valhalla.json")
+
+
+def test_reused_volume_detaches_retired_archive_even_if_exclusions_enabled(tmp_path):
+    config_path = tmp_path / "valhalla.json"
+    config_path.write_text(json.dumps({
+        "mjolnir": {"tile_dir": "/tiles", "traffic_extract": "/old/archive.tar"},
+        "service_limits": {"allow_hard_exclusions": True},
+    }))
+    assert _module().enable_hard_exclusions(config_path) is True
+    assert json.loads(config_path.read_text())["mjolnir"] == {"tile_dir": "/tiles"}
+    assert _module().enable_hard_exclusions(config_path) is False

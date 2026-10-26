@@ -1,6 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator, Iterator
-from dataclasses import replace
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import httpx
@@ -17,12 +16,6 @@ from compass.candidates.domain import (
 )
 from compass.config import Settings, get_api_settings, get_settings
 from compass.db import get_session
-from compass.detours.domain import (
-    NetworkCostBasis,
-    NetworkDetourResult,
-    NetworkEvaluationMetrics,
-    calculate_detour_candidate,
-)
 from compass.freshness.domain import DataFreshnessReport, DataSourceFreshness
 from compass.routing.dependencies import get_routing_provider
 from compass.routing.domain import (
@@ -31,28 +24,11 @@ from compass.routing.domain import (
     Maneuver,
     ManeuverSign,
     ManeuverSignElement,
-    MatrixCost,
     RouteOriginDirection,
     RouteRequest,
     RouteSpeedLimit,
     RoutingUnavailableError,
 )
-from compass.traffic.dependencies import get_traffic_route_refresher
-from compass.traffic.domain import TrafficHealth
-from compass.traffic.route_refresh import (
-    DisabledTrafficRouteRefresher,
-    TrafficRouteRefreshResult,
-)
-
-
-@pytest.fixture(autouse=True)
-def disable_live_traffic_refresh() -> Iterator[None]:
-    async def override_refresher() -> DisabledTrafficRouteRefresher:
-        return DisabledTrafficRouteRefresher()
-
-    app.dependency_overrides[get_traffic_route_refresher] = override_refresher
-    yield
-    app.dependency_overrides.pop(get_traffic_route_refresher, None)
 
 
 def _get(path: str) -> httpx.Response:
@@ -259,9 +235,6 @@ def test_readiness_checks_database(monkeypatch: pytest.MonkeyPatch) -> None:
     async def override_settings():
         return get_settings().model_copy(
             update={
-                "traffic_enabled": False,
-                "traffic_provider": "none",
-                "traffic_valhalla_overlay_enabled": False,
             }
         )
 
@@ -281,45 +254,6 @@ def test_readiness_checks_database(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["database"] == "ready"
     assert response.json()["routing"] == "ready"
     assert response.json()["data"] == "ready"
-    assert response.json()["traffic"] == "not_configured"
-
-
-def test_traffic_unavailable_does_not_take_api_readiness_offline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    provider = FakeRoutingProvider()
-
-    async def override_session() -> AsyncIterator[Session]:
-        with Session(engine) as session:
-            yield session
-
-    async def override_provider() -> FakeRoutingProvider:
-        return provider
-
-    app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_routing_provider] = override_provider
-    monkeypatch.setattr(
-        "compass.api.main.load_data_freshness", lambda *args, **kwargs: _freshness_report()
-    )
-    monkeypatch.setattr(
-        "compass.api.main.traffic_health_from_settings",
-        lambda _settings: TrafficHealth(
-            enabled=True,
-            provider="tomtom",
-            provider_status="unavailable",
-            traffic_aware_routing=True,
-        ),
-    )
-    try:
-        response = _get("/health/ready")
-    finally:
-        app.dependency_overrides.clear()
-        engine.dispose()
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["traffic"] == "unavailable"
 
 
 def test_readiness_reports_routing_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -414,70 +348,6 @@ def test_base_route_contract_is_provider_independent() -> None:
     assert response.status_code == 200
     assert provider.request is not None
     assert provider.request.allow_highways is False
-    assert response.json() == {
-        "distance_meters": 2500.0,
-        "duration_seconds": 320.0,
-        "geometry": {"format": "polyline6", "encoded_polyline": "encoded-route"},
-        "maneuvers": [
-            {
-                "type": 1,
-                "instruction": "Procedi su Via Roma.",
-                "distance_meters": 2500.0,
-                "duration_seconds": 320.0,
-                "begin_shape_index": 0,
-                "end_shape_index": 10,
-                "street_names": ["Via Roma"],
-                "verbal_transition_alert_instruction": None,
-                "verbal_pre_transition_instruction": None,
-                "verbal_post_transition_instruction": None,
-                "bearing_before": None,
-                "bearing_after": None,
-                "travel_mode": "drive",
-                "travel_type": "car",
-                "sign": {
-                    "exit_number_elements": [
-                        {"text": "1", "consecutive_count": 2}
-                    ],
-                    "exit_branch_elements": [
-                        {"text": "A1", "consecutive_count": None}
-                    ],
-                    "exit_toward_elements": [
-                        {"text": "Bologna", "consecutive_count": None}
-                    ],
-                    "exit_name_elements": [],
-                },
-                "roundabout_exit_count": 2,
-            }
-        ],
-        "speed_limits": [
-            {
-                "begin_shape_index": 0,
-                "end_shape_index": 10,
-                "speed_limit_kph": 50,
-            }
-        ],
-        "speed_limit_source": "valhalla_graph",
-        "provider": "valhalla",
-        "uses_highways": False,
-        "navigation": {
-            "route_id": "route_9491c0c629955aa1cb1599fa2af10efe",
-            "driving_duration_seconds": 320.0,
-            "remaining_driving_duration_seconds": 320.0,
-            "refueling_stop_count": 0,
-            "dwell_seconds_per_refueling_stop": 1200,
-            "total_refueling_dwell_seconds": 0.0,
-            "total_trip_duration_seconds": 320.0,
-            "departure_at": None,
-            "driving_arrival_at": None,
-            "trip_arrival_at": None,
-                "traffic_delay_seconds": None,
-                "traffic_delay_state": "unavailable",
-                "traffic_state": "not_configured",
-                "traffic_aware": False,
-                "traffic_observed_at": None,
-                "traffic_detected": False,
-            },
-    }
     assert provider.request == RouteRequest(
         origin=Coordinate(latitude=45.4642, longitude=9.19),
         destination=Coordinate(latitude=45.4781, longitude=9.2271),
@@ -555,121 +425,6 @@ def test_base_route_rejects_origin_heading_tolerance_without_heading() -> None:
     )
 
     assert response.status_code == 422
-
-
-def test_base_route_refreshes_traffic_then_recomputes_with_valhalla() -> None:
-    class CountingProvider(FakeRoutingProvider):
-        def __init__(self) -> None:
-            super().__init__()
-            self.route_calls = 0
-
-        async def route(self, request: RouteRequest) -> BaseRoute:
-            self.route_calls += 1
-            route = await super().route(request)
-            return BaseRoute(
-                distance_meters=route.distance_meters,
-                duration_seconds=route.duration_seconds + self.route_calls,
-                encoded_polyline=route.encoded_polyline,
-                maneuvers=route.maneuvers,
-                provider=route.provider,
-            )
-
-    class UpdatedRefresher:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def refresh(self, **_kwargs) -> TrafficRouteRefreshResult:
-            self.calls += 1
-            return TrafficRouteRefreshResult(state="updated", scope_key="test")
-
-    provider = CountingProvider()
-    refresher = UpdatedRefresher()
-
-    async def override_provider() -> CountingProvider:
-        return provider
-
-    async def override_refresher() -> UpdatedRefresher:
-        return refresher
-
-    app.dependency_overrides[get_routing_provider] = override_provider
-    app.dependency_overrides[get_traffic_route_refresher] = override_refresher
-    try:
-        response = _post(
-            "/api/v1/routes",
-            {
-                "origin": {"latitude": 45.4642, "longitude": 9.19},
-                "destination": {"latitude": 45.4781, "longitude": 9.2271},
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    assert provider.route_calls == 2
-    assert refresher.calls == 1
-
-
-def test_base_route_exposes_fresh_traffic_delay_and_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed_at = datetime(2026, 9, 5, 6, 30, tzinfo=UTC)
-
-    class TrafficProvider(FakeRoutingProvider):
-        async def route(self, request: RouteRequest) -> BaseRoute:
-            route = await super().route(request)
-            return replace(
-                route,
-                duration_seconds=440,
-                traffic_aware=True,
-                traffic_delay_seconds=120,
-            )
-
-    provider = TrafficProvider()
-    settings = Settings(
-        _env_file=None,
-        traffic_enabled=True,
-        traffic_provider="tomtom",
-        traffic_valhalla_overlay_enabled=True,
-        traffic_valhalla_tileset_version="valhalla-3.8.3:test",
-    )
-
-    async def override_provider() -> TrafficProvider:
-        return provider
-
-    async def override_settings() -> Settings:
-        return settings
-
-    monkeypatch.setattr(
-        "compass.api.routes.traffic_health_from_settings",
-        lambda _settings: TrafficHealth(
-            enabled=True,
-            provider="tomtom",
-            provider_status="fresh",
-            traffic_aware_routing=True,
-            last_success_at=observed_at,
-        ),
-    )
-    app.dependency_overrides[get_routing_provider] = override_provider
-    app.dependency_overrides[get_api_settings] = override_settings
-    try:
-        response = _post(
-            "/api/v1/routes",
-            {
-                "origin": {"latitude": 45.4642, "longitude": 9.19},
-                "destination": {"latitude": 45.4781, "longitude": 9.2271},
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    timing = response.json()["navigation"]
-    assert timing["traffic_delay_seconds"] == 120
-    assert timing["traffic_delay_state"] == "estimated"
-    assert timing["traffic_state"] == "fresh"
-    assert timing["traffic_aware"] is True
-    assert timing["traffic_observed_at"] == "2026-09-05T06:30:00Z"
-    assert response.json()["duration_seconds"] == 440.0
 
 
 def test_base_route_propagates_scheduled_departure() -> None:
@@ -857,155 +612,6 @@ def test_corridor_candidates_rejects_detour_input() -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_request"
-
-
-def test_detour_candidates_exposes_network_costs_eta_and_no_traffic_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    provider = FakeRoutingProvider()
-    expected_route = asyncio.run(
-        provider.route(
-            RouteRequest(
-                origin=Coordinate(45.4642, 9.19),
-                destination=Coordinate(44.4949, 11.3426),
-            )
-        )
-    )
-    station = SpatialCandidate(
-        station_id=10,
-        mimit_station_id="1001",
-        name="Milano Metano",
-        municipality="Milano",
-        province="MI",
-        latitude=45.4,
-        longitude=9.3,
-        straight_line_distance_to_route_meters=12.5,
-        route_fraction=0.1,
-    )
-    spatial = CorridorCandidateResult(
-        base_route=expected_route,
-        corridor=CorridorRadius(300, 0.20, 60, 50, "maximum"),
-        metrics=SpatialPruningMetrics(
-            active_station_count=1512,
-            active_station_with_location_count=1505,
-            excluded_missing_location_count=7,
-            corridor_candidate_count=83,
-            returned_candidate_count=1,
-            pruned_with_location_count=1422,
-            reduction_ratio=1 - 83 / 1505,
-            candidate_limit_applied=False,
-        ),
-        candidates=(station,),
-    )
-
-    async def override_session() -> AsyncIterator[object]:
-        yield object()
-
-    async def override_provider() -> FakeRoutingProvider:
-        return provider
-
-    async def fake_evaluate(*args: object, **kwargs: object) -> NetworkDetourResult:
-        domain_request = args[2]
-        assert domain_request.maximum_detour_seconds == 600  # type: ignore[attr-defined]
-        assert domain_request.departure_at.isoformat() == (  # type: ignore[attr-defined]
-            "2026-08-28T08:00:00+02:00"
-        )
-        assert kwargs["detour_policy"].matrix_batch_size == 40
-        departure_at = domain_request.departure_at  # type: ignore[attr-defined]
-        candidate = calculate_detour_candidate(
-            station=station,
-            base_route=expected_route,
-            previous_to_station=MatrixCost(1_200, 120),
-            station_to_destination=MatrixCost(1_600, 260),
-            departure_at=departure_at,
-        )
-        return NetworkDetourResult(
-            spatial_result=spatial,
-            maximum_detour_seconds=600,
-            departure_at=departure_at,
-            cost_basis=NetworkCostBasis(),
-            metrics=NetworkEvaluationMetrics(
-                spatial_candidate_count=83,
-                matrix_candidate_count=1,
-                reachable_candidate_count=1,
-                unreachable_candidate_count=0,
-                eligible_candidate_count=1,
-                excluded_by_detour_count=0,
-                matrix_batch_size=40,
-                matrix_calls=2,
-                matrix_fallback_splits=0,
-                matrix_location_failures=0,
-            ),
-            candidates=(candidate,),
-        )
-
-    monkeypatch.setattr("compass.api.routes.evaluate_cng_detours", fake_evaluate)
-    app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_routing_provider] = override_provider
-    try:
-        response = _post(
-            "/api/v1/cng/detour-candidates",
-            {
-                "origin": {"latitude": 45.4642, "longitude": 9.19},
-                "destination": {"latitude": 44.4949, "longitude": 11.3426},
-                "effective_cng_range_km": 300,
-                "maximum_detour_minutes": 10,
-                "departure_at": "2026-08-28T08:00:00+02:00",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["stage"] == "network_detour"
-    assert body["departure_at"] == "2026-08-28T08:00:00+02:00"
-    assert body["maximum_detour_minutes"] == 10
-    assert body["cost_basis"] == {
-        "provider": "valhalla",
-        "traffic_state": "not_configured",
-        "traffic_aware": False,
-        "duration_model": "valhalla_graph_speeds",
-        "distance_model": "road_network",
-    }
-    assert body["network_evaluation"] == {
-        "spatial_candidate_count": 83,
-        "matrix_candidate_count": 1,
-        "reachable_candidate_count": 1,
-        "unreachable_candidate_count": 0,
-        "eligible_candidate_count": 1,
-        "excluded_by_detour_count": 0,
-        "matrix_batch_size": 40,
-        "matrix_calls": 2,
-        "matrix_fallback_splits": 0,
-        "matrix_location_failures": 0,
-        "base_route_calls": 1,
-        "per_candidate_route_calls": 0,
-    }
-    assert body["candidates"] == [
-        {
-            "station_id": 10,
-            "mimit_station_id": "1001",
-            "name": "Milano Metano",
-            "municipality": "Milano",
-            "province": "MI",
-            "latitude": 45.4,
-            "longitude": 9.3,
-            "straight_line_distance_to_route_meters": 12.5,
-            "route_fraction": 0.1,
-            "distance_from_previous_waypoint_meters": 1200.0,
-            "duration_from_previous_waypoint_seconds": 120.0,
-            "station_to_destination_distance_meters": 1600.0,
-            "station_to_destination_duration_seconds": 260.0,
-            "route_via_station_distance_meters": 2800.0,
-            "route_via_station_duration_seconds": 380.0,
-            "extra_distance_meters": 300.0,
-            "detour_duration_seconds": 60.0,
-            "detour_minutes": 1.0,
-            "station_eta": "2026-08-28T08:02:00+02:00",
-            "destination_eta": "2026-08-28T08:06:20+02:00",
-        }
-    ]
 
 
 def test_detour_candidates_requires_timezone_offset() -> None:

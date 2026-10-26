@@ -77,11 +77,6 @@ def validate_openapi(path: Path) -> None:
     timing_fields = schemas.get("NavigationTimingResponse", {}).get("properties", {})
     for field in (
         "driving_duration_seconds",
-        "traffic_delay_seconds",
-        "traffic_delay_state",
-        "traffic_state",
-        "traffic_aware",
-        "traffic_observed_at",
         "dwell_seconds_per_refueling_stop",
         "total_refueling_dwell_seconds",
         "total_trip_duration_seconds",
@@ -240,14 +235,6 @@ def _validate_navigation_timing(value: dict[str, Any], expected_stops: int, labe
         math.isclose(total, driving + dwell, abs_tol=TOLERANCE_SECONDS),
         f"{label} total is not driving plus dwell",
     )
-    require(
-        timing.get("traffic_delay_state") in {"unavailable", "estimated"},
-        f"{label} traffic-delay state is not explicit",
-    )
-    if timing.get("traffic_delay_state") == "unavailable":
-        require(
-            timing.get("traffic_delay_seconds") is None, f"{label} invented a traffic-delay value"
-        )
     departure = timestamp(timing.get("departure_at"), f"{label}.departure_at")
     trip_arrival = timestamp(timing.get("trip_arrival_at"), f"{label}.trip_arrival_at")
     require(
@@ -322,10 +309,6 @@ def validate_timing(
     _validate_predictive_chronology(multi_plan, multi_count, "multi-stop predictive")
     _validate_navigation_timing(read_json(one_route), one_count, "one-stop route")
     _validate_navigation_timing(read_json(multi_route), multi_count, "multi-stop route")
-    print(
-        "Live timing separates driving/traffic/dwell/total and applies 20 minutes "
-        f"to one stop and cumulatively to {multi_count} stops."
-    )
 
 
 def parser() -> argparse.ArgumentParser:

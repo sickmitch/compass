@@ -30,7 +30,7 @@ Compass API, or change backend route/CNG contracts.
 - Positive differences use the error color; zero or savings use the primary color.
 - The card slides up, contributes its measured height to camera padding and disappears ten seconds
   after commit. Activity recreation does not restart the ten-second interval.
-- Scheduled traffic refreshes and manual debug refreshes do not create the notice.
+
 
 ## Repository-local validation
 
@@ -65,7 +65,7 @@ trigger `Simula fuori percorso`. Confirm:
 3. the replacement route is committed from the raw simulated coordinate;
 4. the bottom card appears with `Prima`, `Ora` and `Differenza`;
 5. the card remains legible without covering the puck and disappears after ten seconds;
-6. no card appears for a manual or scheduled traffic refresh.
+
 
 ## Independent road gate
 

@@ -109,10 +109,6 @@ def waypoint_route_as_base_route(
         encoded_polyline=encode_polyline6(tuple(coordinates)),
         maneuvers=tuple(maneuvers),
         provider=route.provider,
-        traffic_aware=route.traffic_aware,
-        traffic_delay_seconds=route.traffic_delay_seconds,
-        traffic_fallback_used=route.traffic_fallback_used,
-        traffic_detected=route.traffic_detected,
         speed_limits=tuple(speed_limits),
         speed_limit_source=next(
             (leg.speed_limit_source for leg in route.legs if leg.speed_limit_source),

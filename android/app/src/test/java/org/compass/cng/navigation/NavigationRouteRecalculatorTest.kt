@@ -71,7 +71,7 @@ class NavigationRouteRecalculatorTest {
     }
 
     @Test
-    fun offRouteUsesRawFixWhileTrafficAndConnectivityRecoveryUseSnappedPosition() = runTest {
+    fun offRouteUsesRawFixWhileConnectivityRecoveryUsesSnappedPosition() = runTest {
         val repository = RecordingRepository()
         val recalculator = CompassNavigationRouteRecalculator(repository)
         val original = repository.route(
@@ -91,7 +91,7 @@ class NavigationRouteRecalculatorTest {
         assertEquals(raw, repository.lastOrigin)
         assertEquals(RouteOriginDirection(90.0, 45), repository.lastOriginDirection)
 
-        recalculator.recalculate(state, RouteUpdateReason.TRAFFIC_REFRESH)
+        recalculator.recalculate(state, RouteUpdateReason.CONNECTIVITY_RECOVERY)
         assertEquals(snapped, repository.lastOrigin)
         assertEquals(null, repository.lastOriginDirection)
         assertEquals(original.destination, repository.lastDestination)
@@ -332,7 +332,7 @@ class NavigationRouteRecalculatorTest {
             nextFuelStop = NavigationFuelStopProgress(stops.first(), 7_000.0),
         )
 
-        val recalculated = recalculator.recalculate(state, RouteUpdateReason.TRAFFIC_REFRESH)
+        val recalculated = recalculator.recalculate(state, RouteUpdateReason.CONNECTIVITY_RECOVERY)
 
         assertEquals(listOf("first", "second"), repository.lastItineraryIds)
         assertEquals(100.0, requireNotNull(repository.lastEffectiveRangeKm), 0.0)
@@ -698,8 +698,6 @@ class NavigationRouteRecalculatorTest {
                     rangeShortfallToDestinationKm = 0.0,
                     destinationReachableWithReserve = true,
                     consumptionModel = "caller_estimated_remaining_range",
-                    trafficState = "not_configured",
-                    trafficAdjusted = false,
                 ),
                 candidates = emptyList(),
                 itinerary = null,

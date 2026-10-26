@@ -27,8 +27,7 @@ predictive CNG constraints remain part of that request.
 - While a match is suspected or confirmed, the old route's progress, maneuver, ETA and next CNG
   stop do not advance from an unreliable projection. The raw accepted fix remains available as the
   origin of an off-route request.
-- Scheduled traffic refresh waits for a reliable on-route position and cannot race a suspected
-  deviation.
+
 
 ## Rerouting and failure contract
 
@@ -52,8 +51,7 @@ maneuver or contribute fake route progress. The foreground notification uses the
 while recalculation is active.
 
 After a successful off-route replacement, the existing ten-second `Prima` / `Ora` / `Differenza`
-notice remains authoritative for the travel-time impact. Traffic and manual refreshes do not create
-that notice.
+notice remains authoritative for the travel-time impact.
 
 Android version is `0.20.0` (`versionCode=25`).
 
@@ -75,9 +73,6 @@ export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```
 
-Tests cover minimum episode duration, stationary drift, recovery hysteresis, frozen unreliable
-progress, delayed traffic refresh, raw reroute origin, CNG plan preservation/replanning, downloaded
-route retention and the state that drives the recalculation indicator.
 
 ## Live gate
 

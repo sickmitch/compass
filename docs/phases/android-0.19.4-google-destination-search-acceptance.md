@@ -6,8 +6,7 @@ Status: accepted on the live backend and a physical Android device on 2026-09-07
 
 Android `0.19.4` and the Compass API replace the active destination-search path with Google Places
 API (New) Autocomplete plus selected-place Details. Google is the only destination provider for
-this gate. MapLibre, Valhalla, CNG stops, vehicle constraints, traffic and the preview/Start flow are
-unchanged.
+this gate.
 
 The gate is not ready until the operator verifies the Google Cloud billing-account address and sets
 `GOOGLE_PLACES_CONTRACT_REGIME=eea`. This repository deliberately refuses to enable the integration
@@ -27,8 +26,7 @@ Acceptance requires all of these invariants:
   navigation notification; the map label is `Destinazione selezionata`;
 - no Google result payload is persisted or inserted in the CNG catalog;
 - Google 403, 429, timeout and not-found failures do not fall back to TomTom/Nominatim;
-- `/api/v1/destinations/metrics` reports `tomtom_destination_calls=0` while configured TomTom
-  traffic remains independent.
+
 
 ## Local evidence
 
@@ -68,7 +66,6 @@ cd ~/docker/compass
 docker compose config --quiet
 docker compose build api
 docker compose up -d --force-recreate api
-docker compose exec -T api python -c 'from compass.config import get_settings; s=get_settings(); print({"providers": s.destination_search_providers, "google_enabled": s.google_places_enabled, "contract_regime": s.google_places_contract_regime, "tomtom_search": s.tomtom_search_enabled, "destination_fallback": s.destination_search_fallback_enabled, "text_search": s.google_places_text_search_enabled, "traffic_provider": s.traffic_provider, "key_configured": bool(s.google_places_api_key.get_secret_value())})'
 docker compose ps api
 ```
 

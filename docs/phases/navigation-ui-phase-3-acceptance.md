@@ -116,8 +116,7 @@ this phase is accepted.
 
 The next attempted run was blocked before navigation because Valhalla's time-dependent search
 returned error 442 after reaching its iteration/convergence bounds for the otherwise routable
-Milan–Bologna preview. The routing adapter now performs one explicit graph-speed retry only after a
-traffic-aware no-path response. Waypoint routes use the same bounded fallback; a second no-path is
+Milan–Bologna preview. Waypoint routes use the same bounded fallback; a second no-path is
 still returned normally. The live runner now probes the exact default route before building and
 installing Android, so this server-side prerequisite fails early with a preserved response.
 

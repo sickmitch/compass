@@ -18,12 +18,6 @@ class NavigationTiming:
     departure_at: datetime | None
     driving_arrival_at: datetime | None
     trip_arrival_at: datetime | None
-    traffic_delay_seconds: float | None = None
-    traffic_delay_state: str = "unavailable"
-    traffic_state: str = "not_configured"
-    traffic_aware: bool = False
-    traffic_observed_at: datetime | None = None
-    traffic_detected: bool = False
 
 
 def build_navigation_timing(
@@ -34,11 +28,6 @@ def build_navigation_timing(
     departure_at: datetime | None = None,
     provider: str = "valhalla",
     dwell_seconds_per_refueling_stop: int = DEFAULT_CNG_REFUEL_DWELL_SECONDS,
-    traffic_delay_seconds: float | None = None,
-    traffic_state: str = "not_configured",
-    traffic_aware: bool = False,
-    traffic_observed_at: datetime | None = None,
-    traffic_detected: bool = False,
 ) -> NavigationTiming:
     """Build stable route identity and trip timing without changing routing cost.
 
@@ -49,14 +38,6 @@ def build_navigation_timing(
         raise ValueError("driving duration must not be negative")
     if dwell_seconds_per_refueling_stop < 0:
         raise ValueError("refuelling dwell must not be negative")
-    if traffic_delay_seconds is not None and traffic_delay_seconds < 0:
-        raise ValueError("traffic delay must not be negative")
-    if traffic_aware and traffic_delay_seconds is None:
-        raise ValueError("traffic-aware timing requires a graph-speed delay baseline")
-    if traffic_aware and traffic_state not in {"fresh", "mock"}:
-        raise ValueError("traffic-aware timing requires current provider data")
-    if traffic_aware and traffic_observed_at is None:
-        raise ValueError("traffic-aware timing requires an observation timestamp")
 
     shapes = tuple(encoded_polylines)
     stops = tuple(fuel_stop_ids)
@@ -92,12 +73,6 @@ def build_navigation_timing(
         departure_at=departure_at,
         driving_arrival_at=driving_arrival,
         trip_arrival_at=trip_arrival,
-        traffic_delay_seconds=traffic_delay_seconds,
-        traffic_delay_state="estimated" if traffic_delay_seconds is not None else "unavailable",
-        traffic_state=traffic_state,
-        traffic_aware=traffic_aware,
-        traffic_observed_at=traffic_observed_at,
-        traffic_detected=traffic_detected,
     )
 
 

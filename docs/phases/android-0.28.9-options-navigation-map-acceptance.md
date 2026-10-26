@@ -7,9 +7,7 @@
 - A fresh map-picker draft can be opened after every committed intermediate stop.
 - Shared title-only headers; the explicit arrow follows Android's navigation mode.
 - A global Material settings control on planner, follow and active-navigation surfaces.
-- Persistent theme and voice defaults, favourites management, encrypted server connection and a
-  read-only diagnostics panel containing app/backend versions, traffic, tileset, route provider,
-  map source and current GPS coordinate.
+
 
 ## Automated acceptance
 
@@ -36,7 +34,6 @@ The tests must report no failures, lint must complete successfully, and the APK 
 6. In Options switch light/dark/system and verify both Material UI and MapLibre change together.
 7. Disable voice, close/reopen Compass, start navigation and verify guidance remains disabled.
 8. Open favourites and connection from Options; Back returns to Options without changing the trip.
-9. In Info verify app/backend version, server, traffic state, Valhalla tileset and current coordinate.
 10. Compare bundled day/night maps around buildings: minor, secondary and primary roads must remain
     visually distinct without obscuring the blue route overlay.
 

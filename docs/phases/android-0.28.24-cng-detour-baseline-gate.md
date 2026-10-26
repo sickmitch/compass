@@ -2,8 +2,6 @@
 
 ## Criteri di accettazione
 
-- La deviazione confronta tratta diretta e tratta tramite stazione usando costi della stessa
-  matrice Valhalla, con identico istante di partenza e modello di traffico.
 - Il costo diretto viene ottenuto nella chiamata matrice già necessaria: non viene aggiunta una
   richiesta per ogni stazione.
 - Una stazione con deviazione reale superiore al limite non viene inclusa anche quando il riepilogo

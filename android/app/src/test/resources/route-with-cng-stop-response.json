@@ -14,8 +14,14 @@
   "legs": [
     {
       "kind": "origin_to_cng_station",
-      "origin": {"latitude": 45.4642, "longitude": 9.19},
-      "destination": {"latitude": 45.321004, "longitude": 9.376063},
+      "origin": {
+        "latitude": 45.4642,
+        "longitude": 9.19
+      },
+      "destination": {
+        "latitude": 45.321004,
+        "longitude": 9.376063
+      },
       "distance_meters": 23106.0,
       "duration_seconds": 1151.0,
       "geometry": {
@@ -30,7 +36,9 @@
           "duration_seconds": 1151.0,
           "begin_shape_index": 0,
           "end_shape_index": 1,
-          "street_names": ["A1"],
+          "street_names": [
+            "A1"
+          ],
           "verbal_transition_alert_instruction": null,
           "verbal_pre_transition_instruction": null,
           "verbal_post_transition_instruction": null,
@@ -41,14 +49,24 @@
         }
       ],
       "speed_limits": [
-        {"begin_shape_index": 0, "end_shape_index": 1, "speed_limit_kph": 50}
+        {
+          "begin_shape_index": 0,
+          "end_shape_index": 1,
+          "speed_limit_kph": 50
+        }
       ],
       "speed_limit_source": "valhalla_graph"
     },
     {
       "kind": "cng_station_to_destination",
-      "origin": {"latitude": 45.321004, "longitude": 9.376063},
-      "destination": {"latitude": 44.4949, "longitude": 11.3426},
+      "origin": {
+        "latitude": 45.321004,
+        "longitude": 9.376063
+      },
+      "destination": {
+        "latitude": 44.4949,
+        "longitude": 11.3426
+      },
       "distance_meters": 187824.0,
       "duration_seconds": 5688.0,
       "geometry": {
@@ -63,7 +81,9 @@
           "duration_seconds": 5688.0,
           "begin_shape_index": 0,
           "end_shape_index": 1,
-          "street_names": ["A1"],
+          "street_names": [
+            "A1"
+          ],
           "verbal_transition_alert_instruction": null,
           "verbal_pre_transition_instruction": null,
           "verbal_post_transition_instruction": null,
@@ -74,7 +94,11 @@
         }
       ],
       "speed_limits": [
-        {"begin_shape_index": 0, "end_shape_index": 1, "speed_limit_kph": 130}
+        {
+          "begin_shape_index": 0,
+          "end_shape_index": 1,
+          "speed_limit_kph": 130
+        }
       ],
       "speed_limit_source": "valhalla_graph"
     }

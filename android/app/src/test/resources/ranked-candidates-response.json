@@ -17,7 +17,9 @@
         "duration_seconds": 18.0,
         "begin_shape_index": 0,
         "end_shape_index": 2,
-        "street_names": ["Via Roma"],
+        "street_names": [
+          "Via Roma"
+        ],
         "verbal_transition_alert_instruction": null,
         "verbal_pre_transition_instruction": null,
         "verbal_post_transition_instruction": null,
@@ -26,9 +28,24 @@
         "travel_mode": "drive",
         "travel_type": "car",
         "sign": {
-          "exit_number_elements": [{"text": "1", "consecutive_count": 2}],
-          "exit_branch_elements": [{"text": "A1", "consecutive_count": null}],
-          "exit_toward_elements": [{"text": "Bologna", "consecutive_count": null}],
+          "exit_number_elements": [
+            {
+              "text": "1",
+              "consecutive_count": 2
+            }
+          ],
+          "exit_branch_elements": [
+            {
+              "text": "A1",
+              "consecutive_count": null
+            }
+          ],
+          "exit_toward_elements": [
+            {
+              "text": "Bologna",
+              "consecutive_count": null
+            }
+          ],
           "exit_name_elements": []
         },
         "roundabout_exit_count": 2
@@ -56,8 +73,6 @@
   },
   "cost_basis": {
     "provider": "valhalla",
-    "traffic_state": "not_configured",
-    "traffic_aware": false,
     "duration_model": "valhalla_graph_speeds",
     "distance_model": "road_network"
   },

@@ -21,7 +21,7 @@ custom minute value remains a cumulative allowance from that same baseline.
   explicit Cerca action. Over-limit or unverified matches remain explicit preview choices.
 - Evaluation is bounded to 10 candidates and 20 seconds. At most two route-segment recovery calls
   seek three useful candidates. The segment search is candidate discovery, not eligibility.
-- TomTom destination calls and fallbacks remain disabled. TomTom traffic remains independent.
+
 
 ## Device checks
 

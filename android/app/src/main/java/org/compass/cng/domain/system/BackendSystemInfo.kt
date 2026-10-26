@@ -4,12 +4,6 @@ data class BackendSystemInfo(
     val service: String,
     val version: String,
     val status: String,
-    val trafficEnabled: Boolean,
-    val trafficProvider: String,
-    val trafficStatus: String,
-    val trafficAwareRouting: Boolean,
-    val valhallaTilesetVersion: String?,
-    val trafficMappingVersion: String?,
 )
 
 interface BackendSystemInfoRepository {

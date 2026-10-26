@@ -1,8 +1,6 @@
 # Phase 9 acceptance criteria
 
-Phase 9 implements the manual Android Add CNG Stop workflow over the accepted Phase 7 API. It keeps
-the deterministic Milan-to-Bologna route from Phase 8 and does not implement destination editing,
-predictive refuelling, traffic ingestion or active turn-by-turn navigation.
+Phase 9 implements the manual Android Add CNG Stop workflow over the accepted Phase 7 API.
 
 ## Implemented gate
 
@@ -72,8 +70,6 @@ Return the complete runner output plus screenshots of the ranked candidates and 
 
 Accepted from the operator's live backend and physical-device run on 2026-08-29:
 
-- readiness reported database and routing `ready`, data explicitly `degraded`, and traffic
-  explicitly `not_configured`;
 - the live ranked request returned 16 eligible stations from the full-Italy dataset, with official
   MIMIT identities and a ten-minute maximum-detour policy;
 - the saved live artifacts passed the Phase 9 validator, including the top MIMIT `3618` selection,

@@ -112,10 +112,6 @@ class BaseRoute:
     encoded_polyline: str
     maneuvers: tuple[Maneuver, ...]
     provider: str
-    traffic_aware: bool = False
-    traffic_delay_seconds: float | None = None
-    traffic_fallback_used: bool = False
-    traffic_detected: bool = False
     speed_limits: tuple[RouteSpeedLimit, ...] = ()
     speed_limit_source: str | None = None
     uses_highways: bool = False
@@ -138,10 +134,6 @@ class WaypointRoute:
     duration_seconds: float
     legs: tuple[RouteLeg, ...]
     provider: str
-    traffic_aware: bool = False
-    traffic_delay_seconds: float | None = None
-    traffic_fallback_used: bool = False
-    traffic_detected: bool = False
 
     @property
     def uses_highways(self) -> bool:

@@ -465,7 +465,6 @@ class HttpRoutingRepository(
             departureAt = OffsetDateTime.parse(response.departureAt),
             maximumDetourMinutes = response.maximumDetourMinutes,
             baseRoute = response.baseRoute.toRoutePreview(origin, destination, allowHighways),
-            trafficState = response.trafficState,
             candidates = candidates,
         )
     }
@@ -511,7 +510,6 @@ class HttpRoutingRepository(
             departureAt = OffsetDateTime.parse(response.departureAt),
             maximumDetourMinutes = response.maximumDetourMinutes,
             baseRoute = response.baseRoute.toRoutePreview(origin, destination, allowHighways),
-            trafficState = response.trafficState,
             candidates = candidates,
         )
     }
@@ -657,8 +655,6 @@ class HttpRoutingRepository(
                     response.rangeBasis.destinationReachableWithReserve
                 ),
                 consumptionModel = response.rangeBasis.consumptionModel,
-                trafficState = response.rangeBasis.trafficState,
-                trafficAdjusted = response.rangeBasis.trafficAdjusted,
             ),
             candidates = candidates,
             itinerary = response.itinerary?.let { itinerary ->
@@ -1154,12 +1150,6 @@ private fun ApiNavigationTiming.toNavigationTiming(): NavigationTiming = Navigat
     departureAt = departureAt?.let(OffsetDateTime::parse),
     drivingArrivalAt = drivingArrivalAt?.let(OffsetDateTime::parse),
     tripArrivalAt = tripArrivalAt?.let(OffsetDateTime::parse),
-    trafficDelaySeconds = trafficDelaySeconds,
-    trafficDelayState = trafficDelayState,
-    trafficState = trafficState,
-    trafficAware = trafficAware,
-    trafficObservedAt = trafficObservedAt?.let(OffsetDateTime::parse),
-    trafficDetected = trafficDetected,
 )
 
 private fun ApiNavigationTiming.toLegNavigationTiming(

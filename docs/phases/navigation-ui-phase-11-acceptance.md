@@ -13,8 +13,6 @@ waypoints.
 
 - Manual selection copies the chosen ranked station's opening, phone, operator/brand and price
   snapshot into the selected route. Predictive selection does the same for every itinerary stop.
-- Compatible traffic/off-route recalculation preserves that snapshot by official MIMIT ID. A newly
-  selected replacement uses the new predictive result's snapshot.
 - The version-1 private route cache stores these optional fields while remaining able to decode
   documents written before Phase 11.
 - Opening is visible only when validation is `VALID` and its evaluation instant remains within 30
@@ -24,8 +22,7 @@ waypoints.
   omitted rather than presented as live.
 - A cache-restored route keeps waypoint, distance, ETA and dwell guidance, but suppresses dynamic
   opening and price claims.
-- Backend instants retain their offset for comparisons, but every user-facing stop ETA, traffic
-  timestamp and preview time is converted to the Android device timezone before formatting.
+
 
 No request is made from the driving UI. The snapshot is route data, not a persistent station
 catalogue.
@@ -109,9 +106,7 @@ Do not proceed to Navigation UI Phase 12 until this gate is accepted.
 On 2026-09-08 the operator reported that the complete Phase 11 gate passed on the live backend and
 physical Android device. This confirms the five operator-owned checks: persistent compact CNG
 guidance, complete stop details and dwell, lifecycle progression, safe CNG-aware replacement, and
-cache-only behavior without live freshness claims. The follow-up checks also confirmed that stop
-ETA and traffic timestamps use the phone timezone and that `Ricalcolo rotta` appears below the CNG
-stop card.
+cache-only behavior without live freshness claims.
 
 Repository-local unit tests, lint, APK assembly, runner-contract checks and shell checks had already
 passed before the final handoff. No UIAutomator or screenshot-parsing result is claimed; visual and

@@ -43,7 +43,6 @@ The system must eventually support:
 - official CNG price data;
 - opening status at predicted arrival time;
 - phone/contact data when available;
-- traffic-aware route cost;
 - predictive fuel-stop suggestions based on remaining CNG autonomy;
 - turn-by-turn mobile navigation;
 - graceful degraded/offline behavior where feasible.
@@ -96,11 +95,8 @@ Responsibilities:
 - route geometries;
 - route maneuvers;
 - time-dependent routing;
-- traffic-aware costs;
 - matrix/batch computations where useful;
-- later historical/predicted/live traffic ingestion.
 
-Traffic data itself comes from an external provider/ingestion layer.
 
 ## 2. Spatial database — PostgreSQL + PostGIS
 
@@ -163,7 +159,7 @@ Responsibilities:
 - opening-hours-at-ETA evaluation;
 - ranking/scoring;
 - predictive fuel logic;
-- traffic-aware costs.
+
 
 ## 5. API — FastAPI preferred
 
@@ -242,7 +238,7 @@ Predictive mode additionally limits the considered section of the route accordin
 - configurable safety reserve;
 - vehicle consumption model;
 - route progress;
-- traffic/road effects where modeled.
+
 
 A station that is near the route but not safely reachable must not be suggested.
 
@@ -254,7 +250,6 @@ Ranking must be deterministic and explainable.
 
 Possible factors:
 
-- traffic-aware detour minutes;
 - extra distance;
 - distance from previous waypoint;
 - opening state at station ETA;
@@ -272,31 +267,6 @@ Preserve/return scoring components so the client can explain the ranking.
 `missing price` != unusable.
 
 Closed-at-ETA stations should normally be excluded or strongly penalized, controlled by explicit policy.
-
----
-
-# Dynamic traffic requirements
-
-Traffic is an advanced phase but architecture must anticipate it from the beginning.
-
-Valhalla may consume externally produced live traffic and historical/predicted speed information.
-
-Implement traffic through a provider abstraction.
-
-The system must support:
-
-- traffic disabled;
-- deterministic test/synthetic traffic;
-- stale-traffic detection;
-- live provider later;
-- source/freshness metadata;
-- graceful fallback to normal routing.
-
-Do not lock the domain model to one proprietary traffic vendor.
-
-Do not label synthetic/test traffic as live.
-
-When traffic is active, user-visible detour time and ETA should use traffic-aware route costs.
 
 ---
 
@@ -322,7 +292,6 @@ Design interfaces so later versions can incorporate:
 - elevation;
 - temperature/weather;
 - vehicle-specific consumption history;
-- traffic;
 - urban/highway mix.
 
 The first production implementation can be deliberately simpler, but assumptions must be explicit and testable.
@@ -584,23 +553,6 @@ Acceptance:
 - station values match API;
 - route changes correctly after selection.
 
-## Phase 10 — Traffic provider framework + traffic-aware routing
-
-Goal:
-
-- implement traffic-provider abstraction;
-- deterministic fixture provider;
-- traffic freshness state;
-- Valhalla traffic ingestion/update path;
-- select and integrate a real provider only after licensing/data availability is explicitly evaluated;
-- use traffic-aware ETA and detour when valid live data exists;
-- fallback when absent/stale.
-
-Acceptance:
-- deterministic congestion test changes route cost predictably;
-- stale data fallback test;
-- human validates live provider if configured.
-
 ## Phase 11 — Predictive CNG refuelling
 
 Goal:
@@ -643,14 +595,12 @@ Goal:
 Define realistic behavior when:
 
 - API unavailable;
-- traffic unavailable;
 - price data stale;
 - OSM enrichment missing;
 - mobile connectivity intermittent.
 - cached route;
 - cached CNG stations;
 - cached vector tiles;
-- non-traffic routing fallback;
 - explicit freshness UX.
 
 ## Phase 14 — Hardening, observability and performance

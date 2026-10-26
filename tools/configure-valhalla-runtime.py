@@ -18,7 +18,14 @@ def enable_hard_exclusions(config_path: Path) -> bool:
     service_limits = config.setdefault("service_limits", {})
     if not isinstance(service_limits, dict):
         raise ValueError("Valhalla service_limits must be a JSON object")
-    if service_limits.get("allow_hard_exclusions") is True:
+    # Existing installations can retain a retired external-speed archive in their
+    # persistent config. Detach it without touching the routing graph or its files.
+    mjolnir = config.get("mjolnir", {})
+    if not isinstance(mjolnir, dict):
+        raise ValueError("Valhalla mjolnir must be a JSON object")
+    removed_archive = "traffic_extract" in mjolnir
+    mjolnir.pop("traffic_extract", None)
+    if service_limits.get("allow_hard_exclusions") is True and not removed_archive:
         return False
     service_limits["allow_hard_exclusions"] = True
     temporary_path = config_path.with_suffix(f"{config_path.suffix}.tmp")
@@ -36,9 +43,9 @@ def main() -> int:
     args = parser.parse_args()
     changed = enable_hard_exclusions(args.config)
     message = (
-        "Valhalla hard exclusions enabled"
+        "Valhalla nominal routing configuration applied"
         if changed
-        else "Valhalla hard exclusions already enabled"
+        else "Valhalla nominal routing configuration already applied"
     )
     print(message)
     return 0

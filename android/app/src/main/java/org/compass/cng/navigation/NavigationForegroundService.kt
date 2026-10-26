@@ -153,7 +153,7 @@ class NavigationForegroundService : Service(), LocationListener {
         }
         session.start()
         if (!updateControllerStarted) {
-            routeUpdateController.navigationStarted(System.currentTimeMillis())
+            routeUpdateController.navigationStarted()
             updateControllerStarted = true
         }
         val replayRequested = intent?.action == ACTION_START_REPLAY ||
@@ -377,7 +377,7 @@ class NavigationForegroundService : Service(), LocationListener {
                 val route = routeRecalculator.recalculate(snapshot, reason)
                 val completedAt = System.currentTimeMillis()
                 session.replaceRoute(route, completedAt, snapshot.rawLocation)
-                routeUpdateController.updateSucceeded(completedAt)
+                routeUpdateController.updateSucceeded()
                 maneuverController.reset()
                 val durationDeltaSeconds = session.state.value.routeUpdateNotice
                     ?.durationDeltaSeconds
@@ -385,9 +385,6 @@ class NavigationForegroundService : Service(), LocationListener {
                     LOG_TAG,
                     "route update committed: $reason route=${route.routeId} " +
                         "stops=${route.fuelStopIdsForLog()} " +
-                        "traffic_state=${route.timing.trafficState} " +
-                        "traffic_aware=${route.timing.trafficAware} " +
-                        "traffic_delay_seconds=${route.timing.trafficDelaySeconds?.toLong()} " +
                         "duration_delta_seconds=${durationDeltaSeconds?.toLong() ?: "none"}",
                 )
                 resumeReplayAfterRouteUpdateIfNeeded()
@@ -424,7 +421,7 @@ class NavigationForegroundService : Service(), LocationListener {
                     is FuelStopReplacementResult.Replaced -> {
                         val completedAt = System.currentTimeMillis()
                         session.replaceRoute(result.route, completedAt, snapshot.rawLocation)
-                        routeUpdateController.updateSucceeded(completedAt)
+                        routeUpdateController.updateSucceeded()
                         maneuverController.reset()
                         if (replayLifecycle.isReplayActive) startRouteReplay()
                         Log.i(
@@ -494,7 +491,7 @@ class NavigationForegroundService : Service(), LocationListener {
                 val route = routeRecalculator.removeNextStop(snapshot)
                 val completedAt = System.currentTimeMillis()
                 session.replaceRoute(route, completedAt, snapshot.rawLocation)
-                routeUpdateController.updateSucceeded(completedAt)
+                routeUpdateController.updateSucceeded()
                 maneuverController.reset()
                 Log.i(
                     LOG_TAG,

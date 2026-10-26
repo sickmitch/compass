@@ -19,7 +19,6 @@ from compass.api.routes import (
     RouteGeometry,
     RouteSpeedLimitResponse,
     _navigation_timing_response,
-    _navigation_traffic,
     route_origin_direction,
 )
 from compass.config import Settings, get_api_settings
@@ -40,9 +39,6 @@ from compass.routing.domain import (
 )
 from compass.stations.domain import StationDetail
 from compass.stations.repository import load_station_detail, load_station_route_points
-from compass.traffic.dependencies import get_traffic_route_refresher
-from compass.traffic.route_refresh import TrafficRouteRefresher
-from compass.traffic.routing import refresh_waypoint_route_traffic
 
 router = APIRouter(prefix="/api/v1", tags=["stations"])
 MimitStationId = Annotated[str, Path(pattern=r"^[0-9]{1,32}$")]
@@ -248,9 +244,6 @@ async def route_with_cng_stop(
     request: RouteWithCngStopRequest,
     session: Annotated[Session, Depends(get_session)],
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
-    traffic_refresher: Annotated[
-        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
-    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> RouteWithCngStopResponse | JSONResponse:
     try:
@@ -296,15 +289,6 @@ async def route_with_cng_stop(
             "The routing service returned an invalid response.",
         )
 
-    route = await refresh_waypoint_route_traffic(
-        route=route,
-        request=route_request,
-        provider=provider,
-        refresher=traffic_refresher,
-        current_departure_tolerance_seconds=(
-            settings.traffic_route_refresh_min_interval_seconds
-        ),
-    )
 
     departure_at = request.departure_at or datetime.now(UTC)
     stop_arrival_at = fuel_stop_arrival_times(
@@ -319,7 +303,6 @@ async def route_with_cng_stop(
         fuel_stop_ids=(station.mimit_station_id,),
         departure_at=departure_at,
         dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
-        **_navigation_traffic(route, settings),
     )
     coordinates = (origin, stop, destination)
     kinds = ("origin_to_cng_station", "cng_station_to_destination")
@@ -385,9 +368,6 @@ async def route_with_cng_itinerary(
     request: RouteWithCngItineraryRequest,
     session: Annotated[Session, Depends(get_session)],
     provider: Annotated[RoutingProvider, Depends(get_routing_provider)],
-    traffic_refresher: Annotated[
-        TrafficRouteRefresher, Depends(get_traffic_route_refresher)
-    ],
     settings: Annotated[Settings, Depends(get_api_settings)],
 ) -> RouteWithCngItineraryResponse | JSONResponse:
     station_ids = tuple(request.mimit_station_ids)
@@ -448,15 +428,6 @@ async def route_with_cng_itinerary(
             "The routing service returned an invalid response.",
         )
 
-    route = await refresh_waypoint_route_traffic(
-        route=route,
-        request=route_request,
-        provider=provider,
-        refresher=traffic_refresher,
-        current_departure_tolerance_seconds=(
-            settings.traffic_route_refresh_min_interval_seconds
-        ),
-    )
 
     coordinates = (origin, *stop_coordinates, destination)
     response_legs: list[CngItineraryRouteLegResponse] = []
@@ -537,7 +508,6 @@ async def route_with_cng_itinerary(
         fuel_stop_ids=station_ids,
         departure_at=departure_at,
         dwell_seconds_per_refueling_stop=settings.cng_refuel_dwell_seconds,
-        **_navigation_traffic(route, settings),
     )
     return RouteWithCngItineraryResponse(
         selected_stops=[

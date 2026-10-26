@@ -34,10 +34,6 @@ Navigation UI Phase 5 still owns Compass-specific day/night cartographic design.
 - Name-bearing map layers prefer `name:it` and then neutral/local names, while road-reference
   shields retain their original expression. Italian labels are a client presentation policy and do
   not alter route or search data.
-- Active navigation combines each basemap POI layer's existing rank/geometry filter with a strict
-  driving whitelist: fuel/charging stations, toll booths, border control and traffic signals when
-  the tileset supplies them. Transit stops, libraries, shops, tourism and other generic POIs are
-  suppressed. Compass-planned CNG waypoint layers remain independent and always visible.
 - The matched position uses a directional vector vehicle instead of a circular point. In heading-up
   follow it is locked vertically to the viewport, avoiding transient tilt while the camera bearing
   is easing; free and overview modes rotate it against the map using the matched-route tangent. CNG
@@ -137,8 +133,7 @@ surface, manual-camera suspension with legible `Ricentra`, and north-up remainin
   general-purpose development style; the operator must observe the transition on-device.
 - OpenFreeMap Liberty is a development baseline, not the final Compass cartography. Navigation UI
   Phase 5 will define purpose-built low-noise day/night styles and their deployment strategy.
-- The current OpenMapTiles POI schema does not publish traffic-signal nodes. The filter is ready for
-  a compatible future tileset, but Compass does not fabricate unavailable traffic-light data.
+
 
 ## Failure diagnostics
 

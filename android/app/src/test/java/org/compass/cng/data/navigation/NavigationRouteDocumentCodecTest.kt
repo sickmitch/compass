@@ -39,6 +39,17 @@ class NavigationRouteDocumentCodecTest {
     private val codec = NavigationRouteDocumentCodec()
 
     @Test
+    fun retiredTimingMetadataDoesNotDiscardSavedNavigation() {
+        val cached = CachedNavigationRoute(
+            routeWithStop().toNavigationRoute(), 1_725_000_000_000, navigationWasActive = true,
+        )
+        val document = codec.encode(cached).replace(
+            "\"drivingDurationSeconds\":", "\"retiredMetadata\":123,\"drivingDurationSeconds\":",
+        )
+        assertEquals(cached, codec.decode(document))
+    }
+
+    @Test
     fun bicycleModeAndOrdinaryStopsSurviveSavedNavigationRoundTrip() {
         val route = leg(Coordinate(45.0, 9.0), Coordinate(45.1, 9.1), "Prosegui in bici")
             .copy(travelMode = RouteTravelMode.CYCLING)
@@ -234,11 +245,6 @@ class NavigationRouteDocumentCodecTest {
                 OffsetDateTime.parse("2026-09-03T08:00:00+02:00"),
                 OffsetDateTime.parse("2026-09-03T09:30:00+02:00"),
                 OffsetDateTime.parse("2026-09-03T09:50:00+02:00"),
-                trafficDelaySeconds = 180.0,
-                trafficDelayState = "estimated",
-                trafficState = "fresh",
-                trafficAware = true,
-                trafficObservedAt = OffsetDateTime.parse("2026-09-03T07:59:30+02:00"),
             ),
         )
     }

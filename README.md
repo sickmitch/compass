@@ -28,7 +28,6 @@ for Navigation UI Phases 14–15:
 - provider-neutral one-to-many and many-to-one road-cost matrices;
 - bounded Valhalla matrix batching over only the spatially pruned candidates;
 - strict maximum-detour eligibility with road distance, two-leg costs and offset-aware ETAs;
-- explicit no-traffic cost metadata and matrix/per-candidate routing metrics.
 - OSM `opening_hours` evaluation at each station ETA in the explicit `Europe/Rome` timezone;
 - distinct `open`, `closed` and `unknown` availability with missing/invalid validation state;
 - deterministic ranking from detour, availability, MIMIT CNG unit price and price freshness;
@@ -59,15 +58,8 @@ for Navigation UI Phases 14–15:
 - route-free Android startup that follows the live GPS position without inventing a destination,
   plus a wrapping origin/destination selector for current position, search, future favourites and
   explicit coordinates;
-- a provider-independent live-traffic subsystem with mock fixtures, a TomTom base Traffic Flow API
-  adapter, OpenLR direction verification, Valhalla directed-edge matching and time-dependent route
-  requests;
-- a hardened on-demand Docker updater with transactional native `traffic.tar` writes, explicit
-  expiry to `UNKNOWN`, tileset-bound durable state and API-readable runtime health;
 - a server-backed `NavigationRoute` plus an application-scoped Android foreground navigation
   session with local GPS filtering, route snapping, progress/ETA and MapLibre follow rendering;
-- staged Italian TextToSpeech guidance, dynamic navigation camera, robust off-route confirmation,
-  five-minute traffic refresh and hot route replacement through Compass with offline continuity.
 - explicit in-navigation CNG stop skip/replacement with server-acknowledged station exclusion,
   predictive range/reserve preservation and a safe keep-current-route fallback, accepted on a
   physical Android device.
@@ -83,27 +75,25 @@ for Navigation UI Phases 14–15:
   and optional gasoline fallback, restored explicitly after process death;
 - bounded exact-query recent destination caching with visible cache timestamps and no silent
   fallback for malformed input/response data;
-- explicit downloaded-route, rerouting-unavailable, traffic-unavailable and cached-CNG UI states;
 - configurable MapLibre ambient caching for resources already visited and live-route recovery after
   Compass connectivity returns.
 
-It intentionally does **not** yet provide nationwide traffic coverage from the point-based TomTom
-base API, independent LRP-to-GraphId resolution, historical traffic ingestion, vehicle telemetry,
-automatic vehicle tank telemetry or automatic inference that a station is unexpectedly closed.
+
+## Current routing policy
+
+All routes and matrices use nominal Valhalla graph speeds. ETA adds only remaining
+travel time and planned dwell. Android displays a green ETA badge and a green journey
+progress ring. See the [0.28.46 deployment and device gate](docs/phases/android-0.28.46-nominal-routing-gate.md).
 
 ## Quick local validation
 
 Android builds now publish suffix-free APKs and update `dist/last.txt` automatically.
 See [client update checks and signing requirements](docs/phases/android-0.28.41-client-update-gate.md).
 
-Current ETA policy: [traffic is alert-only, not a duration adjustment](docs/phases/android-0.28.40-traffic-alert-gate.md).
 
 Python 3.12+ and Docker with Compose are required.
 
-Fixture-based Python tests ignore the operator's `.env` and inherited application settings;
-tests explicitly opt into authentication, traffic or provider configuration when needed.
-Use `.venv/bin/pytest -m 'not integration'` for validation without an isolated PostGIS database.
-The cleanup scope and device acceptance checklist are documented in
+Use `.venv/bin/pytest -m 'not integration'` for validation without an isolated PostGIS database. The cleanup scope and device acceptance checklist are documented in
 [the 0.28.38 cleanup gate](docs/phases/android-0.28.38-cleanup-gate.md).
 
 ```bash
@@ -145,9 +135,6 @@ upstream payload is unchanged prints `"reused": true` and does not add parsed re
 Repeating `normalize` against the same two source runs, reconciliation policy and overrides likewise
 returns `"reused": true`. Its metrics expose matched, ambiguous and unmatched station counts.
 
-See [deployment and live validation](docs/deployment.md),
-[architecture](docs/architecture.md), [data sources](docs/data-sources.md), and
-[live traffic architecture](docs/traffic.md).
 
 ## Phase 3 base routing
 
@@ -197,8 +184,7 @@ curl --fail -H 'Content-Type: application/json' \
 ```
 
 Results include both road legs, road distance from the origin/previous waypoint, total and extra
-time/distance, station/destination ETAs and eligibility metrics. The current graph has no external
-traffic feed, so the response explicitly reports `traffic_aware=false`. See the
+time/distance, station/destination ETAs and eligibility metrics. See the
 [Phase 5 live gate](docs/deployment.md#phase-5-batched-network-detour-validation).
 
 ## Phase 6 arrival-time availability and ranking
@@ -225,8 +211,6 @@ Phase 7 makes the completed routing/ranking domain usable through stable mobile-
   prices with freshness, accepted OSM enrichment and optional opening evaluation at `arrival_at`;
 - `POST /api/v1/routes/with-cng-stop` resolves the official station ID and returns exactly two route
   legs with independent polyline6 geometry and maneuvers;
-- `GET /api/v1/data-freshness` reports MIMIT, OSM and reconciliation ages/thresholds without
-  pretending that traffic is configured;
 - `/health/ready` distinguishes ready, degraded-but-usable data and missing required data.
 
 The canonical machine-readable contract is [docs/openapi.json](docs/openapi.json), with compact
@@ -338,19 +322,14 @@ structured street, locality, exact civic and a configurable 75 m proximity bound
 defines the unambiguous Italian civic syntax as `Via Cappafredda, 12, Roverchiara`. Google payloads
 are discarded before the API boundary and the resulting order is marked non-cacheable.
 
-Route timing now separates driving duration, an explicit nullable traffic-delay component,
-refuelling dwell and total journey duration. `CNG_REFUEL_DWELL_SECONDS` defaults to 1,200 seconds.
-Predictive stop ETAs and opening-hours checks include all earlier dwell, while detour road cost does
+`CNG_REFUEL_DWELL_SECONDS` defaults to 1,200 seconds. Predictive stop ETAs and opening-hours checks include all earlier dwell, while detour road cost does
 not. The accepted Phase 12 live gate is `bash scripts/run-phase12-live.sh`.
 
 ## Phase 13 offline and degraded navigation
 
 Android persists the active route, geometry, maneuvers, timing and CNG plan in versioned private
-storage. A process restart restores a visibly cached preview; an explicit navigation stop clears it.
-Local GPS matching continues on a downloaded route when Compass is unreachable, while the UI
-separately identifies unavailable rerouting, unavailable traffic and cached CNG data. Ten recent
-exact-query search result sets can be used after network/server failure with cache provenance shown.
-MapLibre's bounded ambient cache retains already visited resources without promising full regional
+storage. A process restart restores a visibly cached preview; an explicit navigation stop clears it. Ten recent
+exact-query search result sets can be used after network/server failure with cache provenance shown. MapLibre's bounded ambient cache retains already visited resources without promising full regional
 offline coverage. The operator accepted the device gate on 2026-09-03; its runner remains available
 as `bash scripts/run-phase13-live.sh`.
 
@@ -358,8 +337,7 @@ as `bash scripts/run-phase13-live.sh`.
 
 The active destination flow now uses Google Places API (New) Autocomplete and resolves only the
 selected Place ID through Details. Google is the sole destination provider for this test increment;
-Text Search, legacy geocoding and automatic provider fallback are disabled. TomTom traffic remains
-independent. Search text and addresses stay on mapless screens, while MapLibre and Valhalla receive
+Text Search, legacy geocoding and automatic provider fallback are disabled. Search text and addresses stay on mapless screens, while MapLibre and Valhalla receive
 only WGS84 coordinates, the permitted Place ID and the neutral label `Destinazione selezionata`.
 
 Live enablement is fail-closed until the operator verifies the Cloud billing-account regime and sets
@@ -385,8 +363,7 @@ inactivity; overview is north-up and bounded to the remaining route. The vehicle
 heading-up follow, and bounded zoom now responds to both speed and the spacing of consecutive
 maneuvers. The development map now uses
 an OpenFreeMap road style so streets remain visible beneath the route and name layers prefer
-Italian. Active navigation suppresses generic basemap POIs while retaining available fuel/charging,
-toll, border and traffic-control infrastructure. A directional vehicle replaces the point, CNG
+Italian. A directional vehicle replaces the point, CNG
 uses dedicated markers, manual camera mode returns to follow after ten idle seconds, and the trip
 summary is available through a compact toggle instead of permanently covering the map. The final
 Compass day/night styling was reserved here and is delivered by Phase 5. No external navigation SDK was added. Android version is `0.12.0`
@@ -395,26 +372,12 @@ Compass day/night styling was reserved here and is delivered by Phase 5. No exte
 Navigation UI Phase 3 was accepted on-device on 2026-09-05. Raw Android fixes now pass through
 explicit validation/smoothing and the existing route matcher into one authoritative
 `NavigationPosition`. Low-speed position and heading noise are held, delayed/inaccurate/implausible
-fixes are rejected, and route-matched heading is stabilized independently from raw GPS bearing.
-MapLibre animates coordinate and shortest-path rotation between accepted matched positions while
-snapping only initial or large discontinuous transitions. A Valhalla traffic-aware no-path now
-receives one logged graph-speed retry, preserving navigation availability when time-dependent
-search reaches its convergence bound. The accepted gate confirmed the exact route preflight,
+fixes are rejected, and route-matched heading is stabilized independently from raw GPS bearing. MapLibre animates coordinate and shortest-path rotation between accepted matched positions while
+snapping only initial or large discontinuous transitions. The accepted gate confirmed the exact route preflight,
 continuous matched movement, density-aware urban zoom, free-camera puck motion, developer pipeline
-diagnostics, follow recovery and clean teardown. Android version is `0.13.0` (`versionCode=14`).
-The repeatable gate remains `bash scripts/run-navigation-ui-phase3-live.sh`; see
+diagnostics, follow recovery and clean teardown. Android version is `0.13.0` (`versionCode=14`). The repeatable gate remains `bash scripts/run-navigation-ui-phase3-live.sh`; see
 `docs/phases/navigation-ui-phase-3-acceptance.md`.
 
-Navigation UI Phase 4 was accepted by the operator on 2026-09-05. Current
-routes now use an explicit local `depart_at` instant with Valhalla's prioritized bidirectional
-search, so the native `traffic.tar` overlay remains active without the long-route convergence
-failure seen during Phase 3. Each successful traffic route is compared with a separate graph-speed
-baseline; the API and Android client expose the resulting non-negative delay, provider freshness
-and observation time without inventing a value after fallback. The accepted server gate used fresh
-TomTom data and a tileset-bound native overlay; returned device evidence showed live traffic in the
-base preview and CNG navigation before and after refresh. Preview, CNG itinerary and active route
-refresh all share this contract. The gate rejects disabled, stale or fallback traffic. See
-`docs/phases/navigation-ui-phase-4-acceptance.md`.
 
 Navigation UI Phase 5 was accepted on-device on 2026-09-05. Compass now ships small,
 purpose-built MapLibre day and night styles with flat buildings, a restrained road hierarchy,
@@ -502,13 +465,10 @@ Navigation UI Phase 13 makes the already downloaded route a durable active guida
 than restoring it only as a preview. A versioned private checkpoint preserves matched progress,
 maneuver position, remaining values, voice preference and CNG stop/refuelling lifecycle; process
 recreation resumes the foreground service and waits for a fresh GPS fix without returning to route
-origin. Android network loss now produces an explicit offline state, suppresses server updates and
-unverifiable dynamic CNG/traffic claims, while route, voice and waypoint guidance continue locally.
-Connectivity return performs a reason-labelled refresh through the existing CNG-aware recalculator;
+origin. Connectivity return performs a reason-labelled refresh through the existing CNG-aware recalculator;
 failed recovery attempts retain local guidance and retry after 5, 15 and then 60 seconds. An active
 debug replay also survives process recreation and resumes from its checkpoint instead of switching
-to stationary device GPS.
-Android version `0.23.1` (`versionCode=30`) passed its physical-device outage, process-recreation and
+to stationary device GPS. Android version `0.23.1` (`versionCode=30`) passed its physical-device outage, process-recreation and
 network-recovery gate on 2026-09-09, as documented in
 [the Navigation UI Phase 13 acceptance record](docs/phases/navigation-ui-phase-13-acceptance.md).
 

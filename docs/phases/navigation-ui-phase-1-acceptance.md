@@ -17,8 +17,6 @@ planning or offline behavior. Those existing subsystems continue to publish one 
   instruction, target road and optional following maneuver.
 - A compact bottom overlay presents remaining distance, total remaining trip duration, ETA and the
   next CNG stop with distance and planned arrival time.
-- Progress, connection/cache/traffic/GPS detail, all planned CNG stops and normal trip actions live
-  in an expandable Material bottom sheet.
 - The main driving surface contains no raw state, route identifiers or debug actions.
 - Debug-build-only route-update simulation, off-route injection and raw state live in a dedicated
   full-screen developer surface marked as unsafe to use while driving.

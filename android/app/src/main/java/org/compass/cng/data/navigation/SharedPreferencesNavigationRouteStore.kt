@@ -74,7 +74,9 @@ class SharedPreferencesNavigationRouteStore internal constructor(
 }
 
 internal class NavigationRouteDocumentCodec(
-    private val json: Json = Json { ignoreUnknownKeys = false; explicitNulls = true },
+    // Older cache documents can carry retired metadata; version and domain invariants
+    // still validate the geometry, timings and saved progress that we restore.
+    private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = true },
 ) {
     fun encode(value: CachedNavigationRoute): String = json.encodeToString(
         StoredNavigationRouteDocument.fromDomain(value),
@@ -383,20 +385,12 @@ private data class StoredNavigationTiming(
     val departureAt: String?,
     val drivingArrivalAt: String?,
     val tripArrivalAt: String?,
-    val trafficDelaySeconds: Double?,
-    val trafficDelayState: String,
-    val trafficState: String = "not_configured",
-    val trafficAware: Boolean = false,
-    val trafficObservedAt: String? = null,
-    val trafficDetected: Boolean = false,
 ) {
     fun toDomain() = NavigationTiming(
         routeId, drivingDurationSeconds, remainingDrivingDurationSeconds, refuelingStopCount,
         dwellSecondsPerRefuelingStop, totalRefuelingDwellSeconds, totalTripDurationSeconds,
         departureAt?.let(OffsetDateTime::parse), drivingArrivalAt?.let(OffsetDateTime::parse),
-        tripArrivalAt?.let(OffsetDateTime::parse), trafficDelaySeconds, trafficDelayState,
-        trafficState, trafficAware, trafficObservedAt?.let(OffsetDateTime::parse),
-        trafficDetected,
+        tripArrivalAt?.let(OffsetDateTime::parse),
     )
 
     companion object {
@@ -405,9 +399,7 @@ private data class StoredNavigationTiming(
             value.refuelingStopCount, value.dwellSecondsPerRefuelingStop,
             value.totalRefuelingDwellSeconds, value.totalTripDurationSeconds,
             value.departureAt?.toString(), value.drivingArrivalAt?.toString(),
-            value.tripArrivalAt?.toString(), value.trafficDelaySeconds, value.trafficDelayState,
-            value.trafficState, value.trafficAware, value.trafficObservedAt?.toString(),
-            value.trafficDetected,
+            value.tripArrivalAt?.toString(),
         )
     }
 }

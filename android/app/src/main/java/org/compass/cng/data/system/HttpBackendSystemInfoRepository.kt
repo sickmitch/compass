@@ -13,12 +13,6 @@ class HttpBackendSystemInfoRepository(
             service = info.service,
             version = info.version,
             status = info.status,
-            trafficEnabled = info.trafficEnabled,
-            trafficProvider = info.trafficProvider,
-            trafficStatus = info.trafficStatus,
-            trafficAwareRouting = info.trafficAwareRouting,
-            valhallaTilesetVersion = info.valhallaTilesetVersion,
-            trafficMappingVersion = info.trafficMappingVersion,
         )
     }
 }

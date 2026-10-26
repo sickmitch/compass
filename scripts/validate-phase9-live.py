@@ -88,8 +88,6 @@ def validate_ranked(value: dict[str, Any]) -> list[dict[str, Any]]:
     cost_basis = value.get("cost_basis")
     _require(isinstance(cost_basis, dict), "cost_basis must be an object")
     _require(cost_basis.get("provider") == "valhalla", "cost basis must use valhalla")
-    _require(cost_basis.get("traffic_state") == "not_configured", "traffic state must be explicit")
-    _require(cost_basis.get("traffic_aware") is False, "traffic-aware must not be claimed")
 
     network = value.get("network_evaluation")
     _require(isinstance(network, dict), "network_evaluation must be an object")

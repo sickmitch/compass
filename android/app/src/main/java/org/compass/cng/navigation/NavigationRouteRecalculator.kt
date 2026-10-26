@@ -45,7 +45,7 @@ data class NavigationRerouteDirectionPolicy(
     }
 }
 
-/** Re-enters Compass for every reroute so Valhalla, traffic and the CNG plan stay authoritative. */
+/** Re-enters Compass for every reroute so Valhalla and the CNG plan stay authoritative. */
 class CompassNavigationRouteRecalculator(
     private val routingRepository: RoutingRepository,
     private val clock: Clock = Clock.systemDefaultZone(),
@@ -60,7 +60,6 @@ class CompassNavigationRouteRecalculator(
             RouteUpdateReason.OFF_ROUTE,
             RouteUpdateReason.MANUAL_DEBUG,
             -> state.rawLocation?.coordinate ?: state.snappedLocation
-            RouteUpdateReason.TRAFFIC_REFRESH,
             RouteUpdateReason.CONNECTIVITY_RECOVERY,
             RouteUpdateReason.FUEL_STOP_UNAVAILABLE,
             -> state.snappedLocation ?: state.rawLocation?.coordinate

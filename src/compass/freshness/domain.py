@@ -2,8 +2,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from compass.traffic.domain import TrafficHealthState
-
 FreshnessState = Literal["fresh", "stale", "future_observation", "missing"]
 
 
@@ -24,4 +22,3 @@ class DataFreshnessReport:
     mimit: DataSourceFreshness
     osm: DataSourceFreshness
     reconciliation: DataSourceFreshness
-    traffic_state: TrafficHealthState = "not_configured"

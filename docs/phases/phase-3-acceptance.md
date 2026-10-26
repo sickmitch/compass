@@ -1,7 +1,6 @@
 # Phase 3 acceptance criteria
 
-Phase 3 adds reproducible Valhalla bootstrap and normal A-to-B routing. It does not add CNG station
-candidate selection, detour calculations, opening-hours evaluation, ranking or traffic.
+Phase 3 adds reproducible Valhalla bootstrap and normal A-to-B routing.
 
 ## Implemented gate
 
@@ -81,8 +80,7 @@ Final operator validation passed on 2026-08-28:
 - API readiness returned HTTP 200 with both `database=ready` and `routing=ready`.
 - The Milan A-to-B API request returned `provider=valhalla`, 4,289 metres, 565.035 seconds, a
   non-empty polyline6 geometry and 16 Italian maneuver objects with shape indexes.
-- Missing `traffic.tar` warnings were expected: Phase 3 intentionally configures no traffic input
-  and makes no traffic-aware routing claim.
+
 
 These results satisfy every Phase 3 acceptance criterion. Phase 4 may begin only when explicitly
 requested.

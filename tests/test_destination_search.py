@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from pydantic import ValidationError
 
 from compass.api.main import app
 from compass.config import Settings, get_api_settings
@@ -545,31 +544,6 @@ def test_service_honours_google_retry_after_without_fallback_or_immediate_retry(
     assert second.retry_after_seconds in range(1, 8)
     assert len(provider.suggest_calls) == 1
     assert service.metrics.tomtom_destination_calls == 0
-
-
-def test_google_search_configuration_requires_verified_eea_and_preserves_traffic_flags() -> None:
-    with pytest.raises(ValidationError, match="contract_regime"):
-        Settings(
-            _env_file=None,
-            destination_search_providers="google_places_new",
-            google_places_enabled=True,
-            google_places_api_key="secret",
-            geocoding_provider="none",
-        )
-    settings = Settings(
-        _env_file=None,
-        destination_search_providers="google_places_new",
-        google_places_enabled=True,
-        google_places_api_key="secret",
-        google_places_contract_regime="eea",
-        geocoding_provider="none",
-        traffic_enabled=True,
-        traffic_provider="tomtom",
-        tomtom_api_key="traffic-secret",
-    )
-    assert settings.tomtom_search_enabled is False
-    assert settings.traffic_provider == "tomtom"
-    assert settings.tomtom_api_key == "traffic-secret"
 
 
 def test_destination_api_keeps_selection_text_separate_from_map_target() -> None:

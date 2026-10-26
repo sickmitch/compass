@@ -49,8 +49,7 @@ The fixed endpoint pair is deliberate Phase 9 test scope, not a mobile navigatio
 - A missing price does not hide a candidate; a missing opening schedule remains unknown.
 - The selected route is not synthesized from matrix estimates: it is recomputed by Valhalla through
   the official station waypoint.
-- Destination editing, device location, predictive fuel reachability, traffic ingestion, navigation
-  sessions, voice guidance and rerouting remain later phases.
+
 
 ## References
 

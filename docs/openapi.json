@@ -379,7 +379,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "description": "Optional timezone-aware departure instant for arrival and opening-hours calculations.",
             "title": "Departure At"
           },
           "destination": {
@@ -733,7 +733,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "description": "Optional timezone-aware departure instant for arrival and opening-hours calculations.",
             "title": "Departure At"
           },
           "destination": {
@@ -981,25 +981,12 @@
             "minItems": 3,
             "title": "Sources",
             "type": "array"
-          },
-          "traffic_state": {
-            "enum": [
-              "not_configured",
-              "configured",
-              "mock",
-              "fresh",
-              "stale",
-              "unavailable"
-            ],
-            "title": "Traffic State",
-            "type": "string"
           }
         },
         "required": [
           "evaluated_at",
           "overall_state",
-          "sources",
-          "traffic_state"
+          "sources"
         ],
         "title": "DataFreshnessResponse",
         "type": "object"
@@ -1898,26 +1885,6 @@
             "title": "Status",
             "type": "string"
           },
-          "traffic": {
-            "anyOf": [
-              {
-                "const": "not_checked",
-                "type": "string"
-              },
-              {
-                "enum": [
-                  "not_configured",
-                  "configured",
-                  "mock",
-                  "fresh",
-                  "stale",
-                  "unavailable"
-                ],
-                "type": "string"
-              }
-            ],
-            "title": "Traffic"
-          },
           "version": {
             "default": "0.1.0",
             "title": "Version",
@@ -1928,8 +1895,7 @@
           "status",
           "database",
           "routing",
-          "data",
-          "traffic"
+          "data"
         ],
         "title": "HealthResponse",
         "type": "object"
@@ -2039,7 +2005,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "description": "Optional timezone-aware departure instant for arrival and opening-hours calculations.",
             "title": "Departure At"
           },
           "destination": {
@@ -2213,7 +2179,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "description": "Optional timezone-aware departure instant for arrival and opening-hours calculations.",
             "title": "Departure At"
           },
           "destination": {
@@ -2572,63 +2538,6 @@
             "title": "Total Trip Duration Seconds",
             "type": "number"
           },
-          "traffic_aware": {
-            "default": false,
-            "title": "Traffic Aware",
-            "type": "boolean"
-          },
-          "traffic_delay_seconds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Diagnostic live-versus-baseline duration difference, in seconds. Null means unavailable, zero means no detected delay. In alert-only mode traffic_aware is false and this value is not added to duration or ETA.",
-            "title": "Traffic Delay Seconds"
-          },
-          "traffic_delay_state": {
-            "default": "unavailable",
-            "enum": [
-              "unavailable",
-              "estimated"
-            ],
-            "title": "Traffic Delay State",
-            "type": "string"
-          },
-          "traffic_detected": {
-            "default": false,
-            "title": "Traffic Detected",
-            "type": "boolean"
-          },
-          "traffic_observed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Traffic Observed At"
-          },
-          "traffic_state": {
-            "default": "not_configured",
-            "enum": [
-              "not_configured",
-              "configured",
-              "mock",
-              "fresh",
-              "stale",
-              "unavailable"
-            ],
-            "title": "Traffic State",
-            "type": "string"
-          },
           "trip_arrival_at": {
             "anyOf": [
               {
@@ -2666,10 +2575,7 @@
             "type": "string"
           },
           "duration_model": {
-            "enum": [
-              "valhalla_graph_speeds",
-              "valhalla_time_dependent_traffic"
-            ],
+            "const": "valhalla_graph_speeds",
             "title": "Duration Model",
             "type": "string"
           },
@@ -2677,28 +2583,10 @@
             "const": "valhalla",
             "title": "Provider",
             "type": "string"
-          },
-          "traffic_aware": {
-            "title": "Traffic Aware",
-            "type": "boolean"
-          },
-          "traffic_state": {
-            "enum": [
-              "not_configured",
-              "configured",
-              "mock",
-              "fresh",
-              "stale",
-              "unavailable"
-            ],
-            "title": "Traffic State",
-            "type": "string"
           }
         },
         "required": [
           "provider",
-          "traffic_state",
-          "traffic_aware",
           "duration_model",
           "distance_model"
         ],
@@ -3721,22 +3609,6 @@
             "title": "Reserve Cng Range Km",
             "type": "number"
           },
-          "traffic_adjusted": {
-            "title": "Traffic Adjusted",
-            "type": "boolean"
-          },
-          "traffic_state": {
-            "enum": [
-              "not_configured",
-              "configured",
-              "mock",
-              "fresh",
-              "stale",
-              "unavailable"
-            ],
-            "title": "Traffic State",
-            "type": "string"
-          },
           "usable_range_before_reserve_km": {
             "exclusiveMinimum": 0.0,
             "title": "Usable Range Before Reserve Km",
@@ -3752,9 +3624,7 @@
           "range_shortfall_to_destination_km",
           "destination_reachable_with_reserve",
           "remaining_route_origin",
-          "consumption_model",
-          "traffic_state",
-          "traffic_adjusted"
+          "consumption_model"
         ],
         "title": "PredictiveRangeBasisResponse",
         "type": "object"
@@ -4809,7 +4679,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "description": "Optional timezone-aware departure instant for arrival and opening-hours calculations.",
             "title": "Departure At"
           },
           "destination": {
@@ -4985,7 +4855,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional timezone-aware departure instant. When omitted, traffic-aware routing departs now.",
+            "description": "Optional timezone-aware departure instant for arrival and opening-hours calculations.",
             "title": "Departure At"
           },
           "destination": {
@@ -6035,196 +5905,6 @@
           "attribution"
         ],
         "title": "SuggestionResponse",
-        "type": "object"
-      },
-      "TrafficHealthResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "edges_expired": {
-            "minimum": 0.0,
-            "title": "Edges Expired",
-            "type": "integer"
-          },
-          "edges_updated": {
-            "minimum": 0.0,
-            "title": "Edges Updated",
-            "type": "integer"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "feed_age_seconds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feed Age Seconds"
-          },
-          "last_fetch_completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Fetch Completed At"
-          },
-          "last_fetch_started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Fetch Started At"
-          },
-          "last_success_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Success At"
-          },
-          "managed_edge_count": {
-            "minimum": 0.0,
-            "title": "Managed Edge Count",
-            "type": "integer"
-          },
-          "mapping_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mapping Version"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_api_errors": {
-            "minimum": 0.0,
-            "title": "Provider Api Errors",
-            "type": "integer"
-          },
-          "provider_segments_received": {
-            "minimum": 0.0,
-            "title": "Provider Segments Received",
-            "type": "integer"
-          },
-          "provider_status": {
-            "enum": [
-              "not_configured",
-              "configured",
-              "mock",
-              "fresh",
-              "stale",
-              "unavailable"
-            ],
-            "title": "Provider Status",
-            "type": "string"
-          },
-          "segments_matched": {
-            "minimum": 0.0,
-            "title": "Segments Matched",
-            "type": "integer"
-          },
-          "segments_normalized": {
-            "minimum": 0.0,
-            "title": "Segments Normalized",
-            "type": "integer"
-          },
-          "segments_unmatched": {
-            "minimum": 0.0,
-            "title": "Segments Unmatched",
-            "type": "integer"
-          },
-          "traffic_aware_routing": {
-            "title": "Traffic Aware Routing",
-            "type": "boolean"
-          },
-          "traffic_extract_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Traffic Extract Path"
-          },
-          "updater_consecutive_failures": {
-            "minimum": 0.0,
-            "title": "Updater Consecutive Failures",
-            "type": "integer"
-          },
-          "valhalla_tileset_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valhalla Tileset Version"
-          }
-        },
-        "required": [
-          "enabled",
-          "provider",
-          "provider_status",
-          "traffic_aware_routing",
-          "last_fetch_started_at",
-          "last_fetch_completed_at",
-          "last_success_at",
-          "provider_segments_received",
-          "segments_normalized",
-          "segments_matched",
-          "segments_unmatched",
-          "edges_updated",
-          "edges_expired",
-          "provider_api_errors",
-          "updater_consecutive_failures",
-          "managed_edge_count",
-          "mapping_version",
-          "valhalla_tileset_version",
-          "traffic_extract_path",
-          "message"
-        ],
-        "title": "TrafficHealthResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -7909,42 +7589,6 @@
         "summary": "Route With Intermediate Stops",
         "tags": [
           "routing"
-        ]
-      }
-    },
-    "/api/v1/traffic/health": {
-      "get": {
-        "operationId": "traffic_health_api_v1_traffic_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TrafficHealthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Missing or invalid Compass API credentials."
-          }
-        },
-        "security": [
-          {
-            "OptionalHTTPBasic": []
-          }
-        ],
-        "summary": "Traffic Health",
-        "tags": [
-          "traffic"
         ]
       }
     },

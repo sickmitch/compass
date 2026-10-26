@@ -89,7 +89,7 @@ data (or enable airplane mode) without closing Compass. Confirm that:
 
 - the route, puck, maneuver countdown, voice guidance and CNG waypoint guidance continue locally;
 - the UI says that the network is absent and that local guidance remains active;
-- traffic is explicitly not refreshable and live CNG opening/price claims disappear;
+- live CNG opening/price claims disappear;
 - no repeated reroute loop starts.
 
 Screenshots are optional. Leave the device offline and press ENTER.
@@ -130,7 +130,7 @@ OPERATOR CHECK C — SAFE NETWORK RECOVERY
 Restore Wi-Fi or mobile data. Compass should show the normal “Ricalcolo rotta” feedback,
 refresh through the existing CNG-aware route path, and remain in navigation. It must preserve the
 destination, remaining CNG constraints and unfinished stops; it must not jump back to route origin.
-After success, the offline/recovery warnings disappear and live traffic/CNG evidence may return only
+After success, the offline/recovery warnings disappear and CNG evidence may return only
 from the refreshed route. If the server is not yet reachable at the first validated-network event,
 Compass retries with bounded 5/15/60-second backoff rather than a tight loop. Then terminate
 navigation from Dettagli and press ENTER.

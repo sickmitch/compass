@@ -27,8 +27,6 @@ That instruction advances development but is not recorded as a successful Phase 
   offered while tracking, while overview/free mode exposes the prominent `Ricentra` action.
 - All icon-only map actions have stable Compose test tags, at least 48 dp touch targets and complete
   Italian accessibility descriptions.
-- No routing, Valhalla, CNG, traffic, map-matching, replay or offline-recovery behavior was replaced.
-  No external navigation SDK or icon dependency was introduced.
 - Android version is `0.24.0` (`versionCode=31`).
 
 The directly installable debug APK is `dist/Compass-0.24.0-debug-installabile.apk`. SHA-256:
