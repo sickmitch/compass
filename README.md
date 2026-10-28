@@ -25,6 +25,7 @@ are distinct constraints.
 | --- | --- |
 | [Architecture](docs/architecture.md) | Component boundaries and data flow |
 | [Deployment](docs/deployment.md) | Docker setup, data imports, graph operations and diagnostics |
+| [Scheduled updates](docs/scheduled-updates.md) | Maps at 03:00; CNG hourly 07:00–20:00, Europe/Rome |
 | [API](docs/api.md) / [OpenAPI](docs/openapi.json) | Requests, responses, units and errors |
 | [Android](docs/android.md) | Toolchain, configuration and device diagnostics |
 | [Client updates](docs/client-updates.md) | APK publishing, signing and installation |

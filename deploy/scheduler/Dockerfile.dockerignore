@@ -1,0 +1,6 @@
+**
+!scripts/
+!scripts/scheduled-update.py
+!deploy/
+!deploy/scheduler/
+!deploy/scheduler/Dockerfile

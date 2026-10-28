@@ -72,6 +72,12 @@ The unauthenticated request must print `401`; the authenticated response must co
 ingress. HTTP is supported for constrained/private deployments, but Basic credentials are then sent
 without transport encryption and the Android app requires an explicit warning acknowledgement.
 
+## Automatic updates
+
+The [container scheduler](scheduled-updates.md) runs map rebuilds at 03:00 and CNG
+imports every hour from 07:00 through 20:00, Europe/Rome. Build `scheduled-updates`
+and start the `routing` profile with Compose; no host timers are needed.
+
 ## Database and source data
 
 ```bash
@@ -99,7 +105,7 @@ build the API and run migrations before recreating services:
 ```bash
 docker compose build api
 docker compose run --rm migrate
-docker compose --profile routing up -d api valhalla
+docker compose --profile routing up -d --build api valhalla scheduled-updates
 docker compose --profile routing ps -a
 ```
 
@@ -132,7 +138,7 @@ docker compose build api
 docker compose --profile routing-build pull valhalla-tiles
 docker compose --profile routing pull valhalla
 docker compose --profile routing-build run --rm valhalla-tiles
-docker compose --profile routing up -d db migrate valhalla api
+docker compose --profile routing up -d --build db migrate valhalla api scheduled-updates
 docker compose --profile routing ps -a
 docker compose --profile routing exec -T valhalla \
   curl --fail --silent --show-error http://127.0.0.1:8002/status
