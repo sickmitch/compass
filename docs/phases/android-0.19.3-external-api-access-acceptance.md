@@ -56,7 +56,7 @@ On the workstation with the authorized Android device, run from the repository r
 ```bash
 export JAVA_HOME=/home/mike/toolchains/jdk17
 export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-bash scripts/install-android-0.19.3.sh
+# Install through the client update workflow (docs/client-updates.md).
 ```
 
 Set `COMPASS_ADB_SERIAL` first only when more than one authorized device is connected. The installer

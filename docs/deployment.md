@@ -1,8 +1,7 @@
-# Docker deployment and live validation
+# Docker deployment and operations
 
-This is the reference test-server workflow for repository bootstrap, raw source ingestion, Phase 2
-normalized station reconciliation, Phase 3 base routing, Phase 4 spatial candidate pruning, the
-accepted Phase 5 batched detour workflow and the accepted Phase 6 ranking workflow.
+Run deployment commands only on the operator's server, from the synchronized repository.
+Local fixture tests do not establish live provider or device acceptance.
 
 ## Prerequisites
 
@@ -12,7 +11,8 @@ accepted Phase 5 batched detour workflow and the accepted Phase 6 ranking workfl
 - this repository synchronized onto the test server;
 - no public reverse proxy is required.
 
-From the repository root, create configuration:
+For a first installation only, create configuration from the repository root. On an existing
+installation preserve `.env` and compare it with `.env.example`:
 
 ```bash
 cp .env.example .env
@@ -72,170 +72,45 @@ The unauthenticated request must print `401`; the authenticated response must co
 ingress. HTTP is supported for constrained/private deployments, but Basic credentials are then sent
 without transport encryption and the Android app requires an explicit warning acknowledgement.
 
-## Phase 0 bootstrap validation
+## Database and source data
 
 ```bash
 docker compose config --quiet
 docker compose build api
 docker compose up -d db migrate api
-docker compose ps
 docker compose logs --no-color migrate
-curl --fail --silent --show-error http://127.0.0.1:8000/health/live
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT extversion FROM pg_extension WHERE extname = '\''postgis'\'';"'
 docker compose exec -T api alembic current
-```
-
-Expected invariants:
-
-- `db` and `api` are healthy and `migrate` exited with code 0;
-- liveness returns `status=ok` with both dependencies `not_checked`;
-- PostGIS has a non-empty version;
-- Alembic reports the repository's current head revision (`0002` once Phase 2 is synchronized).
-
-## Phase 1 live acquisition and idempotency validation
-
-Run MIMIT twice while the upstream daily files remain unchanged, then OSM twice:
-
-```bash
-docker compose --profile jobs run --rm etl mimit
 docker compose --profile jobs run --rm etl mimit
 docker compose --profile jobs run --rm etl osm
-docker compose --profile jobs run --rm etl osm
+docker compose --profile jobs run --rm etl normalize
 ```
 
-The first result for each source should have `status=completed`, `reused=false` and non-zero relevant
-counts. The immediate repeat should have the same `run_id` and hash with `reused=true`. If MIMIT
-publishes between runs, a new hash/run is correct; repeat once more promptly to prove reuse.
+Migrations must reach the repository head. Imports retain source and ingestion timestamps;
+repeating an unchanged source payload reuses the ingestion rather than duplicating it.
+Normalization is separate from acquisition. A failed OSM fetch must not erase valid
+MIMIT data. Inspect job output and database logs if counts or idempotency differ.
+Source policies and reconciliation are described in [data sources](data-sources.md).
 
-Inspect representative data and persisted metrics:
+## Updating an existing deployment
 
-```bash
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT id, source_name, status, source_observed_at, completed_at, metrics FROM ingestion_runs ORDER BY id;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT mimit_station_id, name, municipality, province, latitude, longitude FROM raw_mimit_stations ORDER BY id LIMIT 10;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT mimit_station_id, source_fuel_name, unit_price, currency, unit, is_self_service, price_observed_at FROM raw_mimit_cng_prices ORDER BY id LIMIT 10;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT osm_type, osm_id, name, opening_hours, phone, latitude, longitude FROM raw_osm_cng_features ORDER BY id LIMIT 10;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT source_name, sha256, source_url, source_observed_at, fetched_at, octet_length(content) AS bytes FROM raw_source_snapshots ORDER BY id;"'
-```
-
-Expected invariants:
-
-- MIMIT retained rows contain only metano/CNG prices, with `currency=EUR` and `unit=kg`;
-- representative MIMIT source IDs link prices to selected active-station source rows;
-- OSM rows retain `osm_type` and `osm_id`, with enrichment fields nullable rather than invented;
-- source observation times and fetch/ingestion times are both populated where upstream supplies them;
-- exact raw snapshots have non-zero byte lengths;
-- repeated unchanged imports do not increase counts.
-
-## Diagnostics if an invariant fails
-
-```bash
-docker compose ps -a
-docker compose logs --no-color --tail=300 db migrate api
-docker compose --profile jobs run --rm etl mimit
-docker compose --profile jobs run --rm etl osm
-docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\\dt"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version_num FROM alembic_version;"'
-```
-
-For a download failure, also return the HTTP status/error printed by the ETL job and confirm outbound
-DNS/TLS access from the Docker host. A transient Overpass `429`, `502`, `503`, or `504` is safe to
-retry: the OSM job is independent and cannot erase a successful MIMIT import. Do not paste `.env` or
-database passwords.
-
-## Output to return
-
-Return:
-
-1. `docker compose ps`;
-2. migration log plus both health response bodies;
-3. the four ETL JSON lines (or enough prompt repeats to show `reused=true`);
-4. all five inspection-query outputs above;
-5. diagnostics/logs if any command fails.
-
-On the current Phase 3 checkout, `/health/ready` intentionally returns HTTP 503 with
-`routing=unavailable` until the routing bootstrap below has completed. These Phase 0/1 invariants
-are prerequisites for Phase 2 unless the operator explicitly waives them.
-
-## Phase 2 migration and reconciliation validation
-
-Run these commands from the repository root after synchronizing the Phase 2 changes. Existing Phase
-1 raw records are inputs; they do not need to be downloaded again.
+Preserve database and graph volumes, synchronize code, review `.env.example` changes,
+build the API and run migrations before recreating services:
 
 ```bash
 docker compose build api
-docker compose up -d db migrate api
-docker compose logs --no-color migrate
-docker compose exec -T api alembic current
-docker compose --profile jobs run --rm etl normalize
-docker compose --profile jobs run --rm etl normalize
+docker compose run --rm migrate
+docker compose --profile routing up -d api valhalla
+docker compose --profile routing ps -a
 ```
 
-Expected invariants:
+Follow the [current release gate](phases/android-0.28.46-nominal-routing-gate.md) for
+release-specific recreation and migration requirements. Publish Android updates using
+[the distribution workflow](client-updates.md). Do not delete volumes during upgrades.
 
-- migration exits zero and Alembic reports `0002 (head)`;
-- the first normalize result is `completed`, normally with `reused=false`;
-- `stations_seen`, `price_rows_seen`, and `osm_features_seen` are non-zero;
-- `matched + ambiguous + unmatched == stations_seen`;
-- the prompt repeat has the same reconciliation run/configuration hash and `reused=true`;
-- no live download is performed by `normalize`.
+## Valhalla graph bootstrap and recovery
 
-Inspect the schema, outcome counts, and representative current data:
-
-```bash
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = '\''public'\'' AND indexname IN ('\''ix_stations_location_gist'\'', '\''ix_osm_cng_features_location_gist'\'') ORDER BY indexname;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT status, count(*) FROM reconciliation_results WHERE reconciliation_run_id = (SELECT max(id) FROM reconciliation_runs WHERE status = '\''completed'\'') GROUP BY status ORDER BY status;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT id, algorithm_version, status, configuration_sha256, metrics FROM reconciliation_runs ORDER BY id DESC LIMIT 3;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT s.mimit_station_id, s.name, s.municipality, ST_Y(s.location::geometry) AS latitude, ST_X(s.location::geometry) AS longitude, p.unit_price, p.currency, p.unit, p.service_mode, p.observed_at AS price_observed_at, o.osm_type, o.osm_id, o.opening_hours, o.phone, l.match_method, l.confidence, l.distance_meters FROM stations s JOIN station_current_prices cp ON cp.station_id = s.id AND cp.fuel_type = '\''cng'\'' JOIN station_prices p ON p.id = cp.station_price_id LEFT JOIN station_osm_links l ON l.station_id = s.id LEFT JOIN osm_cng_features o ON o.id = l.osm_feature_id WHERE s.is_active ORDER BY (o.id IS NOT NULL) DESC, s.id LIMIT 20;"'
-```
-
-The two index definitions must use `gist`. The representative query must return active Italian CNG
-stations with EUR/kg prices and timestamps. At least some rows should include OSM identity and any
-available opening-hours/phone enrichment; null enrichment is valid for unmatched stations and must
-not be invented.
-
-Manual overrides are available for operator-reviewed cases. Do not run these merely for smoke
-testing because they intentionally change reconciliation state:
-
-```bash
-docker compose --profile jobs run --rm etl override \
-  --mimit-station-id MIMIT_ID --action link --osm-type node --osm-id OSM_ID \
-  --reason "operator-verified identity" --created-by OPERATOR
-docker compose --profile jobs run --rm etl override \
-  --mimit-station-id MIMIT_ID --action unmatch \
-  --reason "operator-verified non-match" --created-by OPERATOR
-docker compose --profile jobs run --rm etl normalize
-```
-
-### Phase 2 diagnostics
-
-```bash
-docker compose ps -a
-docker compose logs --no-color --tail=300 migrate api db
-docker compose exec -T api alembic current
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT id, status, error_message, metrics FROM reconciliation_runs ORDER BY id DESC LIMIT 10;"'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT r.status, r.decision_reason, count(*) FROM reconciliation_results r WHERE r.reconciliation_run_id = (SELECT max(id) FROM reconciliation_runs) GROUP BY r.status, r.decision_reason ORDER BY r.status, count(*) DESC;"'
-```
-
-Return the migration log/current revision, both normalize JSON lines, and all four Phase 2 inspection
-query outputs. If anything fails, also return the Phase 2 diagnostic output. Do not include `.env`.
-
-Do not begin Phase 3 until these Phase 2 live invariants pass or the operator explicitly waives the
-gate.
-
-## Phase 3 Valhalla bootstrap and base-route validation
+For the authenticated route check below, set `COMPASS_CHECK_USER` to your API username;
+curl will prompt for the password. Do not include credentials in shared output.
 
 Run from the repository root after synchronizing Phase 3. Confirm `.env` contains the pinned
 `VALHALLA_IMAGE` from `.env.example`. The default PBF is the full Italy extract. Set
@@ -265,7 +140,7 @@ docker compose --profile routing exec -T valhalla sh -c \
   'ls -lh /custom_files/*.pbf /custom_files/valhalla_tiles.tar && sha256sum /custom_files/*.pbf'
 curl --fail --silent --show-error http://127.0.0.1:8000/health/live
 curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-curl --fail --silent --show-error \
+curl --fail --silent --show-error --user "$COMPASS_CHECK_USER" \
   -H 'Content-Type: application/json' \
   -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":45.4857,"longitude":9.2045}}' \
   http://127.0.0.1:8000/api/v1/routes
@@ -342,7 +217,7 @@ Repeat the representative route request above. If it fails, restore the previous
 volume remains intact. Removing retired graph volumes is intentionally not automated; list and
 confirm an exact volume target before any later operator-controlled deletion.
 
-### Phase 3 diagnostics
+### Routing diagnostics
 
 If tile construction or startup fails, return:
 
@@ -369,693 +244,7 @@ complete Compass route response. If an invariant fails, include the matching dia
 return `.env`, credentials or the full PBF. A deployment that fails these invariants must be fixed
 before proceeding into functionality that depends on routing.
 
-## Phase 4 autonomy-aware corridor validation
-
-Run from the repository root after synchronizing Phase 4. The Phase 2 normalized data and Phase 3
-Italy graph must still be present. No migration beyond `0002` is expected because this phase reuses
-the station geography GiST index and creates request route geometry transiently.
-
-```bash
-docker compose build api
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-
-curl --fail --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300}' \
-  http://127.0.0.1:8000/api/v1/cng/corridor-candidates \
-  -o /tmp/compass-phase4-corridor.json
-
-python3 -c 'import json; p=json.load(open("/tmp/compass-phase4-corridor.json")); print(json.dumps({"stage":p["stage"],"corridor":p["corridor"],"metrics":p["metrics"],"candidate_sample":p["candidates"][:5]},indent=2))'
-```
-
-Expected invariants:
-
-- readiness is HTTP 200 with database and routing both `ready`;
-- the corridor request is HTTP 200 with `stage=spatial_pruning`;
-- `uncapped_radius_km=60`, `radius_km=50`, and `cap_applied=maximum`;
-- `routing_calls=1`—there is no per-station routing in Phase 4;
-- `active_station_count >= active_station_with_location_count > corridor_candidate_count`;
-- `excluded_missing_location_count` equals the difference between the first two counts;
-- `pruned_with_location_count` equals geocoded count minus corridor count;
-- `reduction_ratio >= 0.50` for this representative northern-Italy route;
-- returned count equals the candidate array length and is no more than the configured 200 limit;
-- every candidate has non-negative `straight_line_distance_to_route_meters`, a `route_fraction`
-  from 0 through 1, and coordinates within the 50 km corridor.
-
-The spatial distance is intentionally not a detour or road-network distance. Do not use these
-results as proof that a station satisfies a user detour limit.
-
-### Phase 4 diagnostics
-
-If the endpoint fails or counts are inconsistent, return:
-
-```bash
-curl --silent --show-error -i \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300}' \
-  http://127.0.0.1:8000/api/v1/cng/corridor-candidates
-docker compose --profile routing logs --no-color --tail=300 api valhalla db
-docker compose exec -T api alembic current
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT count(*) FILTER (WHERE is_active) AS active, count(*) FILTER (WHERE is_active AND location IS NOT NULL) AS geocoded FROM stations; SELECT indexname, indexdef FROM pg_indexes WHERE indexname = '\''ix_stations_location_gist'\'';"'
-```
-
-Return the summarized JSON printed by Python and readiness output. If any invariant fails, also
-return the HTTP response with headers and the three diagnostics. Keep the full JSON in `/tmp` only;
-do not return the long route polyline/maneuver payload unless requested.
-
-### Phase 4 accepted live result
-
-The operator completed this procedure on 2026-08-28. The Milan-to-Bologna request returned HTTP
-200, a 210,925 metre route, the expected capped 50 km corridor, 325 candidates from 1,505 geocoded
-stations, 200 returned candidates, a 78.4% reduction ratio and exactly one routing call. Alembic
-remained at `0002 (head)`. These results satisfy the Phase 4 live gate.
-
-## Phase 5 batched network detour validation
-
-Run from the repository root after synchronizing Phase 5. Keep the accepted Phase 2 normalized data
-and Phase 3 Italy graph. No migration beyond `0002` is expected. `departure_at` must include an
-explicit UTC offset; use an offset appropriate for the requested civil time.
-
-```bash
-docker compose build api
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-
-curl --fail --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-28T08:00:00+02:00"}' \
-  http://127.0.0.1:8000/api/v1/cng/detour-candidates \
-  -o /tmp/compass-phase5-detours.json
-
-python3 - <<'PY'
-import json
-from datetime import datetime
-
-p = json.load(open("/tmp/compass-phase5-detours.json"))
-s = p["spatial_pruning"]
-n = p["network_evaluation"]
-candidates = p["candidates"]
-assert p["stage"] == "network_detour"
-assert p["cost_basis"]["distance_model"] == "road_network"
-assert n["spatial_candidate_count"] == s["corridor_candidate_count"]
-assert n["matrix_candidate_count"] == s["returned_candidate_count"]
-assert n["reachable_candidate_count"] + n["unreachable_candidate_count"] == n["matrix_candidate_count"]
-assert n["eligible_candidate_count"] + n.get("excluded_by_range_count", 0) + n["excluded_by_detour_count"] == n["reachable_candidate_count"]
-assert n["eligible_candidate_count"] == len(candidates)
-assert n["base_route_calls"] == 1
-assert n["per_candidate_route_calls"] == 0
-minimum_calls = 0 if n["matrix_candidate_count"] == 0 else 2 * ((n["matrix_candidate_count"] + n["matrix_batch_size"] - 1) // n["matrix_batch_size"])
-assert n["matrix_calls"] == minimum_calls + 4 * n["matrix_fallback_splits"]
-assert n["matrix_location_failures"] <= n["unreachable_candidate_count"]
-for candidate in candidates:
-    assert candidate["detour_duration_seconds"] <= 600.000001
-    assert abs(candidate["detour_minutes"] * 60 - candidate["detour_duration_seconds"]) < 0.001
-    assert abs(candidate["route_via_station_distance_meters"] - candidate["distance_from_previous_waypoint_meters"] - candidate["station_to_destination_distance_meters"]) < 0.001
-    assert abs(candidate["route_via_station_duration_seconds"] - candidate["duration_from_previous_waypoint_seconds"] - candidate["station_to_destination_duration_seconds"]) < 0.001
-    assert datetime.fromisoformat(candidate["station_eta"]).utcoffset() is not None
-    assert datetime.fromisoformat(candidate["destination_eta"]).utcoffset() is not None
-assert [c["detour_duration_seconds"] for c in candidates] == sorted(c["detour_duration_seconds"] for c in candidates)
-print(json.dumps({"stage": p["stage"], "corridor": p["corridor"], "spatial_pruning": s, "cost_basis": p["cost_basis"], "network_evaluation": n, "candidate_sample": candidates[:5]}, indent=2))
-PY
-
-# Independently validate one known candidate with ordinary Valhalla routes. These three route
-# calls are acceptance diagnostics only; the Compass request above must still use matrix batches.
-docker compose --profile routing exec -T api python - <<'PY' \
-  > /tmp/compass-phase5-known-route.json
-import json
-import urllib.request
-
-url = "http://valhalla:8002/route"
-origin = {"lat": 45.4642, "lon": 9.1900, "type": "break"}
-station = {"lat": 45.321004, "lon": 9.376063, "type": "break"}
-destination = {"lat": 44.4949, "lon": 11.3426, "type": "break"}
-
-def route(start, end):
-    body = json.dumps({
-        "locations": [start, end],
-        "costing": "auto",
-        "units": "kilometers",
-        "directions_type": "none"
-    }).encode()
-    request = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        summary = json.load(response)["trip"]["summary"]
-    return {"distance_meters": summary["length"] * 1000, "duration_seconds": summary["time"]}
-
-base = route(origin, destination)
-outward = route(origin, station)
-onward = route(station, destination)
-via_distance = outward["distance_meters"] + onward["distance_meters"]
-via_duration = outward["duration_seconds"] + onward["duration_seconds"]
-print(json.dumps({
-    "mimit_station_id": "43690",
-    "base": base,
-    "origin_to_station": outward,
-    "station_to_destination": onward,
-    "route_via_station_distance_meters": via_distance,
-    "route_via_station_duration_seconds": via_duration,
-    "extra_distance_meters": max(0, via_distance - base["distance_meters"]),
-    "detour_duration_seconds": max(0, via_duration - base["duration_seconds"])
-}, indent=2))
-PY
-
-python3 - <<'PY'
-import json
-
-p = json.load(open("/tmp/compass-phase5-detours.json"))
-known = json.load(open("/tmp/compass-phase5-known-route.json"))
-candidate = next(c for c in p["candidates"] if c["mimit_station_id"] == known["mimit_station_id"])
-assert known["detour_duration_seconds"] <= 600
-assert candidate["detour_duration_seconds"] <= 600
-assert abs(candidate["route_via_station_distance_meters"] - known["route_via_station_distance_meters"]) <= 1000
-assert abs(candidate["route_via_station_duration_seconds"] - known["route_via_station_duration_seconds"]) <= 120
-print(json.dumps({"batched_candidate": candidate, "independent_route_check": known}, indent=2))
-PY
-
-docker compose --profile routing logs --no-color --since=5m api valhalla \
-  | grep -E 'POST /route|POST /sources_to_targets|detour-candidates'
-docker compose exec -T api alembic current
-```
-
-Expected invariants:
-
-- readiness and the detour request are HTTP 200;
-- `stage=network_detour`, the applied corridor policy remains the accepted Phase 4 policy and the
-  request maximum is ten minutes;
-- the matrix count equals Phase 4's returned count, not the all-Italy active count;
-- reachable plus unreachable equals evaluated, and eligible plus detour-excluded equals reachable;
-- matrix calls equal two per configured batch on the clean path (ten when 200 candidates use
-  batches of 40), plus four observable calls per binary fallback split;
-- an uncorrelatable station is counted as unreachable without discarding valid batch siblings;
-- `base_route_calls=1` and `per_candidate_route_calls=0`;
-- every returned candidate satisfies the inclusive 600-second maximum and its two leg sums;
-- MIMIT station `43690` (San Zenone Ovest) is independently eligible under ordinary route calls,
-  appears in the batched response and agrees within 1 km / 120 seconds; these tolerances account for
-  CostMatrix versus bidirectional A* path/snap differences;
-- distance from the previous waypoint is explicitly a road-network field;
-- station and destination ETA values retain a UTC offset;
-- metrics prove the Compass request made one base `/route`, zero per-candidate route calls and only
-  batched `/sources_to_targets` calls. The final filtered log also contains the three deliberately
-  independent `/route` diagnostics above, so four route lines are expected in this procedure.
-  Healthcheck `/status` lines may also appear.
-
-The request evaluates at most the Phase 4 returned-candidate limit. If
-`spatial_pruning.candidate_limit_applied=true`, it is intentionally not an exhaustive evaluation of
-every pre-limit corridor station.
-
-### Phase 5 diagnostics
-
-If the endpoint fails or matrix/count invariants do not hold, return:
-
-```bash
-curl --silent --show-error -i \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-28T08:00:00+02:00"}' \
-  http://127.0.0.1:8000/api/v1/cng/detour-candidates
-docker compose --profile routing logs --no-color --tail=500 api valhalla db
-docker compose --profile routing exec -T valhalla sh -c \
-  'curl --fail --silent --show-error -H "Content-Type: application/json" -d '\''{"sources":[{"lat":45.4642,"lon":9.1900}],"targets":[{"lat":45.321004,"lon":9.376063},{"lat":45.141970,"lon":9.634009}],"costing":"auto","units":"kilometers","verbose":true,"shape_format":"no_shape"}'\'' http://127.0.0.1:8002/sources_to_targets'
-docker compose exec -T api alembic current
-```
-
-Return both summarized JSON objects, the independent known-route comparison, filtered request logs
-and Alembic output. If a check fails, also return the HTTP response with headers and all diagnostics.
-Keep the full route/candidate JSON in `/tmp` unless a specific malformed item must be inspected.
-
-## Phase 6 arrival-time availability and ranking validation
-
-Run this gate from the repository root after synchronizing Phase 6. The accepted normalized data and
-Italy Valhalla volume must still be present. No new migration is expected: Alembic remains at `0002`.
-The API image must be rebuilt because Phase 6 adds pinned Python packages and application code.
-
-The commands below deliberately use Sunday 30 August 2026. This makes normal weekday-only OSM
-schedules visibly closed while `24/7` schedules remain open. It is a deterministic civil-time test,
-not a claim about whether those stations are open today. The `+02:00` offset is correct for Italy on
-that date; the service converts every station ETA to the configured `Europe/Rome` timezone.
-
-Copy each fenced shell block as a whole and do not paste shell prompt characters into it. The full
-API responses stay under `/tmp` because route geometry makes them large; the checked-in verifier
-prints only the evidence that should be returned.
-
-First rebuild and restart the application against the existing database/router:
-
-```bash
-docker compose build api
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-docker compose --profile routing ps -a
-curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-```
-
-Both calls below run the same route. The first exercises the user-facing default (closed stations
-excluded); the second includes closed stations only so their explicit penalty can be inspected.
-Keep `phase6_started_at` in the same terminal so the later log command isolates these two requests.
-
-```bash
-phase6_started_at="$(date --iso-8601=seconds)"
-
-curl --fail --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00"}' \
-  http://127.0.0.1:8000/api/v1/cng/ranked-candidates \
-  -o /tmp/compass-phase6-ranked-default.json
-
-curl --fail --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00","include_closed":true}' \
-  http://127.0.0.1:8000/api/v1/cng/ranked-candidates \
-  -o /tmp/compass-phase6-ranked-with-closed.json
-```
-
-Run the checked-in verifier below. It performs the count, network-batching, detour-leg,
-timezone, opening-state, price-age, score-contribution and deterministic-order checks, then prints
-only compact human-reviewable samples. Keeping this logic in the repository avoids copying a long
-inline Python heredoc and makes the acceptance procedure versioned with the implementation.
-
-Fetch the live OpenAPI document before invoking it:
-
-```bash
-curl --fail --silent --show-error \
-  http://127.0.0.1:8000/openapi.json \
-  -o /tmp/compass-phase6-openapi.json
-
-python3 scripts/validate-phase6-live.py \
-  --default /tmp/compass-phase6-ranked-default.json \
-  --with-closed /tmp/compass-phase6-ranked-with-closed.json \
-  --openapi /tmp/compass-phase6-openapi.json \
-  --require-closed
-
-docker compose exec -T api python -c \
-  'from importlib.metadata import version; print("opening-hours-py", version("opening-hours-py")); print("tzdata", version("tzdata"))'
-docker compose exec -T api python -c \
-  'from datetime import datetime; from compass.ranking.opening_hours import evaluate_opening_hours; result=evaluate_opening_hours("Mo-Sa 06:30-12:30, 14:30-19:00; Su, PH off", eta=datetime.fromisoformat("2026-08-30T11:48:13+02:00"), latitude=44.492256, longitude=11.262711, timezone_name="Europe/Rome", country="IT", source_confidence=1.0); print(result); assert result.state == "closed"'
-
-docker compose --profile routing logs --no-color --since="$phase6_started_at" valhalla \
-  | grep -E 'POST /route|POST /sources_to_targets'
-docker compose --profile routing logs --no-color --since="$phase6_started_at" api \
-  | grep 'ranked-candidates'
-docker compose exec -T api alembic current
-```
-
-Expected invariants:
-
-- readiness and both ranked requests return HTTP 200;
-- the default response contains no `closed` candidate, but preserves `unknown`; the opt-in response
-  contains at least one visibly closed Sunday candidate with multiplier `0.25`;
-- all state, validation, price and ranking counts reconcile exactly as the verifier asserts;
-- every opening state is evaluated at the offset-aware station ETA in `Europe/Rome`;
-- a comma-separated `Su, PH off` selector remains closed on Sunday even when the OSM value contains
-  whitespace after the comma; the direct parser check must print `state='closed'`;
-- missing/invalid hours are `unknown`, never open, and price absence does not remove a candidate;
-- price values are explicit EUR/kg unit prices with source times and ETA-relative freshness;
-- ranks are contiguous and total scores descend; the returned components reproduce each total;
-- `enrichment_queries=1` confirms one joined enrichment read over eligible IDs;
-- each API request retains one base route, batched matrices and zero per-candidate route calls. With
-  the previously accepted 200-candidate / batch-40 route, two ranked requests normally produce two
-  `/route` lines and twenty `/sources_to_targets` lines, unless observable fallback splits occur;
-- the image reports `opening-hours-py=2.1.4`, `tzdata=2026.3`, and OpenAPI exposes the strict request;
-- Alembic remains `0002 (head)`.
-
-### Phase 6 diagnostics
-
-If an endpoint or assertion fails, keep the `/tmp` response files and return these diagnostics:
-
-```bash
-curl --silent --show-error -i \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":44.4949,"longitude":11.3426},"effective_cng_range_km":300,"maximum_detour_minutes":10,"departure_at":"2026-08-30T10:00:00+02:00","include_closed":true}' \
-  http://127.0.0.1:8000/api/v1/cng/ranked-candidates
-docker compose --profile routing logs --no-color --tail=500 api valhalla db
-docker compose exec -T api python -c \
-  'from importlib.metadata import version; print(version("opening-hours-py"), version("tzdata"))'
-docker compose exec -T api python -c \
-  'from datetime import datetime; from compass.ranking.opening_hours import evaluate_opening_hours; print(evaluate_opening_hours("Mo-Sa 06:30-12:30, 14:30-19:00; Su, PH off", eta=datetime.fromisoformat("2026-08-30T11:48:13+02:00"), latitude=44.492256, longitude=11.262711, timezone_name="Europe/Rome", country="IT", source_confidence=1.0))'
-docker compose exec -T db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "SELECT count(*) AS active, count(*) FILTER (WHERE l.station_id IS NOT NULL) AS linked, count(*) FILTER (WHERE o.opening_hours IS NOT NULL) AS with_hours, count(*) FILTER (WHERE cp.station_price_id IS NOT NULL) AS with_current_cng_price FROM stations s LEFT JOIN station_osm_links l ON l.station_id=s.id LEFT JOIN osm_cng_features o ON o.id=l.osm_feature_id LEFT JOIN station_current_prices cp ON cp.station_id=s.id AND cp.fuel_type='\''cng'\'' WHERE s.is_active;"'
-docker compose exec -T api alembic current
-```
-
-Return the compact verifier JSON, package-version lines, filtered Valhalla/API request logs and
-Alembic output. If anything fails, also return the HTTP response and diagnostics above. Do not paste
-the complete 2+ GB graph, `.env`, credentials, or the unabridged ranked response unless a specific
-candidate must be debugged. Stop at this gate; do not begin Phase 7 until these invariants pass or
-the operator explicitly waives them.
-
-## Phase 7 public API contract validation
-
-Run this gate from the repository root after synchronizing Phase 7. Reuse the accepted normalized
-full-Italy database and Valhalla tiles. No migration is added, so Alembic must remain at `0002`.
-
-The complete gate is automated by `scripts/run-phase7-live.sh`. It creates the request JSON files,
-runs every HTTP request separately, checks the expected 404 and 422 responses, runs the contract
-verifier and prints bounded service evidence. Do not join these commands onto one line and do not
-pipe them through `tr`.
-
-### Step 1: build the application image
-
-```bash
-docker compose build api
-```
-
-Wait for this command to finish before continuing.
-
-### Step 2: restart the Phase 7 services
-
-```bash
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-```
-
-Wait for this command to finish before continuing.
-
-### Step 3: inspect service state
-
-```bash
-docker compose --profile routing ps -a
-```
-
-`db`, `api` and `valhalla` must be healthy. `migrate` must have exited with status 0.
-
-### Step 4: run the complete live gate
-
-```bash
-bash scripts/run-phase7-live.sh
-```
-
-That is one command. Do not copy the contents of the script into the terminal. The script prints
-progress from `[1/9]` through `[9/9]` and stops immediately if a request or assertion fails. Large
-route responses are saved under `/tmp` instead of being printed.
-
-Expected invariants:
-
-- the normal and ranked route capabilities still work, with one base route and bounded matrices for
-  ranking rather than per-candidate route calls;
-- station `43690` is active, geocoded and has explicit current EUR/kg price timestamps/freshness;
-- optional `arrival_at` produces an evaluated open/closed/unknown state rather than `open_now`;
-- selected-stop routing makes one provider request and returns exactly two ordered legs whose
-  distance/time sums reproduce the total within provider rounding tolerance;
-- every leg has separate polyline6 geometry and maneuver indices;
-- freshness contains exactly MIMIT, OSM and reconciliation; required MIMIT/reconciliation are not
-  missing, and stale data is visible rather than hidden;
-- unknown station and invalid request bodies return the shared 404/422 `{code,message}` contracts;
-- live OpenAPI contains all seven verifier-required paths and the shared `ErrorResponse` schema;
-- the filtered workload normally contains three `/route` calls (normal, ranking base, selected stop)
-  and ten `/sources_to_targets` calls for the accepted 200-candidate/batch-40 ranking path, unless
-  observable matrix fallback splits occur;
-- Alembic is `0002 (head)` and the built package reports `GPL-3.0-only`.
-
-### Phase 7 diagnostics
-
-If the runner fails, first capture container state:
-
-```bash
-docker compose --profile routing ps -a
-```
-
-Then capture recent logs:
-
-```bash
-docker compose --profile routing logs --no-color --tail=500 api valhalla db migrate
-```
-
-Then inspect readiness:
-
-```bash
-curl --silent --show-error -i http://127.0.0.1:8000/health/ready
-```
-
-Then inspect freshness:
-
-```bash
-curl --silent --show-error -i http://127.0.0.1:8000/api/v1/data-freshness
-```
-
-The following station-detail command is safe to paste as one block:
-
-```bash
-curl --silent --show-error -i --get --data-urlencode 'arrival_at=2026-08-30T10:19:11+02:00' http://127.0.0.1:8000/api/v1/cng/stations/43690
-```
-
-Finally inspect the migration revision:
-
-```bash
-docker compose exec -T api alembic current
-```
-
-Return the runner output and these diagnostics. The failed response body remains in the matching
-`/tmp/compass-phase7-*.json` file; return that file only when the failing `[N/9]` step identifies it.
-Do not return `.env`, credentials, full large polylines or Valhalla tile contents. Stop at this gate;
-do not begin Phase 8 until it passes or the operator explicitly waives it.
-
-## Phase 10 predictive CNG reachability validation
-
-Run this gate from the repository root after synchronizing Phase 10. It adds no migration, so the
-expected revision remains `0002 (head)`. Reuse the accepted full-Italy database and Valhalla graph.
-
-### Step 1: build the new application image
-
-```bash
-docker compose build api
-```
-
-Wait for this command to finish.
-
-### Step 2: restart the backend and router
-
-```bash
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-```
-
-Wait for all dependency checks to finish.
-
-### Step 3: verify service state
-
-```bash
-docker compose --profile routing ps -a
-```
-
-`db`, `api` and `valhalla` must be healthy. `migrate` must exit with status 0.
-
-### Step 4: open the SSH tunnel when the Android build machine is remote
-
-Skip this step only when the repository/device machine is also the live server. Otherwise open a
-separate terminal on the Android build machine and keep this command running:
-
-```bash
-ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
-```
-
-Replace `TEST_SERVER` with the real hostname. Do not type subsequent commands into that terminal.
-
-### Step 5: export the Android toolchain and API endpoint
-
-Open a second terminal at the repository root:
-
-```bash
-export JAVA_HOME=/home/mike/toolchains/jdk17
-export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
-```
-
-### Step 6: run the complete gate
-
-```bash
-bash scripts/run-phase10-live.sh
-```
-
-Do not copy individual requests from the runner. It writes each body and response to a distinct
-`/tmp/compass-phase10-*.json` file, validates the predictive states and the complete multi-stop
-route, then builds, installs and launches the Android app.
-
-Expected automated invariants:
-
-- readiness is HTTP 200 with database and routing ready; degraded source freshness is visible;
-- live OpenAPI exposes the corrected Phase 10 predictive itinerary contract, including
-  `/api/v1/routes/with-cng-itinerary`, `PredictiveCandidatesResponse.itinerary` and pairwise
-  itinerary-search metrics;
-- 120 km remaining with a 30 km reserve and 300 km full range returns a complete ordered itinerary;
-- the exposed first stop is within 90 road km and all later plan legs fit the 270 km full-refill
-  usable range;
-- 300 km remaining with a 30 km reserve returns `not_needed`, one base route call, zero matrix calls
-  and zero enrichment queries;
-- 31 km remaining with a 30 km reserve returns `no_reachable_station` for the accepted fixed route;
-- 65 km remaining, 30 km reserve and 100 km full range produces at least three ordered CNG stops;
-- the 65/30/100 first leg is at most 35 road km, every later leg is at most 70 road km and every
-  station/destination reserve margin is non-negative;
-- `routes/with-cng-itinerary` returns all planned MIMIT stops in order, exactly one more route leg
-  than stops, and `range_validation=all_legs_preserve_reserve`;
-- Android unit tests, lint and APK assembly pass, installation succeeds, cold launch reports
-  `Status: ok`, and no immediate Compass fatal exception is present;
-- Alembic remains `0002 (head)` when checked after the runner.
-
-The runner's automated result is not the device gate. Follow its fully described scenarios and
-return its entire output plus the four requested screenshots.
-
-### Phase 10 diagnostics
-
-First capture service state:
-
-```bash
-docker compose --profile routing ps -a
-```
-
-Then capture bounded logs:
-
-```bash
-docker compose --profile routing logs --no-color --tail=500 api valhalla db migrate
-```
-
-Inspect the response named by the failing runner step, one command at a time:
-
-```bash
-python3 -m json.tool /tmp/compass-phase10-standard-response.json
-```
-
-```bash
-python3 -m json.tool /tmp/compass-phase10-not-needed-response.json
-```
-
-```bash
-python3 -m json.tool /tmp/compass-phase10-unreachable-response.json
-```
-
-```bash
-python3 -m json.tool /tmp/compass-phase10-multi-stop-response.json
-```
-
-```bash
-python3 -m json.tool /tmp/compass-phase10-itinerary-route-response.json
-```
-
-Check the deployed schema revision:
-
-```bash
-docker compose exec -T api alembic current
-```
-
-For device connectivity and crash diagnostics use the separate commands in
-[Android client development](android.md#diagnostics). Return only the failing artifact and bounded
-logs; never return `.env`, credentials, the full graph or complete unabridged route polylines. Stop
-at this gate until the failure is fixed or explicitly waived.
-
-## Phase 11 Android route endpoint editing validation
-
-Phase 11 is an Android-only increment over the accepted Phase 10 backend. It does not add a
-migration; the expected database revision remains `0002 (head)`.
-
-### Step 1: rebuild/restart the synchronized services
-
-```bash
-docker compose build api
-```
-
-```bash
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-```
-
-Confirm the state:
-
-```bash
-docker compose --profile routing ps -a
-```
-
-`db`, `api` and `valhalla` must be healthy. `migrate` must exit with status 0.
-
-### Step 2: open the SSH tunnel when needed
-
-Skip this only when the Android build/device machine is also the live server. Otherwise open a
-separate terminal on the Android build machine and keep it open:
-
-```bash
-ssh -N -L 8000:127.0.0.1:8000 mike@TEST_SERVER
-```
-
-### Step 3: run the Android gate
-
-In a second terminal at the repository root:
-
-```bash
-export JAVA_HOME=/home/mike/toolchains/jdk17
-export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
-bash scripts/run-phase11-live.sh
-```
-
-Expected automated invariants:
-
-- readiness is HTTP 200 with database and routing ready;
-- the live backend returns a Valhalla route for the generated Rome-to-Florence request;
-- Android unit tests, lint and debug APK assembly pass for version `0.4.0`;
-- installation succeeds, cold launch reports `Status: ok`, and no immediate Compass fatal
-  exception is present.
-
-Manual acceptance is still required. Follow the runner scenarios and return its complete output plus
-the five requested screenshots: edited Rome-to-Florence preview, manual CNG candidates for the
-edited route, selected-stop route for the edited route, predictive result for the edited route and
-invalid-coordinate validation. On edited routes, destination labels must be generic and must not
-retain fixed Milan/Bologna copy.
-
-### Phase 11 diagnostics
-
-Inspect generated artifacts one at a time:
-
-```bash
-python3 -m json.tool /tmp/compass-phase11-custom-route-request.json
-```
-
-```bash
-python3 -m json.tool /tmp/compass-phase11-custom-route-response.json
-```
-
-Check the deployed schema revision:
-
-```bash
-docker compose exec -T api alembic current
-```
-
-Capture bounded service logs:
-
-```bash
-docker compose --profile routing logs --no-color --tail=300 api valhalla db migrate
-```
-
-For device connectivity and crash diagnostics use
-[Android client diagnostics](android.md#diagnostics). Return only the failing artifact and bounded
-logs.
-
-## Phase 12 search/navigation validation
-
-Set an identifying `HTTP_USER_AGENT` and the desired server-side geocoder in `.env`. The default is
-Nominatim with Italy-only results. Rebuild and recreate the API so the search/timing contract and
-configuration are active:
-
-```bash
-docker compose build api
-docker compose --profile routing up -d --force-recreate migrate api valhalla
-```
-
-On the Android workstation, keep the usual SSH tunnel open when the backend is remote, then run:
-
-```bash
-export JAVA_HOME=/home/mike/toolchains/jdk17
-export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
-bash scripts/run-phase12-live.sh
-```
-
-The runner saves all API artifacts under `/tmp/compass-phase12-*`. It rejects a stale OpenAPI image,
-missing normalized search modes, missing Valhalla geometry/maneuvers, incorrect default dwell,
-non-cumulative multi-stop timing and missing chronological dwell in subsequent ETAs. Its Android
-half verifies client requests, CNG-stop preservation across automatic rerouting, replacement of a
-simulated invalid stop, foreground lifecycle continuity and teardown. Human screenshots remain
-mandatory; automated output alone does not accept Phase 12.
-
-### Optional Google Places (New) corroboration
-
-This section describes the dormant pre-0.19.4 corroborator. For the active destination selector use
-the Google-only configuration below.
+## Destination search configuration
 
 ### Google Places (New) destination selector
 
@@ -1115,44 +304,15 @@ The command reports only whether the key exists, never its value. The expected a
 `providers=google_places_new`, `legacy_geocoder=none`, `google_enabled=true`,
 `contract_regime=eea` and `tomtom_search=false`.
 
-## Phase 13 degraded/offline navigation validation
+## Acceptance and diagnostic output
 
-Phase 13 adds no server workload or secret. Build-time Android configuration
-`COMPASS_MAP_AMBIENT_CACHE_MB` defaults to 100 and accepts 16–1,024 MiB. After synchronizing the
-repository, keep the API/Valhalla deployment and optional SSH tunnel running, then execute:
+Validate liveness, readiness and an authenticated route before device testing. For the
+route command above set `COMPASS_CHECK_USER` to the configured API username; curl prompts
+for its password. The API image need not contain curl: use Python urllib for internal
+connectivity inspection as shown above. Do not send credentials in returned artifacts.
 
-```bash
-export JAVA_HOME=/home/mike/toolchains/jdk17
-export ANDROID_SDK_ROOT=/home/mike/toolchains/android-sdk
-export COMPASS_API_BASE_URL=http://127.0.0.1:8000/
-bash scripts/run-phase13-live.sh
-```
-
-The script clears only the debug application's data at the start, builds/installs it, populates the
-device caches and temporarily removes `adb reverse`. General device networking is not disabled. It
-then checks search fallback, route continuity, foreground lifecycle, process-death recovery, ambient
-cache initialization, recovery through a fresh route response and final cache/service teardown.
-Return all screenshots and bounded artifacts requested by the runner.
-
-## Navigation UI Phase 5 map-style deployment
-
-No additional server container or secret is required for the default Compass cartography. The day
-and night style documents ship inside the APK and retrieve the same keyless OpenFreeMap vector tiles
-and fonts used by the accepted development baseline.
-
-For a self-hosted map deployment, provide complete HTTPS style documents at Android build time:
-
-```bash
-cd android
-./gradlew --no-daemon \
-  -PCOMPASS_MAP_DAY_STYLE_URL=https://maps.example.test/styles/compass-day.json \
-  -PCOMPASS_MAP_NIGHT_STYLE_URL=https://maps.example.test/styles/compass-night.json \
-  assembleDebug
-cd ..
-```
-
-The style documents themselves must reference the intended self-hosted TileJSON, glyph and optional
-sprite URLs. Do not place access tokens in Git. The legacy `COMPASS_MAP_STYLE_URL` still sets both
-modes for deployments intentionally using one style. The canonical bundled-style device gate and
-its bounded diagnostics are documented in
-[`navigation-ui-phase-5-acceptance.md`](phases/navigation-ui-phase-5-acceptance.md).
+If an invariant fails, return the failing request/response with secrets removed, job
+exit status, `docker compose --profile routing ps -a` and bounded API/Valhalla/database
+logs. For CNG scenarios check station counts, maximum detour, reserve reachability and
+opening state at arrival, not just HTTP success. [API documentation](api.md) specifies
+current contracts; old scenario-specific checks remain in [historical gates](phases/).

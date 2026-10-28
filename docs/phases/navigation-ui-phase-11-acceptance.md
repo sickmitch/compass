@@ -53,7 +53,7 @@ Android version is `0.21.0` (`versionCode=26`).
 From the repository root:
 
 ```bash
-bash -n scripts/install-android-0.21.0.sh scripts/run-navigation-ui-phase11-live.sh
+bash -n scripts/run-navigation-ui-phase11-live.sh
 .venv/bin/pytest -q tests/test_navigation_ui_phase11_script.py
 git diff --check
 ```

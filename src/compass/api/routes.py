@@ -424,7 +424,7 @@ async def base_route(
         )
 
 
-    return _base_route_response(route, settings=settings, departure_at=request.departure_at)
+    return _base_route_response(route, departure_at=request.departure_at)
 
 
 @router.post(
@@ -684,7 +684,7 @@ async def corridor_candidates(
         return error_response(503, "database_unavailable", "The station database is unavailable.")
 
     return CorridorCandidatesResponse(
-        base_route=_base_route_response(result.base_route, settings=settings),
+        base_route=_base_route_response(result.base_route),
         corridor=CorridorPolicyResponse.model_validate(asdict(result.corridor)),
         metrics=SpatialPruningMetricsResponse.model_validate(asdict(result.metrics)),
         candidates=[
@@ -767,7 +767,7 @@ async def detour_candidates(
     return DetourCandidatesResponse(
         departure_at=result.departure_at,
         maximum_detour_minutes=result.maximum_detour_seconds / 60,
-        base_route=_base_route_response(spatial.base_route, settings=settings),
+        base_route=_base_route_response(spatial.base_route),
         corridor=CorridorPolicyResponse.model_validate(asdict(spatial.corridor)),
         spatial_pruning=SpatialPruningMetricsResponse.model_validate(
             asdict(spatial.metrics)
@@ -783,7 +783,6 @@ async def detour_candidates(
 def _base_route_response(
     route: BaseRoute,
     *,
-    settings: Settings,
     departure_at: datetime | None = None,
 ) -> BaseRouteResponse:
     navigation = build_navigation_timing(

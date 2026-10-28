@@ -2,7 +2,6 @@ from pathlib import Path
 
 RUNNER = Path("scripts/run-navigation-ui-phase12-live.sh")
 RANKING_RUNNER = Path("scripts/run-navigation-ui-phase12-ranking-live.sh")
-INSTALLER = Path("scripts/install-android-0.22.1.sh")
 ENGINE = Path(
     "android/app/src/main/java/org/compass/cng/navigation/NavigationEngine.kt"
 )
@@ -32,15 +31,6 @@ def test_phase12_gate_is_operator_driven_and_preserves_profiles() -> None:
     assert "uiautomator dump" not in content.lower()
     assert "screencap" not in content
     assert "Do not proceed to Navigation UI Phase 13" in content
-
-
-def test_phase12_installer_builds_replaces_and_cold_launches() -> None:
-    content = INSTALLER.read_text()
-
-    assert 'install -r "$apk_path"' in content
-    assert "pm clear" not in content
-    assert "assembleDebug" in content
-    assert "ANDROID 0.22.1 INSTALLED" in content
 
 
 def test_phase12_visit_is_engine_owned_and_keeps_manual_completion() -> None:

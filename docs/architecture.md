@@ -1,748 +1,89 @@
-# Architecture overview
+# Architecture
 
-## Boundaries
+## Responsibilities
 
-Compass uses six explicit server/domain boundaries and one first-class device client:
+| Component | Owns |
+| --- | --- |
+| Source adapters and ETL | MIMIT/OSM acquisition, immutable payloads, parsing, timestamps and restartable imports |
+| PostgreSQL/PostGIS | Station geography, spatial indexes, price observations, reconciliation and provenance |
+| Routing adapter | Valhalla HTTP requests, costing options, units, geometry validation and error translation |
+| CNG domain services | Corridor pruning, road-network detours, reserve reachability, opening status and explainable ranking |
+| FastAPI | Strict versioned request/response contracts, authentication and dependency health |
+| Android | Interaction, saved profiles/routes, GPS guidance, presentation and update consent |
 
-1. **Source adapters** fetch MIMIT CSV and OSM Overpass JSON without embedding source-specific
-   behavior in routing code.
-2. **ETL** retains exact payloads, parses source records and publishes counts. Normalization is a
-   separate restartable command so source acquisition remains independently useful.
-3. **PostgreSQL/PostGIS** stores raw source history, normalized/spatial station data, price history
-   and reconciliation evidence.
-4. **Routing provider** exposes a provider-neutral async interface. Its Valhalla adapter owns HTTP
-   translation, response validation and failure classification.
-5. **Routing intelligence** owns corridor policy, spatial pruning, batched road detour math,
-   arrival-time opening status, explainable ranking and reserve-aware predictive reachability. It
-   does not live in the Android UI or raw ETL adapters.
-6. **FastAPI** exposes strict versioned mobile contracts without exposing provider response shapes.
-7. **Android (Kotlin, Jetpack Compose, MapLibre Native)** owns presentation and interaction state.
+The backend returns domain data rather than widget placement or colors. Provider-specific
+responses do not cross the mobile API boundary. See [API](api.md), [ADRs](adr/) and
+[data-source rules](data-sources.md) for contracts and rationale.
 
-The public mobile boundary optionally applies HTTP Basic authentication to every `/api/v1` router.
-Credentials exist only in server environment configuration and the Android app-private connection
-profile; the device encrypts the password with Android Keystore. Transport security is terminated by
-the operator's ingress, with HTTPS preferred and explicitly acknowledged HTTP available only as a
-fallback. Health endpoints remain outside this auth boundary for container/ingress monitoring.
+## Data ingestion
 
-Valhalla is the selected routing engine. Phase 3 adds its independently persisted tile bootstrap and
-provider adapter; Valhalla remains inaccessible from host/public ports.
+MIMIT supplies authoritative station identity and official price observations. OSM
+supplies complementary metadata such as opening hours and contact information. Imports
+preserve original payloads and separate source timestamps from ingestion time.
+Normalization uses deterministic, versioned reconciliation and explicit matched,
+ambiguous and unmatched outcomes. Manual overrides are auditable; OSM enrichment does
+not silently overwrite MIMIT source fields. Missing geography remains explicit.
 
-## Phase 1 data flow
+Price observations are deduplicated independently of current-price pointers. Repeated
+inputs reuse ingestion/reconciliation results where the policy and inputs are unchanged.
+Source acquisition failures must not erase previously valid data from another source.
 
-```text
-MIMIT active-station CSV ─┐
-                          ├─> fetch limit + exact snapshot ─> parse ─> select CNG IDs ─> raw tables
-MIMIT price CSV ──────────┘
+## Route and CNG pipeline
 
-OSM Overpass JSON ──────────> fetch limit + exact snapshot ─> validate CNG features ─> raw table
+```mermaid
+flowchart TD
+    Android --> API[FastAPI versioned API]
+    API --> Router[Valhalla adapter]
+    Router --> Base[Nominal route geometry and duration]
+    Base --> Corridor[Autonomy-based spatial corridor]
+    DB[PostGIS station inventory] --> Corridor
+    Corridor --> Prune[Bounded candidate pruning]
+    Prune --> Costs[Road-network matrix and detour costs]
+    Router --> Costs
+    Costs --> Rank[Arrival opening hours and explainable ranking]
+    Rank --> Select[Selected stops or predictive chain]
+    Select --> Router
+    Base --> Android
+    Rank --> Android
 ```
 
-Every retained exact payload has a SHA-256 identity. MIMIT's two related payloads receive a
-deterministic combined identity for an ingestion run. OSM runs use a versioned canonical identity of
-the parsed CNG feature collection, excluding the volatile Overpass response timestamp; otherwise an
-unchanged query would create a new run every minute. The first exact payload for that logical content
-is retained. A completed run with the same identity is returned as reused. Database constraints
-independently protect snapshot, run and row identity.
-
-The current raw model preserves:
-
-- source URL and content type;
-- payload bytes and SHA-256;
-- source observation/extraction time and fetch/ingestion time separately;
-- source IDs and original source record JSON;
-- explicit CNG price currency (`EUR`) and unit (`kg`);
-- OSM element type + ID and unmodified tags;
-- per-run visible metrics.
-
-## Phase 2 normalized data flow
-
-```text
-latest completed MIMIT run ─> MIMIT-anchored stations ─> geography(Point, 4326) + price history
-                                        │
-                                        ├─ ST_DWithin 250 m candidate search (GiST)
-                                        │          └─ deterministic distance/name policy
-latest completed OSM run ───> stable OSM features ─> matched / ambiguous / unmatched evidence
-                                                               └─ current enrichment link
-```
-
-`stations` represents official MIMIT station identity and fields. `osm_cng_features` represents
-stable OSM type/ID and enrichment fields. `station_osm_links` is the current accepted relationship;
-it does not copy or overwrite authoritative station fields. Price observations are semantically
-deduplicated in `station_prices`, while `station_current_prices` points to the latest observation for
-each station/fuel/service-mode tuple.
-
-Each reconciliation run records its MIMIT/OSM input run IDs, algorithm version, effective policy,
-manual overrides, configuration hash, decisions, ranked candidates and summary counts. Identical
-inputs are reused. A changed override or policy creates a distinct run. An OSM feature cannot be
-linked to two stations: automatic conflicts become ambiguous, while conflicting manual claims fail.
-
-Source coordinates outside conservative Italian bounds, or missing coordinates, remain preserved in
-raw tables but produce a null normalized geography and an explicit unmatched outcome.
-
-## Deliberate Phase 2 limits
-
-- MIMIT coordinates remain authoritative source values, not verified road-access points.
-- OSM data never overwrites MIMIT source data; only accepted links expose enrichment.
-- Reconciliation uses conservative deterministic proximity/name rules, not address geocoding or an
-  opaque fuzzy model.
-
-
-## Phase 3 base-routing flow
-
-```text
-POST /api/v1/routes ─> strict A/B request ─> RoutingProvider
-                                               └─ Valhalla adapter ─> internal /route
-                                                    └─ metres + seconds + polyline6 + maneuvers
-
-Geofabrik Italy/regional PBF ─> one-shot tile build ─> named volume ─> Valhalla service
-```
-
-The public base-route operation supports exactly two coordinates with automobile, pedestrian or bicycle
-costing. Ordinary waypoint routes support the same modes; every CNG operation remains automobile
-only. Mode propagates through search detour verification, route identity, Android persisted sessions,
-and direct/waypoint rerouting. Non-automotive routes skip speed-limit
-enrichment. Bicycle access, geometry and estimated travel duration are delegated to Valhalla's
-`bicycle` costing with its hybrid/city defaults; this is not a car route with a reduced speed.
-See the [Valhalla bicycle costing reference](https://valhalla.github.io/valhalla/api/route/api-reference/#bicycle-costing-options).
-No additional routing service, migration or Docker configuration is required. The existing
-provider adapter converts Valhalla kilometres to metres and validates the response before creating
-domain objects. No source station model is consulted in this phase.
-
-## Deliberate Phase 3 limits
-
-- No route corridor, CNG candidate selection, matrix call or detour calculation.
-- No opening-hours evaluation, ranking, predictive range model or multi-waypoint public API.
-- Tile refresh remains an explicit operator job; application startup never erases the tile volume.
-
-## Phase 4 spatial-pruning flow
-
-```text
-A/B + effective CNG range ─> one base-route call ─> decode polyline6
-                                                        │
-                                                        └─> transient PostGIS LineString
-                                                              │
-20% range policy + caps ──────────────────────────────────────┤
-                                                              └─ ST_DWithin geography corridor
-                                                                  │
-stations.location GiST ───────────────────────────────────────────┘
-                                    └─ cheap route distance/projection ordering + count metrics
-```
-
-The route is request state, not durable domain history, so Phase 4 does not add a route table.
-`stations.location` remains the MIMIT-anchored geography point from Phase 2. `ST_DWithin` performs
-metre-based corridor filtering and can use its existing GiST index. `ST_Distance` and
-`ST_LineLocatePoint` are computed only for the reduced spatial set and are labeled as cheap
-prefilter values.
-
-## Deliberate Phase 4 limits
-
-- Effective CNG range is an explicit request input; no tank/consumption model estimates it yet.
-- Corridor inclusion proves spatial proximity only, not fuel reachability or road access.
-- Candidate distance-to-route is not road-network distance from the previous waypoint.
-- No candidate route, matrix, detour threshold, opening-hours evaluation or score is calculated.
-- A configurable response limit protects the contract while the true pre-limit count remains in
-  metrics for observability.
-
-## Phase 5 network-detour flow
-
-```text
-Phase 4 returned candidates ── batches of 40 ─┬─ previous waypoint -> stations (one-to-many)
-                                              └─ stations -> destination (many-to-one)
-                                                                  │
-base A/B route cost ──────────────────────────────────────────────┤
-user maximum detour ─────────────────────────────────────────────┤
-                                                                  └─ eligible road-cost results
-```
-
-The provider boundary exposes a rectangular matrix of optional road costs; the Valhalla adapter
-owns `/sources_to_targets`, kilometre conversion, source/target index validation and unreachable
-pair semantics. Routing intelligence combines the two legs, compares them to the Phase 4 base
-route, calculates ETAs from an offset-aware departure and applies the caller's maximum detour
-inclusively.
-
-Phase 5 evaluates no more than Phase 4's configurable returned-candidate limit. With the defaults,
-200 candidates require a clean-path minimum of ten matrix calls rather than 200 full route calls.
-An error-171 batch is binary-split to isolate uncorrelatable stations without losing valid siblings.
-Metrics expose the pre-limit corridor count, matrix-evaluated count, reachability, eligibility,
-batch/call/fallback counts and the absence of per-candidate route calls.
-
-## Deliberate Phase 5 limits
-
-- ETAs are elapsed-time projections only. Opening-hours parsing and status at ETA are later work.
-- Eligibility ordering by detour cost is deterministic but is not price/opening/quality ranking.
-- Refuelling dwell time is not included in detour duration.
-- A Phase 4 candidate limit can make evaluation non-exhaustive; that state remains visible.
-- Selecting a station and returning a full route through it is not part of this endpoint.
-
-## Phase 6 availability and ranking flow
-
-```text
-Phase 5 eligible tuple ───────────────┬─> one relational enrichment query
-                                     │      ├─ accepted OSM opening/phone/brand/operator
-station ETA in Europe/Rome ──────────┤      └─ current MIMIT CNG price modes
-                                     │
-OSM opening_hours parser ────────────┼─> open / closed / unknown at ETA
-price observation time ──────────────┼─> fresh / stale / future / unknown
-explicit fixed weights ──────────────┴─> score components + deterministic ranked list
-```
-
-`POST /api/v1/cng/ranked-candidates` composes the accepted Phase 4 and Phase 5 stages; it does not
-re-query the all-Italy inventory after detour eligibility. Only eligible station IDs enter one
-outer-joined enrichment query; no query is issued for an empty eligible tuple. Accepted OSM links
-supply enrichment without overwriting the MIMIT-anchored station. Across the current CNG price
-pointers, the lowest unit price is selected; equal prices prefer the newest observation and then a
-stable service-mode order.
-
-Opening expressions are evaluated at each road-network station ETA after converting the instant to
-the configured IANA timezone (`Europe/Rome` by default). A missing expression is `unknown/missing`,
-a parser failure is `unknown/invalid`, and a valid expression can itself evaluate to `unknown`.
-None of those states is silently treated as open.
-
-The score is a documented weighted sum of normalized detour, opening, unit-price and price-freshness
-components. Missing prices remain eligible with zero price contributions. Future observations are
-exposed but excluded from price scoring. Closed stations are excluded by default; the opt-in
-`include_closed` diagnostic mode retains them with zero opening score and a configurable availability
-multiplier. Rank, raw component scores, contributions and multiplier are all returned. Stable
-tie-breakers are detour duration, price presence/value and internal station ID.
-
-## Deliberate Phase 6 limits
-
-- Opening evaluation uses OSM expressions attached through accepted reconciliation links; unmatched
-  stations correctly remain `unknown`.
-- The configured timezone is national (`Europe/Rome`), appropriate to the current Italy-only scope;
-  per-station timezone lookup is deferred until the geographic scope expands.
-- The ranking weights are a transparent baseline policy, not a personalized model or opaque score.
-- Current MIMIT prices are ranked as unit prices; refill quantity/cost requires a future vehicle and
-  tank-state model.
-- Selecting a candidate and recomputing the route through it remains outside this phase.
-
-## Phase 7 public contract boundary
-
-Phase 7 exposes completed domain behavior without coupling the client to database primary keys or
-Valhalla payloads:
-
-```text
-MIMIT station ID ──> one joined normalized detail read ──> provenance + price freshness
-origin + MIMIT ID + destination ──> station resolution ──> one Valhalla waypoint route
-ingestion/reconciliation runs ──> freshness policy ──> detailed report + readiness data state
-domain/API schemas ──> FastAPI OpenAPI ──> checked docs/openapi.json contract
-```
-
-`mimit_station_id` is the public station identity because MIMIT is authoritative and the internal
-database ID is an implementation detail. Station detail performs one joined query for the station,
-accepted OSM link and all current CNG service modes. Optional `arrival_at` uses the same explicit
-opening-hours evaluator as ranking; omission is `not_requested`, not an implicit open state.
-
-Selected-stop routing sends origin, resolved station point and destination as three Valhalla break
-locations in one request. The response retains two separate legs, each with its own polyline6 and
-maneuver indices. Compass therefore does not concatenate independently encoded geometry or leak the
-provider response shape to clients. Inactive stations and missing station coordinates are distinct
-409 domain conflicts; an unknown ID is 404.
-
-Freshness compares source observation time (or completion time where no source observation exists)
-with configurable thresholds. Missing required MIMIT or reconciliation data makes readiness 503. Present but stale/future data is explicitly `degraded` and remains queryable with readiness HTTP 200. OSM freshness can degrade enrichment quality without erasing authoritative MIMIT data.
-
-All public request models reject unknown fields. Validation and operational failures use a shared
-`{code,message}` JSON envelope; health responses intentionally use their dependency-state schema.
-The generated OpenAPI document is checked into `docs/openapi.json` and tests require byte-equivalent
-semantic content to the runtime schema.
-
-## Deliberate Phase 7 limits
-
-- The selected stop is supplied explicitly; predictive fuel reachability remains a later phase.
-- Route alternatives, navigation session state and rerouting are not introduced by this contract.
-- Data freshness is observed on request; no scheduler/alerting infrastructure is added without an
-  operational requirement.
-- Stale data thresholds are operator policy, not claims about upstream publication guarantees.
-
-## Phase 8 Android route-preview boundary
-
-The first device client consumes the public API rather than provider or persistence models:
-
-```text
-Compose screen ─> RoutePreviewViewModel ─> RoutingRepository
-                                                │
-                                                └─> strict Compass API DTOs ─> POST /api/v1/routes
-                                                              │
-polyline6 decoder <─ domain RoutePreview <────────────────────┘
-        │
-        └─> MapLibre GeoJSON source/style layers + endpoint markers
-```
-
-`data` owns HTTP and JSON translation, `domain` owns route concepts and geometry decoding, and `ui`
-owns Android lifecycle and presentation state. Compose never receives raw HTTP DTOs, and MapLibre
-types do not enter the repository interface. Manual application-level dependency construction keeps
-the boundary replaceable without adding framework infrastructure for a single screen.
-
-The debug API endpoint and map style are build properties. Emulator/USB development can reach the
-loopback-bound backend through `10.0.2.2` or `adb reverse`. The build-time API URL is only a
-first-launch default: the persisted server profile can replace endpoint and credentials immediately.
-Non-local endpoints prefer HTTPS; dynamic HTTP is allowed only after an explicit in-app warning. The
-checked-in device runner preflights the backend, builds, installs and launches the app but leaves
-visual rendering as an explicit human gate.
-
-## Deliberate Phase 8 limits
-
-- The preview uses a fixed accepted Milan-to-Bologna fixture pair; destination entry is later UI.
-- No CNG candidate request, station card, Add Stop flow or selected-stop route is implemented before
-  Phase 9.
-- No navigation session, location tracking, voice guidance, rerouting or background service exists.
-- Map-style availability is an independent external dependency and is not labeled as backend
-  routing failure.
-- Physical-device rendering and lifecycle behavior require operator evidence before Phase 8 is
-  accepted.
-
-## Phase 9 Android manual CNG-stop workflow
-
-Phase 9 extends the same data/domain/UI boundary without moving route policy to the device:
-
-```text
-Base preview ─> Add stop ─> Metano + detour/range ─> ranked-candidates
-                                                        │
-                                                        ├─> route + station markers
-                                                        └─> ranked cards
-                                                               │ MIMIT ID
-                                                               v
-                                                routes/with-cng-stop
-                                                               │
-                                                               └─> two legs + CNG waypoint
-```
-
-One lifecycle-preserved planner ViewModel owns the explicit preview, configuration, candidate and
-selected-route stages. The device supplies an offset-aware departure instant but does not evaluate
-OSM hours, calculate detours or rescore stations. Complete strict DTOs are translated into domain
-models before Compose sees them. Candidate cards expose road distance, detour, ETA, opening state,
-hours, phone, current CNG price/freshness and score components; missing price and unknown opening
-state remain explicit.
-
-MapLibre receives only decoded domain geometry and coordinates. Candidate markers remain a visual
-index to the ranked list. A selected station is routed by official MIMIT ID and produces one
-combined map line while retaining the two maneuver legs and their station boundary.
-
-## Deliberate Phase 9 limits
-
-- Milan and Bologna remain the deterministic endpoint pair; endpoint search/editing is not bundled
-  into the CNG workflow.
-- Manual Add Stop does not estimate remaining tank state or proactively suggest a reachable stop.
-- No location permission, navigation session, voice instruction, background tracking or rerouting
-  service is introduced.
-
-## Phase 10 predictive CNG reachability
-
-Phase 10 composes accepted route, candidate, detour and ranking boundaries without moving
-safety-relevant policy into Compose:
-
-```text
-request origin + caller range/reserve
-                 │
-                 v
-        one remaining base route
-                 │
-       ┌─────────┴──────────┐
-       │ destination within │ yes ─> not_needed; skip DB/matrices/enrichment
-       │ usable road range? │
-       └─────────┬──────────┘
-                 │ no
-                 v
-   PostGIS corridor ─> bounded Valhalla matrices ─> detour eligibility
-                                                        │
-                                                        v
-                       first road leg <= remaining - reserve
-                                                        │
-                                                        v
-                       candidate-to-candidate Valhalla matrices
-                                                        │
-                                                        v
-                       complete forward itinerary search
-                          (later legs <= full - reserve)
-                                                        │
-                                                        v
-                      per-stop ETA/opening/price enrichment
-```
-
-`request_origin` is the current or previous waypoint for the remaining route. The caller supplies
-estimated remaining CNG range because no telemetry integration exists.
-
-The predictive API returns distinct `not_needed`, `suggested`, `gasoline_fallback`, `no_reachable_station`,
-`no_eligible_station` and `no_complete_itinerary` states. `suggested` means a complete ordered chain
-has been found, not merely that its first station is reachable. The first leg uses the driver-supplied
-remaining range; every later leg assumes a full refill and must preserve the same reserve. Search
-progress is measured by remaining road-network distance to the destination, not route-projection or
-Euclidean distance.
-
-`POST /api/v1/routes/with-cng-itinerary` is the execution boundary. It resolves the ordered MIMIT
-IDs in one query, asks Valhalla for one multi-waypoint route and revalidates the actual distance and
-reserve margin of every returned leg. Android maps the strict predictive plan and validated route
-into separate domain models, draws every stop marker, and divides maneuvers by refuelling leg. The
-shared contract bounds a plan to 32 stops and derives route totals from the validated leg sums.
-
-Vehicle profiles are local Android presentation state, persisted as a versioned strict document.
-They contain a label plus effective full range and reserve for CNG and gasoline. Selecting a profile
-pre-fills those policy values; it never invents current tank levels. The driver may separately enter
-estimated remaining gasoline range. Extended planning can explicitly clear the selection and use
-custom values; remaining CNG range and maximum detour remain required regardless of that selection.
-Only after complete CNG planning fails may the backend return a
-direct-route `gasoline_fallback`, with explicit required range and reserve margin. Navigation retains
-those metrics across route preview and ordinary rerouting so the fallback stays visible.
-
-## Deliberate Phase 10 limits
-
-- Remaining range is driver supplied; no CAN/OBD integration, tank sensor or fuel-level inference is
-  claimed.
-- Every planned stop assumes an immediate full refill to the configured effective range; refill
-  dwell time, partial fills and station queues are not yet modeled.
-- The maximum-detour policy remains a per-station eligibility bound. It is not a promise that the
-  sum of all refuelling deviations is below one global detour value.
-- The deterministic request origin replaces live navigation progress for this gate.
-- Active guidance, voice, rerouting and location permissions are not bundled into predictive
-  reachability. Address search and current-location selection remain future route-input work.
-
-## Phase 11 Android route endpoint editing
-
-Phase 11 keeps routing policy on the backend and changes only the Android route-input boundary:
-
-```text
-editable coordinate form
-          │
-          v
-  RoutePlannerViewModel active origin/destination
-          │
-          ├─> POST /api/v1/routes
-          ├─> POST /api/v1/cng/ranked-candidates
-          ├─> POST /api/v1/cng/predictive-candidates
-          ├─> POST /api/v1/routes/with-cng-stop
-          └─> POST /api/v1/routes/with-cng-itinerary
-```
-
-The Milan-to-Bologna pair is now only the default state. When the driver applies a new
-origin/destination coordinate pair, the ViewModel reloads the base route, records the active
-coordinates and clears stale ranked candidates, predictive suggestions and selected routes. All
-downstream CNG requests use the active route's origin/destination, not constructor defaults.
-
-The increment intentionally accepts raw coordinates rather than adding geocoding. That keeps Phase
-11 small and testable: endpoint editing is independent from address search, current-location
-permissions, saved places and navigation-session state.
-
-## Android navigation boundary
-
-The backend returns Valhalla geometry/maneuvers and Compass fuel-stop timing as a provider-neutral
-`NavigationRoute`. After the user starts navigation, an application-scoped session and foreground
-location service own live progress:
-
-```text
-Android LocationManager -> LocationFilter -> route-window matcher -> NavigationEngine StateFlow
-                                                              |                  |
-                                                              |                  +-> Compose / MapLibre
-                                                              +-> ManeuverController -> Android TTS
-
-confirmed off-route / 5-minute refresh -> RouteUpdateController -> Compass API -> Valhalla
-                                                                    |
-                                                                    +-> hot NavigationRoute replace
-```
-
-Raw GPS is exposed in state for diagnostics but is never rendered as the active vehicle position.
-Filtering and projection are pure Kotlin and have deterministic replay fixtures. The matcher uses a
-bounded window around prior progress, heading compatibility and backwards penalties. Three
-consecutive poor fixes are required to confirm off-route; the decision combines a 20-metre
-accuracy-aware route-distance threshold, a separate moving 65-degree heading conflict outside the
-GPS uncertainty band, and implausible backwards progress. Ordinary fixes never call the backend.
-The map-matched position remains the presentation anchor, but deviation evidence is measured before
-that projection is treated as route truth.
-
-On confirmation, `RouteUpdateController` deduplicates the episode and
-`CompassNavigationRouteRecalculator` uses the raw GPS coordinate as the new origin. A successful
-replacement publishes a transient duration comparison in `NavigationState`; Compose alone owns its
-ten-second visibility timer and measured bottom obstruction. The API remains authoritative for the alternate
-route, so ADB loopback is unsuitable after a device is physically disconnected.
-
-The service and UI share the session through `AppContainer`, allowing Activity recreation,
-backgrounding and screen-off operation without losing the downloaded route. Stage 3 owns
-TextToSpeech in that service, deduplicates early/prepare/immediate announcements and applies a
-smoothed, speed-aware MapLibre camera with explicit follow and overview modes.
-
-The maneuver boundary also preserves Valhalla's structured sign groups and roundabout exit count.
-Those optional values pass unchanged in meaning through FastAPI, Android DTO/domain models and the
-private route cache. Compose may format them for a bounded sign panel or numeric icon badge, but it
-does not parse localized instruction prose or make a routing decision. Lane guidance and speed
-limits require a future source-backed contract because they are not fields of the standard
-turn-by-turn maneuver response used here.
-
-Valhalla maneuver instructions describe the transition at `begin_shape_index`. For a matched route
-segment, `NavigationEngine` therefore selects the first maneuver whose begin index is still ahead
-and measures the remaining distance to that same index. Once the matcher enters the maneuver's
-outgoing segment, guidance advances immediately. The resulting current maneuver and distance are a
-single timeline consumed unchanged by Compose, speech staging, navigation phase and camera policy.
-
-Navigation UI Phase 2 introduced that camera boundary. `NavigationCameraConfig` owns the driving
-pitch, continuous speed- and maneuver-density-dependent zoom, screen anchor and transition timing
-policy;
-`NavigationCameraController` converts the current `NavigationState` into a MapLibre-independent
-camera instruction whose geographic target is the matched vehicle pose and whose bearing follows a
-short forward route tangent instead of a potentially lagging location heading. `NavigationMap`
-places the target at the configured screen-space anchor. A deliberate single-finger pan changes the
-UI-owned camera mode to `FREE`, suppressing later automatic camera updates until `Ricentra` or the
-inactivity timeout; pinch zoom retains follow mode and the manually selected scale;
-north-up overview continues to fit only remaining geometry. This keeps camera presentation out of route matching and avoids a
-second copy of navigation progress.
-
-The free-camera state has a UI-owned ten-second inactivity timeout, reset by each MapLibre gesture;
-the navigation engine remains unaware of this presentation timer. Follow instructions also carry
-centralized asymmetric top padding. The matched vehicle is rendered by a vector locked vertically
-to the viewport during heading-up follow, then rotated against the map in free and overview modes.
-Consecutive-maneuver spacing contributes a bounded continuous zoom adjustment: dense junction
-sequences move closer and sparse stretches widen the view. The primary trip summary is opt-in
-through a compact map control rather than permanently covering the lower map.
-
-Navigation UI Phase 5 replaces the Android Liberty development baseline with keyless, bundled
-Compass day/night MapLibre v8 style documents over OpenFreeMap/OpenMapTiles. Their shared low-noise
-layer structure uses flat buildings, explicit road hierarchy and Italian-first labels. Compose
-selects the style from system dark mode, while `COMPASS_MAP_DAY_STYLE_URL` and
-`COMPASS_MAP_NIGHT_STYLE_URL` remain independently injectable for self-hosted deployments. The
-legacy `COMPASS_MAP_STYLE_URL` maps to both modes when the specific properties are absent.
-After a style loads, Compass rewrites only name-bearing symbol layers to prefer Italian names with
-neutral/local fallbacks, leaving route shields untouched. This is deliberately a rendering policy,
-not a mutation of OpenStreetMap or backend data.
-
-The active-navigation renderer also intersects every basemap `poi` symbol layer with a conservative
-driving whitelist while preserving that layer's original rank and geometry filter. Compass-owned CNG waypoint sources are not part of this filtering. The combined Phase 2 camera, interaction, cartographic-context and lifecycle gate was accepted on
-an Android device on 2026-09-04.
-
-Route previews and active guidance resolve a theme-specific `CompassMapAppearance`, which couples
-only the style URI and map-owned overlay palette. A theme change can therefore replace MapLibre
-style/layers while the navigation engine, route progress, camera policy and foreground service
-remain unchanged. Diagnostic events classify style sources without logging URLs or credentials.
-
-Navigation UI Phase 6 adds a presentation-only boundary between Valhalla maneuver identifiers and
-Compose. `ManeuverVisual` maps every published type 0–36 to an explicit family, direction and
-Italian semantic label; `ManeuverIcon` renders those values as theme-colored vector route shapes.
-Both current and following instructions derive their own visual from the authoritative maneuver
-sequence. Unknown future identifiers degrade to a bounded instruction hint or an explicit unknown
-glyph. Routing, progression and speech never depend on the icon model. A debug-only catalog exposes
-all mappings for visual acceptance without adding synthetic routes or provider types to the normal
-driving UI.
-
-Navigation UI Phase 3 makes the existing location boundary explicit:
-
-```text
-Android LocationManager
-        -> NavigationLocation (raw fix)
-        -> LocationFilter (validation, deadband, smoothing)
-        -> RouteMatcher (projection and progress)
-        -> NavigationPosition (single authoritative matched pose)
-        -> NavigationPuckMotion (pure transition plan)
-        -> MapPuckAnimator (MapLibre frame updates)
-```
-
-Raw GPS remains available only for diagnostics and off-route/reroute origin selection. The map,
-camera and route portions consume the matched `NavigationPosition`; compatibility accessors derive
-coordinate, segment, speed and bearing from that object rather than duplicating them in state.
-Route-segment bearing is stabilized with circular shortest-path interpolation and frozen below the
-low-speed threshold, so noisy raw course cannot rotate the vehicle at rest. Normal puck movement
-interpolates over a bounded fraction of the fix interval; stationary deadband changes are held and
-large discontinuities snap rather than animating across the map. Android frame scheduling remains
-in the MapLibre presentation adapter, while all thresholds and transition math are platform-free
-and unit tested.
-
-Phase 3 device evidence revealed that using a farther point on curved remaining geometry as the
-camera target could move the vehicle sideways even with the correct local bearing. Phase 8 removes
-the remaining geographic projection entirely: the target is the puck's exact interpolated pose,
-with the forward view created by asymmetric screen padding. This preserves the heading-up invariant
-at every zoom and prevents separately eased camera motion from advancing ahead of the puck.
-
-Automotive routing and matrices explicitly request `constrained` and `freeflow`
-speeds from Valhalla. A departure timestamp anchors station opening-hours evaluation
-and arrival-time calculations; it does not change the nominal route duration. No
-scheduled provider polling runs during navigation. Position updates continue locally,
-with backend rerouting for deviations, connectivity recovery and explicit user actions.
-
-The current route remains active while the request is in flight and after a failure; a successful
-response atomically replaces the route inside the existing session. The current increment preserves
-remaining planned stations and fuel-range inputs.
-
-Stage 4 makes next-stop replacement explicit. The foreground service snapshots the current
-navigation state, derives remaining range from the accepted predictive plan and local progress, and
-asks Compass for a new predictive itinerary with the unavailable official MIMIT ID excluded. The
-exclusion happens in PostGIS before the candidate limit and Valhalla matrices. Android accepts only
-an acknowledged exclusion plus a complete `suggested` itinerary or a proven `not_needed` direct
-route, then atomically replaces the route and restarts debug replay on the new geometry. Missing
-range state, no complete itinerary and transport failures all retain the downloaded route.
-
-## Phase 12 destination and journey-time flow
-
-```text
-                                      +-> Nominatim primary records -----+
-Android text query -> /places/search -+                                  +-> query/civic ranking
-                                      +-> Google Places (ephemeral) -----+          |
-Android coordinate query -----------------> local coordinate parser                 |
-                                                                                   v
-                                                          Nominatim-only results -> selected A/B
-                                                                                   |
-                                                                                   v
-                                                               /routes -> Valhalla maneuvers
-```
-
-Android never contacts Nominatim directly. Coordinate queries are resolved inside Compass; textual
-queries pass through the provider abstraction and return a strict normalized contract. Current
-location is requested by Android only after user action and is then used as an ordinary route
-origin.
-
-The optional Google adapter is a corroborator, not a second mobile-visible source. It compares
-normalized names and proximity for POIs. For an address it additionally requires the query civic,
-structured civic equality, compatible street/locality and proximity within the configured radius.
-The query grammar requires the civic after a comma (`Via Cappafredda, 12, Roverchiara`) to avoid
-confusing road identifiers with house numbers. Google records are discarded inside the provider;
-only Nominatim records cross the API boundary and Google-influenced ordering is never cached.
-
-## Android 0.19.4 Google destination boundary
-
-ADR 0021 supersedes the preceding corroboration path for the active destination selector:
-
-```text
-mapless Compose search -> /destinations/suggest -> Google Autocomplete (New)
-        selection       -> /destinations/resolve -> Google Place Details (New)
-                                                 |
-                                                 +-> text selection (mapless only)
-                                                 +-> WGS84 + Place ID + neutral label
-                                                             |
-                                                             +-> Valhalla / MapLibre
-```
-
-The testing registry contains only `google_places_new`. Exact Place IDs are deduplicated without
-cross-ID merging; TomTom/Nominatim destination adapters remain dormant. Autocomplete serves the
-600 ms typing path, while explicit origin/destination submit uses Text Search and the ordinary-stop
-intent uses its separate Search Along Route service. Suggestion/resolution state is transient and the map-safe target is a distinct type that
-cannot carry Google name or address fields.
-
-For ordinary stops, Android sends the selected Valhalla legs plus direct/current durations and the
-existing cumulative time limit. The backend converts E6 to E5, classifies the query, obtains Google
-candidates and asks Valhalla for complete ordered waypoint routes. Generic candidates are returned
-only when their unrounded duration is within `baseline + limit`, ordered by marginal added driving
-time. Specific and explicitly expanded ambiguous queries retain over-budget/unverified states for
-an explicit preview decision. Candidate evaluation is bounded and route-segment recovery never
-acts as an eligibility test.
-
-Favorite places form a separate local boundary. `FavoritePlaceRepository` persists only a
-user-authored private label and WGS84 coordinate in app-private Android storage; neither normalized
-Google selection objects nor provider text can cross into that model. Choosing an endpoint favorite
-therefore needs no provider call. Choosing an ordinary-stop favorite enters the existing waypoint
-preview pipeline, where Valhalla validates the complete itinerary before an explicit confirmation
-commits it. This store is not a history, Places cache or server-side POI database.
-
-The established local matcher, maneuver controller, confirmed off-route state machine and
-foreground service continue to own live progress. A successful reroute first attempts to retain the
-remaining ordered CNG stops and their range policy. If Compass reports a missing, unavailable or
-range-invalid stop, Android excludes that invalid remainder and requests a fresh complete predictive
-plan before atomically replacing the active route. A failure leaves the downloaded route active.
-
-Journey chronology is represented independently from physical route cost:
-
-```text
-total trip duration = Valhalla driving duration + sum(CNG stop dwell)
-stop N ETA = departure + driving through leg N + dwell at stops before N
-```
-
-The default dwell is 1,200 seconds and is injected from server configuration into predictive and
-selected-route responses. It changes later opening-hours evaluations and ETAs, but never the road
-detour comparison.
-
-## Runtime
-
-The default Compose graph contains:
-
-- `db`: pinned PostGIS 16 / PostGIS 3.5 family with a named data volume and readiness healthcheck;
-- `migrate`: one-shot Alembic upgrade after the database is healthy;
-- `api`: non-root FastAPI container with liveness/readiness healthcheck, loopback host bind by
-  default, configurable bind address and optional authenticated `/api/v1` boundary;
-- `etl`: profile-gated one-shot job, not a persistent service.
-
-Routing adds two opt-in workloads:
-
-- `valhalla-tiles`: `routing-build` profile, one-shot Italy/regional graph construction;
-- `valhalla`: `routing` profile, persistent internal router with a status healthcheck.
-
-Both routing workloads use the same `valhalla_data` named volume. The API does not require the
-routing profile merely to start, but readiness is `not_ready` until both PostgreSQL and Valhalla are
-available. `VALHALLA_VOLUME_NAME` makes the physical volume versionable so graph updates can be
-built and validated before activation, while the previous graph remains available for rollback. The
-builder checks the scripted image's PBF registration (`use_tiles_ignore_pbf=False`); only the serving
-process trusts and reuses the completed graph (`use_tiles_ignore_pbf=True`). Exact input identity is
-an explicit content SHA-256, because the image's internal registration hashes file paths.
-
-The migration, API and ETL workloads use the same configurable `COMPASS_IMAGE`. Only `api` declares
-that repository build, so one build produces the exact image used for those three workloads.
-
-Secrets are environment supplied. No host-specific paths or privileged containers are required.
-
-## Phase 13 device cache and degraded operation
-
-The application-scoped `NavigationSession` sits in front of a versioned private-storage route
-store. Preview/start and successful route replacements persist the complete `NavigationRoute`;
-explicit stop/abandon clears it. On process reconstruction the store creates a cached preview rather
-than silently restarting location or a foreground service.
-
-```text
-Compass live route -> NavigationSession -> versioned route store
-                           |                       |
-                           v                       +-> process-restart cached preview
-                    local matcher/GPS
-                           |
-Compass unavailable ------+-> keep route + REROUTING_UNAVAILABLE
-Compass restored -> successful route replace -> LIVE + ONLINE
-```
-
-The HTTP repository independently keeps ten normalized exact-query search result sets. Only
-network/server failures may read that cache. MapLibre retains already requested style/tile/font
-resources in its bounded ambient database. Neither cache performs routing; any new physical route
-or reroute continues to cross the Compass API and server-side Valhalla boundary. See ADR 0018.
-
-## Navigation UI Phase 8 road-context boundary
-
-After a successful route calculation the
-routing adapter performs an `edge_walk` `/trace_attributes` request for only
-`edge.begin_shape_index`, `edge.end_shape_index`, and `edge.speed_limit`. Consecutive equal limits
-are compacted into a provider-independent shape profile. Enrichment failure is logged and degrades
-to an explicitly absent source without invalidating the route.
-
-Android retains the profile across its DTO, domain, multi-leg joining and private cache boundaries.
-The existing `NavigationPosition.routeSegmentIndex` is the sole selector for the current limit;
-Compose receives only the resolved nullable value. Lane guidance is deliberately excluded because
-the accepted route contract does not provide a stable lane-level assignment.
-
-The same phase tightens the driving presentation contract. The MapLibre camera consumes the exact
-pose emitted to the puck source on each animation frame and places it at 75% of viewport height via
-screen padding. Pinch uses that point as its focal point and retains the chosen zoom; only a
-single-finger pan enters `FREE`. The compact trip panel owns its `Nascondi` and `Dettagli` controls,
-reports its actual pixel height to the camera adapter and uses centered vector chevrons. Camera
-padding then anchors the puck at 75% of the unobscured map above the panel. The modal details
-surface measures to short content before falling back to scrolling.
-
-## Navigation UI Phase 9 speed-compliance boundary
-
-Speed compliance remains a device-side presentation state. It consumes only the filtered,
-map-matched `NavigationPosition` speed and the graph-backed limit already resolved for that route
-segment. A five km/h entry buffer and two km/h exit buffer provide hysteresis; they are explicitly
-UI stability values rather than legal tolerances. Missing GPS or limit data yields `UNAVAILABLE`
-instead of retaining an old warning.
-
-Compose owns the transient previous state and renders a second alert ring plus red limit number. Sound and
-haptics are excluded until a later preference contract can make them explicitly opt-in.
-
-## Android route-free startup boundary
-
-The production `RoutePlannerViewModel.Factory` now starts without a route or routing operation. A
-foreground-Activity location listener feeds a dedicated route-free MapLibre surface directly from
-Android GPS; it never invokes the route matcher and therefore cannot manufacture an on-route
-position when no itinerary exists. Starting the navigation foreground service first removes that
-listener, preserving a single location owner.
-
-```text
-fresh launch -> FOLLOW -> raw GPS -> route-free MapLibre puck
-                    |
-                    +-> Crea viaggio -> endpoint selector -> POST /api/v1/routes -> preview
-```
-
-The route-free camera shares the accepted 75%-height puck anchor and temporary free-pan recentering
-policy. It intentionally has no overview because there is no route geometry. Endpoint choices are
-presentation state: current position and normalized search write coordinates into the same strict
-routing request used by manual coordinate entry; the future-favourites button remains an inert,
-visible placeholder.
+The corridor defaults to 20% of effective CNG range, with configurable caps. Straight-line
+metrics only prune candidates. Eligibility and displayed station distance use road costs;
+detour is candidate travel time minus base travel time. Predictive planning additionally
+validates remaining fuel/reserve and the complete refuelling chain. A full-refill
+assumption and any gasoline fallback remain explicit domain policy.
+
+Valhalla supplies nominal automotive durations using constrained/freeflow graph speeds;
+pedestrian and bicycle requests use dedicated costing. Highway exclusions are enforced
+by the routing adapter/runtime configuration. Departure timestamps anchor arrival and
+opening-hours calculations. Planned dwell is separate from driving duration and advances
+subsequent arrivals. Unknown opening hours are never treated as known open.
+
+## Navigation and recovery
+
+Android converts the server route into guidance state, filters GPS fixes, matches progress
+to the route and updates remaining duration locally. Ordinary and fuel stops retain
+explicit lifecycle state. Manual recalculation, deviations and connectivity recovery may
+request a new route while preserving relevant remaining stops and destination.
+
+The foreground session supports voice and Picture in Picture. Cached route geometry and
+maneuvers can support an existing journey during an outage; new routing requires the
+backend. MapLibre ambient caching only covers previously visited resources. Saved-route
+format validation is independent of optional retired metadata.
+
+Destination search is server-side and provider-configured. Search credentials never
+belong in the mobile app. Provider attribution and storage constraints remain distinct
+from routing geometry. Android's updater uses a separate download client without API
+authentication; see [client updates](client-updates.md).
+
+## Runtime and verification
+
+Compose separates the API, PostgreSQL/PostGIS, Valhalla and one-shot migration/import/
+graph-building jobs. Graph and database storage persist across service recreation.
+The API is the public boundary; the operator owns HTTPS ingress and secrets. Liveness,
+readiness and source freshness serve different purposes.
+
+Fixture/unit tests validate local contracts. Database integration, external-provider
+behavior and physical navigation require their own environments and evidence. Current
+operational instructions are in [deployment](deployment.md) and [Android](android.md);
+[history](history.md) summarizes older milestones without treating them as current proof.

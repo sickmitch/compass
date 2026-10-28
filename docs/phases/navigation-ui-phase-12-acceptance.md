@@ -69,7 +69,7 @@ has no coloured price panel. Price never changes the station order.
 From the repository root:
 
 ```bash
-bash -n scripts/install-android-0.22.1.sh scripts/run-navigation-ui-phase12-live.sh \
+bash -n scripts/run-navigation-ui-phase12-live.sh \
   scripts/run-navigation-ui-phase12-ranking-live.sh
 .venv/bin/pytest -q tests/test_navigation_ui_phase12_script.py
 git diff --check
