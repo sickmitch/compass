@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
+import org.compass.cng.ui.theme.navigationAccent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
@@ -1261,7 +1262,7 @@ private fun ArrivalEtaBadge(
     progress: Float,
     modifier: Modifier = Modifier,
 ) {
-    val ringColor = Color(0xFF98EEB0)
+    val ringColor = MaterialTheme.navigationAccent
     Box(
         modifier = modifier
             .size(72.dp)
@@ -1301,7 +1302,7 @@ private fun ArrivalEtaBadge(
             modifier = Modifier.size(60.dp),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            contentColor = Color(0xFF98EEB0),
+            contentColor = MaterialTheme.navigationAccent,
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -1347,7 +1348,7 @@ private fun TripBottomBar(
                 DrivingSummaryValue("Durata", ui.remainingDuration)
                 DrivingSummaryValue(
                     "Arrivo", ui.arrivalTime,
-                    color = Color(0xFF98EEB0),
+                    color = MaterialTheme.navigationAccent,
                 )
             }
             ui.statusMessages.filter { it.level == NavigationStatusLevel.WARNING }.forEach { message ->

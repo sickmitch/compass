@@ -198,7 +198,7 @@ fun NavigationMap(
                 val firstMapLabelLayerId = style.layers.firstOrNull { it is SymbolLayer }?.id
                 style.addSource(GeoJsonSource(REMAINING_SOURCE, lineFeature(remainingPoints)))
                 val remainingLayer = LineLayer(REMAINING_LAYER, REMAINING_SOURCE).withProperties(
-                        lineColor(NAVIGATION_REMAINING_ROUTE_COLOR),
+                        lineColor(appearance.navigationRouteColor()),
                         lineWidth(NAVIGATION_REMAINING_ROUTE_WIDTH),
                         lineCap(LINE_CAP_ROUND),
                         lineJoin(LINE_JOIN_ROUND),

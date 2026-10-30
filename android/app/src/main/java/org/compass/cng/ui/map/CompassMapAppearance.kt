@@ -43,7 +43,7 @@ internal fun resolveCompassMapAppearance(
         theme = theme,
         styleUrl = dayStyleUrl,
         palette = CompassMapPalette(
-            route = 0xFF08783E.toInt(),
+            route = 0xFF006C4C.toInt(),
             travelledRoute = 0xFF69716C.toInt(),
             origin = 0xFF08783E.toInt(),
             destination = 0xFFB73024.toInt(),
@@ -78,4 +78,9 @@ internal fun mapStyleSource(styleUrl: String): String = when {
 internal fun CompassMapAppearance.navigationPuckDrawableRes(): Int = when (theme) {
     CompassMapTheme.DAY -> R.drawable.ic_navigation_vehicle
     CompassMapTheme.NIGHT -> R.drawable.ic_navigation_vehicle_night
+}
+
+internal fun CompassMapAppearance.navigationRouteColor(): Int = when (theme) {
+    CompassMapTheme.DAY -> 0xFF006C4C.toInt()
+    CompassMapTheme.NIGHT -> NAVIGATION_REMAINING_ROUTE_COLOR
 }

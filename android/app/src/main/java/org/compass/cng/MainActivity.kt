@@ -1,5 +1,12 @@
 package org.compass.cng
 
+import android.graphics.Rect
+import android.util.Log
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import org.compass.cng.navigation.shouldOfferNavigationPip
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -33,7 +40,6 @@ import org.compass.cng.navigation.NavigationForegroundService
 import org.compass.cng.navigation.FollowLocationPolicy
 import org.compass.cng.navigation.FollowLocationStabilizer
 import org.compass.cng.navigation.NavigationLocation
-import org.compass.cng.navigation.NavigationPhase
 import org.compass.cng.ui.route.PlannerStage
 import org.compass.cng.ui.route.RoutePlannerScreen
 import org.compass.cng.ui.route.RoutePlannerViewModel
@@ -87,6 +93,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycleScope.launch {
+            combine(routePlannerViewModel.uiState, routePlannerViewModel.navigationState) { ui, nav ->
+                shouldOfferNavigationPip(ui.stage == PlannerStage.NAVIGATION_PREVIEW, nav.phase)
+            }.distinctUntilChanged().collect { updatePipParams() }
+        }
+        window.decorView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updatePipParams()
+        }
         enableEdgeToEdge()
         setContent {
             val plannerState by routePlannerViewModel.uiState.collectAsStateWithLifecycle()
@@ -270,21 +284,55 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isActiveNavigation()) {
-            enterPictureInPictureMode(
-                PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build(),
-            )
+    override fun onResume() {
+        super.onResume()
+        updatePipParams()
+    }
+
+    private fun supportsPip(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    private fun pipParams(): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+        val bounds = Rect()
+        if (window.decorView.getGlobalVisibleRect(bounds) && !isInPictureInPictureMode) {
+            builder.setSourceRectHint(bounds)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(isActiveNavigation())
+            builder.setSeamlessResizeEnabled(false)
+        }
+        return builder.build()
+    }
+
+    private fun updatePipParams() {
+        if (!supportsPip() || isFinishing || isDestroyed) return
+        try {
+            setPictureInPictureParams(pipParams())
+        } catch (error: RuntimeException) {
+            Log.w("CompassPiP", "Unable to update PiP parameters", error)
         }
     }
 
-    private fun isActiveNavigation(): Boolean =
-        routePlannerViewModel.uiState.value.stage == PlannerStage.NAVIGATION_PREVIEW &&
-            routePlannerViewModel.navigationState.value.phase != NavigationPhase.ROUTE_PREVIEW &&
-            routePlannerViewModel.navigationState.value.phase != NavigationPhase.IDLE
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 12+ prepares gesture-driven entry before this callback.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+        if (!supportsPip() || !isActiveNavigation() || isInPictureInPictureMode || isFinishing) return
+        try {
+            if (!enterPictureInPictureMode(pipParams())) {
+                Log.w("CompassPiP", "PiP entry declined by system; check app PiP permission")
+            }
+        } catch (error: RuntimeException) {
+            Log.w("CompassPiP", "PiP entry unavailable", error)
+        }
+    }
+
+    private fun isActiveNavigation(): Boolean = shouldOfferNavigationPip(
+        routePlannerViewModel.uiState.value.stage == PlannerStage.NAVIGATION_PREVIEW,
+        routePlannerViewModel.navigationState.value.phase,
+    )
 
     override fun onStop() {
         stopFollowLocationUpdates()

@@ -40,6 +40,14 @@ internal val CompassLightColors = lightColorScheme(
     onBackground = Color(0xFF171D1A),
     surface = Color(0xFFF5FBF7),
     onSurface = Color(0xFF171D1A),
+    surfaceDim = Color(0xFFD9E7DE),
+    surfaceBright = Color(0xFFF5FBF7),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF0F8F2),
+    surfaceContainer = Color(0xFFEAF4ED),
+    surfaceContainerHigh = Color(0xFFE4F0E8),
+    surfaceContainerHighest = Color(0xFFDEECE2),
+    surfaceTint = Color(0xFF006C4C),
     surfaceVariant = Color(0xFFDBE5DE),
     onSurfaceVariant = Color(0xFF404943),
     outline = Color(0xFF707973),
@@ -240,3 +248,6 @@ fun CompassTheme(
         )
     }
 }
+
+val MaterialTheme.navigationAccent: Color
+    @Composable get() = if (LocalCompassDarkTheme.current) Color(0xFF98EEB0) else colorScheme.primary
