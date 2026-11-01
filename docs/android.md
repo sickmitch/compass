@@ -10,6 +10,11 @@ ETA uses nominal route duration plus remaining dwell. The ETA badge and whole-jo
 progress ring are green. Cached geometry permits guidance on an already loaded route;
 it does not provide an offline routing engine or guarantee downloaded map coverage.
 
+Automatic place search waits 800 ms after the last edit; explicit search remains immediate.
+Camera look-ahead reads only the required route points instead of copying the complete
+geometry on each frame. See [performance validation](phases/android-0.28.50-performance.md)
+for the backend connection-pooling changes and operator checks.
+
 ## Build and local validation
 
 Use JDK 17, Android SDK Platform 37, compatible AGP-selected Build-Tools and the pinned

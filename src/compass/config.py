@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     google_places_enabled: bool = False
     tomtom_search_enabled: bool = False
     destination_search_fallback_enabled: bool = False
-    destination_search_debounce_ms: int = Field(default=600, ge=100, le=2_000)
+    destination_search_debounce_ms: int = Field(default=800, ge=100, le=2_000)
     destination_search_min_chars: int = Field(default=3, ge=1, le=20)
     destination_search_language: str = Field(default="it", pattern=r"^[a-z]{2}$")
     destination_search_region: str = Field(default="it", pattern=r"^[a-z]{2}$")

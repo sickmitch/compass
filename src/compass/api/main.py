@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
+import httpx
 from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -40,8 +41,13 @@ validation_logger = logging.getLogger("compass.api.validation")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    await close_destination_search_runtime()
+    async with httpx.AsyncClient() as client:
+        _app.state.routing_http_client = client
+        try:
+            yield
+        finally:
+            await close_destination_search_runtime()
+            del _app.state.routing_http_client
 
 
 app = FastAPI(

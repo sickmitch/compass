@@ -4,7 +4,7 @@ Status: awaiting operator live validation.
 
 ## Correction
 
-The 600 ms settled-query path and the explicit `Cerca`/IME path now both use Google Text Search with
+The 800 ms settled-query path and the explicit `Cerca`/IME path now both use Google Text Search with
 the same selected-origin context. For a single category query such as `farmacia`, the existing
 backend adapter requests Google's distance ranking. Autocomplete remains supported by the backend
 contract but is no longer used for the Android settled-query flow because its candidate set is
@@ -15,7 +15,7 @@ This does not change `ADD_STOP_ALONG_ROUTE`, which continues to use its dedicate
 ## Device checks
 
 1. Select San Giovanni Lupatoto as origin, open destination search, type `farmacia` and wait at least
-   600 ms without pressing `Cerca`. The first results must be local and show distances from that
+   800 ms without pressing `Cerca`. The first results must be local and show distances from that
    selected origin.
 2. Capture the visible first results, then press `Cerca`. The refreshed list must use the same local
    area and ordering policy; it must not jump from Verona-wide results to San Giovanni results.

@@ -153,7 +153,7 @@ class NavigationCameraController(
             ?: 0.0
         val maneuverSpacingMeters = state.nextManeuver?.distanceMeters
         val maneuverDensityZoomAdjustment = maneuverSpacingZoomAdjustment(maneuverSpacingMeters)
-        val remaining = state.routePortions().remaining
+        val remaining = state.remainingRouteGeometry()
         val position = state.snappedLocation ?: remaining.firstOrNull() ?: route.origin
         val headingTarget = coordinateAlong(
             remaining.ifEmpty { listOf(position) },
@@ -205,9 +205,11 @@ class NavigationCameraController(
     private fun coordinateAlong(points: List<Coordinate>, requestedDistanceMeters: Double): Coordinate {
         if (points.size < 2 || requestedDistanceMeters <= 0.0) return points.first()
         var distanceLeft = requestedDistanceMeters
-        points.zipWithNext().forEach { (start, end) ->
+        for (index in 0 until points.lastIndex) {
+            val start = points[index]
+            val end = points[index + 1]
             val segmentDistance = distanceMeters(start, end)
-            if (segmentDistance <= 0.0) return@forEach
+            if (segmentDistance <= 0.0) continue
             if (distanceLeft <= segmentDistance) {
                 val fraction = (distanceLeft / segmentDistance).coerceIn(0.0, 1.0)
                 return Coordinate(

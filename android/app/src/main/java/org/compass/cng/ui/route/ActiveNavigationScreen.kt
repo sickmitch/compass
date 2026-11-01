@@ -239,7 +239,8 @@ internal fun ActiveNavigationScreen(
     LaunchedEffect(Unit) {
         Log.i(NAVIGATION_UI_LOG_TAG, "surface=driving visible=true")
     }
-    val ui = state.toDrivingUiModel()
+    val displayZone = java.time.ZoneId.systemDefault()
+    val ui = remember(state, displayZone) { state.toDrivingUiModel(displayZone) }
     LaunchedEffect(ui.isRouteRecalculationInProgress, state.routeUpdateReason) {
         Log.i(
             NAVIGATION_UI_LOG_TAG,

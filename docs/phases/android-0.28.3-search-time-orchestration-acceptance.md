@@ -10,7 +10,7 @@ This increment keeps the existing ordinary-stop time input and makes it authorit
 candidate discovery. The default is still one third of the direct Valhalla driving duration; a
 custom minute value remains a cumulative allowance from that same baseline.
 
-- All destination fields use one trailing-edge debounce of 600 ms.
+- All destination fields use one trailing-edge debounce of 800 ms.
 - Typing origin/destination uses Google Autocomplete New. Cerca/IME search cancels that timer and
   uses Text Search New once. Results with a Google `distanceMeters`/location are ordered from the
   stable recent device position; unknown distances remain last.
@@ -26,7 +26,7 @@ custom minute value remains a cumulative allowance from that same baseline.
 ## Device checks
 
 1. Set a valid recent GPS position near Verona. In both Partenza and Destinazione type `farmacia`.
-   Confirm there is no request before 600 ms of inactivity; local results precede distant results.
+   Confirm there is no request before 800 ms of inactivity; local results precede distant results.
    Press Cerca after editing and confirm the list updates once, without a delayed duplicate.
 2. Enter an explicit distant query such as `Via Roma 10 Bologna`. Confirm it is still discoverable;
    local bias must not turn into a local restriction.

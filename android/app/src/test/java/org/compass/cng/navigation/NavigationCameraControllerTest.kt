@@ -291,6 +291,43 @@ class NavigationCameraControllerTest {
         travelType = "car",
     )
 
+
+    @Test
+    fun cameraLookAheadDoesNotReadTheEntireLongRoute() {
+        var reads = 0
+        val geometry = object : AbstractList<Coordinate>() {
+            override val size = 100_000
+            override fun get(index: Int): Coordinate {
+                reads += 1
+                return Coordinate(45.0, 9.0 + index * 0.001)
+            }
+        }
+        val state = NavigationState(
+            route = route.copy(geometry = geometry),
+            navigationPosition = position(Coordinate(45.0, 9.05), segment = 50),
+        )
+        reads = 0
+
+        val instruction = NavigationCameraController().instruction(state)
+
+        assertEquals(9.05, instruction.target.longitude, 0.000001)
+        assertEquals(90.0, instruction.bearingDegrees, 0.5)
+        assertTrue("Camera read $reads points for a short look-ahead", reads < 10)
+    }
+
+    @Test
+    fun remainingViewPreservesSnappedGeometryAtEverySegment() {
+        for (segment in 0 until route.geometry.lastIndex) {
+            val state = NavigationState(
+                route = route,
+                navigationPosition = position(route.geometry[segment], segment = segment),
+            )
+            assertEquals(state.routePortions().remaining, state.remainingRouteGeometry())
+        }
+        val state = NavigationState(route = route)
+        assertEquals(state.routePortions().remaining, state.remainingRouteGeometry())
+    }
+
     private fun position(
         coordinate: Coordinate,
         segment: Int = 0,

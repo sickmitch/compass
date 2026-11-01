@@ -31,7 +31,7 @@ Crea viaggio
 - Each ordinary stop can use current GPS position, local favorites, Google search or map
   selection. A Google result is resolved once, then shown as an exact highlighted point on a route
   preview; `Scegli` is the commit action.
-- Android 0.28.3 makes the search context explicit end to end. Typing is debounced once for 600 ms;
+- Android 0.28.3 makes the search context explicit end to end. Typing is debounced once for 800 ms;
   explicit Cerca uses Text Search immediately. Ordinary generic stops are prevalidated by full
   Valhalla itinerary duration against the cumulative budget and ordered by marginal added time;
   specific/global matches can be explicitly previewed beyond the limit.

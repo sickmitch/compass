@@ -331,7 +331,7 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
-    fun destinationSearchDebouncesOneLocalizedTextSearchBySixHundredMilliseconds() = runTest {
+    fun destinationSearchDebouncesOneLocalizedTextSearchByEightHundredMilliseconds() = runTest {
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
         val viewModel = RoutePlannerViewModel(
             routingRepository = repository,
@@ -347,13 +347,13 @@ class RoutePlannerViewModelTest {
 
         viewModel.updatePlaceSearchQuery("farma")
         runCurrent()
-        advanceTimeBy(599)
+        advanceTimeBy(799)
         runCurrent()
         assertEquals(0, repository.destinationSuggestCalls)
 
         viewModel.updatePlaceSearchQuery("farmacia")
         runCurrent()
-        advanceTimeBy(599)
+        advanceTimeBy(799)
         runCurrent()
         assertEquals(0, repository.destinationSuggestCalls)
         advanceTimeBy(1)
@@ -385,7 +385,7 @@ class RoutePlannerViewModelTest {
         runCurrent()
         viewModel.searchDestinations()
         runCurrent()
-        advanceTimeBy(600)
+        advanceTimeBy(800)
         runCurrent()
 
         assertEquals(1, repository.destinationSuggestCalls)
@@ -2068,7 +2068,7 @@ class RoutePlannerViewModelTest {
 
         viewModel.updatePlaceSearchQuery("farmacia")
         runCurrent()
-        advanceTimeBy(600)
+        advanceTimeBy(800)
         runCurrent()
 
         val request = requireNotNull(repository.lastDestinationSuggestRequest)

@@ -103,6 +103,24 @@ async def evaluate_cng_detours(
         fallback_splits += splits
         location_failures += failures
 
+        prefix_distance = 0.0
+        prefix_duration = 0.0
+        suffix_distance = 0.0
+        suffix_duration = 0.0
+        if waypoint_route is not None:
+            prefix_distance = sum(
+                leg.distance_meters for leg in waypoint_route.legs[:leg_index]
+            )
+            prefix_duration = sum(
+                leg.duration_seconds for leg in waypoint_route.legs[:leg_index]
+            )
+            suffix_distance = sum(
+                leg.distance_meters for leg in waypoint_route.legs[leg_index + 1 :]
+            )
+            suffix_duration = sum(
+                leg.duration_seconds for leg in waypoint_route.legs[leg_index + 1 :]
+            )
+
         for station, (
             previous_to_station,
             station_to_destination,
@@ -117,23 +135,7 @@ async def evaluate_cng_detours(
             ):
                 unreachable += 1
                 continue
-            prefix_distance = 0.0
-            prefix_duration = 0.0
-            suffix_distance = 0.0
-            suffix_duration = 0.0
             if waypoint_route is not None:
-                prefix_distance = sum(
-                    leg.distance_meters for leg in waypoint_route.legs[:leg_index]
-                )
-                prefix_duration = sum(
-                    leg.duration_seconds for leg in waypoint_route.legs[:leg_index]
-                )
-                suffix_distance = sum(
-                    leg.distance_meters for leg in waypoint_route.legs[leg_index + 1 :]
-                )
-                suffix_duration = sum(
-                    leg.duration_seconds for leg in waypoint_route.legs[leg_index + 1 :]
-                )
                 previous_to_station = MatrixCost(
                     distance_meters=(
                         prefix_distance + previous_to_station.distance_meters
