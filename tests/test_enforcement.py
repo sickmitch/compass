@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from compass.enforcement.osm import parse, query
+from compass.enforcement.osm import parse, parse_report, query
 
 
 def payload(*elements, **extra):
@@ -50,8 +50,9 @@ def test_partial_responses_rejected():
 
 
 def test_invalid_coordinates_rejected():
-    with pytest.raises(ValueError, match="coordinate"):
-        parse(payload(dict(camera(), lat=91)))
+    report = parse_report(payload(dict(camera(), lat=91)))
+    assert report.controls == []
+    assert report.rejected[0]["reason"] == "invalid_coordinate"
 
 
 def test_query_is_bounded_and_cannot_inject_country():
@@ -70,3 +71,44 @@ def test_inventory_never_claims_unmatched_controls_are_alert_eligible():
     )
     assert control.alert_eligible is False
     assert control.association_state == "unmatched"
+
+
+def test_unresolved_relation_is_quarantined_without_blocking_valid_nodes():
+    relation = {"type": "relation", "id": 8826292,
+                "tags": {"type": "enforcement", "enforcement": "average_speed"},
+                "members": [{"type": "way", "ref": 12, "role": "section"}]}
+    report = parse_report(payload(camera(), relation))
+    assert len(report.controls) == 1
+    assert report.rejected[0]["source_key"] == "osm:relation:8826292"
+    assert report.rejected[0]["reason"] == "unresolved_location"
+    assert report.rejected[0]["raw"]["members"] == relation["members"]
+
+
+def test_unresolved_member_is_not_replaced_by_invented_coordinates():
+    relation = {"type": "relation", "id": 1,
+                "tags": {"type": "enforcement", "enforcement": "maxspeed"},
+                "members": [{"type": "node", "ref": 999, "role": "device"}]}
+    report = parse_report(payload(camera(), relation))
+    assert len(report.controls) == 1
+    assert report.rejected[0]["raw"]["resolved_members"][0]["element"] is None
+
+
+@pytest.mark.parametrize("coordinate", [None, "bad", "NaN", "Infinity"])
+def test_malformed_coordinate_does_not_block_other_controls(coordinate):
+    report = parse_report(payload(camera(), dict(camera(), id=2, lat=coordinate)))
+    assert len(report.controls) == 1
+    assert report.rejected[0]["reason"] == "invalid_coordinate"
+
+def test_all_unresolvable_records_do_not_start_a_database_transaction():
+    from datetime import UTC, datetime
+    from unittest.mock import Mock
+
+    from compass.enforcement.importer import ingest
+    from compass.etl.acquisition import DownloadedPayload
+
+    session = Mock()
+    data = DownloadedPayload(payload(dict(camera(), lat=91)), "fixture://invalid",
+                             "application/json", datetime.now(UTC))
+    with pytest.raises(ValueError, match="Empty enforcement"):
+        ingest(session, data, "TEST")
+    session.begin.assert_not_called()

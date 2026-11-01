@@ -1,4 +1,5 @@
 """Requires a dedicated test database; never point TEST_DATABASE_URL at production."""
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +49,22 @@ def test_enforcement_import_is_atomic_idempotent_and_spatial(monkeypatch):
             assert session.execute(text(
                 "SELECT count(*) FROM enforcement_controls WHERE scope='TEST' AND active"
             )).scalar_one() == 3
+            session.rollback()
+            mixed = json.loads(body)
+            # A present but unusable camera must not retire its previous valid record.
+            mixed["elements"][1]["lat"] = 91
+            result = ingest(session, DownloadedPayload(
+                json.dumps(mixed).encode(), data.source_url, data.content_type, data.fetched_at,
+            ), "TEST")
+            assert result["count"] == 2
+            assert result["rejected_count"] == 1
+            assert session.execute(text(
+                "SELECT count(*) FROM enforcement_controls WHERE scope='TEST' AND active"
+            )).scalar_one() == 3
+            rejected = session.execute(text(
+                "SELECT rejected FROM enforcement_imports WHERE id=:id"
+            ), {"id": result["import_id"]}).scalar_one()
+            assert rejected[0]["source_key"] == "osm:node:900000000002"
     finally:
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM enforcement_controls WHERE scope='TEST'"))

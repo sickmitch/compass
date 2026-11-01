@@ -2,6 +2,7 @@
 import json
 import math
 import re
+from dataclasses import dataclass
 
 
 def query(country: str) -> str:
@@ -24,12 +25,27 @@ def number(value: object, maximum: float) -> float | None:
     return result if math.isfinite(result) and 0 <= result <= maximum else None
 
 
+@dataclass(frozen=True)
+class ParseReport:
+    controls: list[dict]
+    rejected: list[dict]
+
+
 def parse(content: bytes) -> list[dict]:
-    payload = json.loads(content)
+    return parse_report(content).controls
+
+
+def _invalid_json_constant(value: str):
+    raise ValueError(f"Invalid JSON numeric constant: {value}")
+
+
+def parse_report(content: bytes) -> ParseReport:
+    payload = json.loads(content, parse_constant=_invalid_json_constant)
     if payload.get("remark") or not isinstance(payload.get("elements"), list):
         raise ValueError("Incomplete or invalid Overpass response")
     elements = {(e["type"], e["id"]): e for e in payload["elements"]}
     result = []
+    rejected = []
     for (kind, osm_id), element in elements.items():
         tags = element.get("tags", {})
         is_node = kind == "node" and tags.get("highway") == "speed_camera"
@@ -53,12 +69,23 @@ def parse(content: bytes) -> list[dict]:
             if item["role"] in {"device", "from", "to"} and item["element"] is not None
         ]
         points = [p for p in points if "lat" in p and "lon" in p]
+        raw = dict(element, resolved_members=resolved)
+        reason = None
         if not points:
-            raise ValueError(f"Enforcement {kind}/{osm_id} has no resolved location")
-        lat, lon = float(points[0]["lat"]), float(points[0]["lon"])
-        if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90
-                and -180 <= lon <= 180):
-            raise ValueError("Invalid enforcement coordinate")
+            reason = "unresolved_location"
+        else:
+            try:
+                lat, lon = float(points[0]["lat"]), float(points[0]["lon"])
+                if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90
+                        and -180 <= lon <= 180):
+                    reason = "invalid_coordinate"
+            except (ValueError, TypeError):
+                reason = "invalid_coordinate"
+        if reason:
+            rejected.append({
+                "source_key": f"osm:{kind}:{osm_id}", "reason": reason, "raw": raw,
+            })
+            continue
         direction = number(tags.get("direction"), 360)
         speed = number(tags.get("maxspeed"), 300)
         result.append({
@@ -69,4 +96,7 @@ def parse(content: bytes) -> list[dict]:
             "speed_limit_kph": speed if speed and speed > 0 else None,
             "raw": dict(element, resolved_members=resolved),
         })
-    return sorted(result, key=lambda item: item["source_key"])
+    return ParseReport(
+        sorted(result, key=lambda item: item["source_key"]),
+        sorted(rejected, key=lambda item: item["source_key"]),
+    )

@@ -1,15 +1,28 @@
 import hashlib
 import json
+import logging
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from compass.enforcement.osm import parse
+from compass.enforcement.osm import parse_report
 from compass.etl.acquisition import DownloadedPayload
 
 
 def ingest(session: Session, payload: DownloadedPayload, scope: str) -> dict:
-    controls = parse(payload.content)
+    report = parse_report(payload.content)
+    controls = report.controls
+    diagnostics = {
+        "rejected_count": len(report.rejected),
+        "rejected_sample": [
+            {"source_key": item["source_key"], "reason": item["reason"]}
+            for item in report.rejected[:20]
+        ],
+    }
+    if report.rejected:
+        logging.getLogger(__name__).warning(
+            "enforcement records quarantined: %s", json.dumps(diagnostics, sort_keys=True),
+        )
     # Never erase a previously valid inventory on an unexpectedly empty extraction.
     if not controls:
         raise ValueError("Empty enforcement extraction rejected; previous inventory retained")
@@ -23,15 +36,23 @@ def ingest(session: Session, payload: DownloadedPayload, scope: str) -> dict:
             WHERE source='osm' AND scope=:scope AND sha256=:digest
         """), {"scope": scope, "digest": digest}).scalar_one_or_none()
         if previous is not None:
-            return {"status": "unchanged", "count": len(controls), "import_id": previous}
+            return {
+                "status": "unchanged", "count": len(controls),
+                "import_id": previous, **diagnostics,
+            }
         import_id = session.execute(text("""
-            INSERT INTO enforcement_imports(source,scope,sha256,source_url,fetched_at,record_count)
-            VALUES ('osm',:scope,:digest,:url,:at,:count) RETURNING id
+            INSERT INTO enforcement_imports
+            (source,scope,sha256,source_url,fetched_at,record_count,rejected)
+            VALUES ('osm',:scope,:digest,:url,:at,:count,CAST(:rejected AS jsonb)) RETURNING id
         """), {"scope": scope, "digest": digest, "url": payload.source_url,
-               "at": payload.fetched_at, "count": len(controls)}).scalar_one()
+               "at": payload.fetched_at, "count": len(controls),
+               "rejected": json.dumps(report.rejected)}).scalar_one()
         session.execute(text("""
             UPDATE enforcement_controls SET active=false WHERE source='osm' AND scope=:scope
-        """), {"scope": scope})
+            AND NOT (source_key = ANY(CAST(:rejected_keys AS text[])))
+        """), {"scope": scope, "rejected_keys": [
+            item["source_key"] for item in report.rejected
+        ]})
         for control in controls:
             session.execute(text("""
                 INSERT INTO enforcement_controls
@@ -47,4 +68,4 @@ def ingest(session: Session, payload: DownloadedPayload, scope: str) -> dict:
                     import_id=excluded.import_id,fetched_at=excluded.fetched_at,active=true
             """), {**control, "raw": json.dumps(control["raw"]), "scope": scope,
                    "import_id": import_id, "at": payload.fetched_at})
-    return {"status": "imported", "count": len(controls), "import_id": import_id}
+    return {"status": "imported", "count": len(controls), "import_id": import_id, **diagnostics}

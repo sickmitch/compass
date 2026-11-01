@@ -1,6 +1,6 @@
 # Enforcement inventory — integration gate 1
 
-Delivered: PostGIS migration 0003, source-preserving OSM importer, authenticated spatial
+Delivered: PostGIS migrations 0003–0004, source-preserving OSM importer, authenticated spatial
 inventory API. NOT delivered: Android alerts/map markers, Valhalla directed-road association,
 continuous free-follow matching, offline packages, Tutor journey tracking, scheduled import.
 This is not the complete requested feature. No new APK is published at this gate.
@@ -95,3 +95,33 @@ output and the import results. Real data coverage and server behavior remain unv
 OSM provenance and contributor attribution are preserved. Offline distribution must retain
 [ODbL attribution and derived-database obligations](https://www.openstreetmap.org/copyright).
 MIT must remain a separately licensed source; no MIT compliance is claimed.
+
+## Fix for unresolved OSM relations (0004)
+
+A single enforcement relation with no directly resolved device/from/to point no longer
+aborts an otherwise valid extraction. These records (and invalid coordinates) are stored
+in enforcement_imports.rejected with source key, reason and original/resolved membership.
+No centroid, nearby camera or invented directed geometry is substituted. Existing valid
+controls with rejected source keys retain their prior location and fetched timestamp;
+missing records elsewhere still retire normally. Missing/invalid records are not new alerts.
+All-unusable, empty and explicitly partial responses still fail before database writes.
+
+CLI output includes rejected_count and rejected_sample (maximum 20 entries); full rejection
+records are in the import row. An identical snapshot returns the same diagnostics. Synthetic
+regressions cover unresolved relation 8826292 without claiming its actual live contents
+were inspected. PostGIS integration tests additionally check preservation of old coordinates
+and persistence of rejection metadata.
+
+From ~/docker/compass on the server, with existing .env credentials:
+
+    git pull --ff-only
+    docker compose build api
+    docker compose run --rm migrate
+    docker compose up -d --no-deps api
+    docker compose --profile jobs run --rm etl enforcement
+
+Expected: imported (or unchanged), a positive count, rejected_count and rejected_sample;
+unresolved relations must not abort the entire import. Return the final JSON and rerun the
+API query above. That API queries only within 10 km of 45,9: an empty regional result alone
+does not prove the national catalog is empty. On failure return the complete ETL traceback
+and migration output. No Android update is required for this parser/database correction.
