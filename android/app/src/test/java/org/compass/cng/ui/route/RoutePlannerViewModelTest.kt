@@ -84,6 +84,26 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
     @Test
+    fun arrivalNoticeReturnsToFollowAndCanBeDismissedWithoutRestartingGuidance() = runTest {
+        val session = NavigationSession()
+        val vm = RoutePlannerViewModel(
+            FakeRoutingRepository(baseResult = Result.success(sampleRoute())), navigationSession = session,
+        )
+        runCurrent()
+        vm.openNavigationPreview()
+        vm.startNavigation()
+        session.notifyDestinationReached()
+        assertTrue(vm.arrivalNotice.value)
+        vm.completeArrival()
+        assertEquals(PlannerStage.FOLLOW, vm.uiState.value.stage)
+        assertTrue(vm.uiState.value.destinationReachedNotice)
+        assertFalse(vm.arrivalNotice.value)
+        assertEquals(NavigationPhase.IDLE, vm.navigationState.value.phase)
+        vm.dismissArrivalNotice()
+        assertFalse(vm.uiState.value.destinationReachedNotice)
+    }
+
+    @Test
     fun directNavigationRequestsStartAndCanBeConsumedWithoutChangingRoute() = runTest {
         val vm = RoutePlannerViewModel(FakeRoutingRepository(baseResult = Result.success(sampleRoute())))
         runCurrent()

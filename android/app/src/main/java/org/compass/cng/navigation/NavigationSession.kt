@@ -1,5 +1,6 @@
 package org.compass.cng.navigation
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Application-scoped boundary shared by UI and the foreground location service. */
@@ -10,6 +11,9 @@ class NavigationSession(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     val state: StateFlow<NavigationState> = engine.state
+    private val mutableArrivalNotice = MutableStateFlow(false)
+    val arrivalNotice: StateFlow<Boolean> = mutableArrivalNotice
+    fun notifyDestinationReached() { mutableArrivalNotice.value = true }
     private val restoredCache = routeStore.load()
     val restoredNavigationWasActive: Boolean = restoredCache?.navigationWasActive == true
     private var lastCheckpointAtEpochMillis: Long? = null
@@ -177,6 +181,7 @@ class NavigationSession(
     }
 
     fun clear() {
+        mutableArrivalNotice.value = false
         engine.clear()
         routeStore.clear()
         eventLogger("navigation route cache cleared: reason=session_clear")

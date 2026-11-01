@@ -174,6 +174,7 @@ data class RoutePlannerUiState(
     val favoritePlaces: List<FavoritePlace> = emptyList(),
     val pendingParking: Coordinate? = null,
     val parkingNotice: String? = null,
+    val destinationReachedNotice: Boolean = false,
     val directNavigationRequested: Boolean = false,
     val favoritePlaceTarget: RouteEndpoint = RouteEndpoint.DESTINATION,
     val favoritePlaceNameInput: String = "",
@@ -276,6 +277,7 @@ class RoutePlannerViewModel(
     private val eventLogger: (String) -> Unit = {},
 ) : ViewModel() {
     val navigationState = navigationSession.state
+    val arrivalNotice = navigationSession.arrivalNotice
     private val restoredNavigation = navigationSession.state.value.let { restored ->
         if (
             startInFollowMode &&
@@ -3426,6 +3428,15 @@ class RoutePlannerViewModel(
         eventLogger("navigation voice default applied: enabled=$voiceDefault")
         navigationSession.start()
         mutableUiState.value = mutableUiState.value.copy(message = null)
+    }
+
+    fun completeArrival() {
+        stopNavigation()
+        mutableUiState.value = mutableUiState.value.copy(destinationReachedNotice = true)
+    }
+
+    fun dismissArrivalNotice() {
+        mutableUiState.value = mutableUiState.value.copy(destinationReachedNotice = false)
     }
 
     fun stopNavigation() {

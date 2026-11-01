@@ -49,6 +49,8 @@ class NavigationForegroundService : Service(), LocationListener {
     private val replayLifecycle = ReplayLifecycleController()
     private var replayRunnable: Runnable? = null
     private var routeUpdateJob: Job? = null
+    private var arrivalCompletion: Runnable? = null
+    private var arrivalHandled = false
     private var updateControllerStarted = false
     private var lastLoggedOffRouteStatus = OffRouteStatus.ON_ROUTE
     private var networkAvailable: Boolean? = null
@@ -72,7 +74,7 @@ class NavigationForegroundService : Service(), LocationListener {
         override fun run() {
             session.tick(System.currentTimeMillis())
             processNavigationState(System.currentTimeMillis())
-            handler.postDelayed(this, GPS_LOSS_CHECK_INTERVAL_MILLIS)
+            if (!arrivalHandled) handler.postDelayed(this, GPS_LOSS_CHECK_INTERVAL_MILLIS)
         }
     }
 
@@ -151,6 +153,10 @@ class NavigationForegroundService : Service(), LocationListener {
             }
             return START_STICKY
         }
+        arrivalCompletion?.let(handler::removeCallbacks)
+        arrivalCompletion = null
+        arrivalHandled = false
+        voiceGuidance.stop()
         session.start()
         if (!updateControllerStarted) {
             routeUpdateController.navigationStarted()
@@ -213,6 +219,8 @@ class NavigationForegroundService : Service(), LocationListener {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        arrivalCompletion?.let(handler::removeCallbacks)
+        arrivalCompletion = null
         handler.removeCallbacks(gpsLossCheck)
         replayRunnable?.let(handler::removeCallbacks)
         replayRunnable = null
@@ -290,6 +298,7 @@ class NavigationForegroundService : Service(), LocationListener {
                     ),
                 )
                 processNavigationState(System.currentTimeMillis())
+                if (arrivalHandled) return
                 previousCoordinate = coordinate
                 if (session.state.value.activeFuelStopVisit != null) {
                     Log.i(
@@ -317,13 +326,44 @@ class NavigationForegroundService : Service(), LocationListener {
         stopSelf()
     }
 
+    private fun finishAtDestination(state: NavigationState) {
+        if (arrivalHandled) return
+        arrivalHandled = true
+        locationManager.removeUpdates(this)
+        routeUpdateJob?.cancel()
+        handler.removeCallbacks(gpsLossCheck)
+        replayRunnable?.let(handler::removeCallbacks)
+        voiceGuidance.stop()
+        val finish = object : Runnable {
+            override fun run() {
+                if (arrivalCompletion !== this) return
+                handler.removeCallbacks(this)
+                arrivalCompletion = null
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+        arrivalCompletion = finish
+        // Keep foreground status until TTS finishes: required for background audio focus.
+        handler.postDelayed(finish, 30_000L)
+        if (state.voiceGuidanceEnabled) {
+            voiceGuidance.speak(VoiceAnnouncement(
+                id = "${state.route?.routeId}:arrival",
+                text = "Destinazione raggiunta.",
+                stage = AnnouncementStage.NOW,
+                kind = AnnouncementKind.ARRIVAL,
+            )) { handler.post(finish) }
+        } else handler.post(finish)
+        session.notifyDestinationReached()
+    }
+
     private fun processNavigationState(nowEpochMillis: Long) {
         val state = session.state.value
         if (state.phase == NavigationPhase.ARRIVED) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            finishAtDestination(state)
             return
         }
+        if (arrivalHandled) return
         if (state.offRouteStatus != lastLoggedOffRouteStatus) {
             Log.i(
                 LOG_TAG,

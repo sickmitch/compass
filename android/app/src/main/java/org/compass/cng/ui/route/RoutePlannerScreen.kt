@@ -159,6 +159,16 @@ fun RoutePlannerScreen(
             onStartNavigation()
         }
     }
+    if (state.destinationReachedNotice) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissArrivalNotice,
+            title = { Text("Destinazione raggiunta") },
+            text = { Text("La navigazione è conclusa.") },
+            confirmButton = {
+                CompassButton(onClick = viewModel::dismissArrivalNotice) { Text("OK") }
+            },
+        )
+    }
     if (state.pendingParking != null) {
         AlertDialog(
             onDismissRequest = viewModel::dismissParkingDialog,
