@@ -114,6 +114,7 @@ internal fun RouteFreeFollowScreen(
     location: NavigationLocation?,
     statusMessage: String? = null,
     onCreateTrip: () -> Unit,
+    onSaveParking: () -> Unit,
     onOpenOptions: () -> Unit,
 ) {
     val cameraConfig = remember { NavigationCameraConfig() }
@@ -161,6 +162,13 @@ internal fun RouteFreeFollowScreen(
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            MapIconControlButton(
+                testTag = "follow_save_parking",
+                contentDescription = "Salva parcheggio",
+                onClick = onSaveParking,
+            ) {
+                Icon(Icons.Rounded.LocalParking, contentDescription = null)
+            }
             MapIconControlButton(
                 testTag = "follow_options",
                 contentDescription = "Opzioni",

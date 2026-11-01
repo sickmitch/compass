@@ -19,6 +19,10 @@ Theme options include automatic ambient-light selection with hysteresis and a tw
 stability delay. Devices without a light sensor fall back to the system theme; see the
 [device checks](phases/android-0.28.51-ambient-theme.md).
 
+Base follow includes parking saving. Arrival notices auto-dismiss after five seconds.
+Maneuvers use at most three speed-dependent voice alerts; see the
+[guidance checks](phases/android-0.28.52-guidance.md).
+
 ## Build and local validation
 
 Use JDK 17, Android SDK Platform 37, compatible AGP-selected Build-Tools and the pinned

@@ -159,6 +159,12 @@ fun RoutePlannerScreen(
             onStartNavigation()
         }
     }
+    LaunchedEffect(state.destinationReachedNotice) {
+        if (state.destinationReachedNotice) {
+            kotlinx.coroutines.delay(5_000)
+            viewModel.dismissArrivalNotice()
+        }
+    }
     if (state.destinationReachedNotice) {
         AlertDialog(
             onDismissRequest = viewModel::dismissArrivalNotice,
@@ -305,6 +311,7 @@ fun RoutePlannerScreen(
                 location = state.followLocation,
                 statusMessage = state.message,
                 onCreateTrip = viewModel::openRouteConfiguration,
+                onSaveParking = viewModel::requestSaveParking,
                 onOpenOptions = viewModel::openOptions,
             )
         }

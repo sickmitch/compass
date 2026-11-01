@@ -14,7 +14,7 @@ import org.junit.Test
 
 class NavigationStage3Test {
     @Test
-    fun cyclingCountdownStartsAt250MetersAndDoesNotRepeat() {
+    fun cyclingUsesThreeSpeedBasedStagesWithoutDistantInitialSpeech() {
         val route = route("cycling-voice").copy(travelMode = RouteTravelMode.CYCLING)
         val controller = ManeuverController()
         val state = NavigationState(
@@ -23,14 +23,15 @@ class NavigationStage3Test {
             currentManeuver = route.maneuvers.first(),
             navigationPosition = position(route.origin, speed = 4.0),
         )
+        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 650.0)))
+        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 249.0)))
         assertEquals(AnnouncementStage.INITIAL,
-            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 650.0))?.stage)
-        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 499.0)))
-        assertEquals(AnnouncementStage.TWO_HUNDRED_FIFTY_METERS,
-            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 249.0))?.stage)
-        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 240.0)))
-        assertEquals(AnnouncementStage.ONE_HUNDRED_METERS,
-            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 99.0))?.stage)
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 119.0))?.stage)
+        assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 110.0)))
+        assertEquals(AnnouncementStage.PREPARE,
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 47.0))?.stage)
+        assertEquals(AnnouncementStage.NOW,
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 11.0))?.stage)
     }
 
     @Test
@@ -87,8 +88,8 @@ class NavigationStage3Test {
     }
 
     @Test
-    fun maneuverAnnouncementsUseFixedCountdownThresholdsWithoutDuplicates() {
-        val route = route("route_stage_3_voice")
+    fun drivingAnnouncementsAreLimitedToThreeAndNeverBackfill() {
+        val route = route("voice-three")
         val controller = ManeuverController()
         val base = NavigationState(
             phase = NavigationPhase.NAVIGATING,
@@ -96,34 +97,49 @@ class NavigationStage3Test {
             currentManeuver = route.maneuvers.first(),
             navigationPosition = position(route.origin, speed = 10.0),
         )
+        val announcements = listOf(650.0, 400.0, 299.0, 280.0, 119.0, 100.0, 29.0, 8.0,
+            200.0, 300.0, 20.0).mapNotNull {
+            controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = it))
+        }
+        assertEquals(listOf(AnnouncementStage.INITIAL, AnnouncementStage.PREPARE,
+            AnnouncementStage.NOW), announcements.map { it.stage })
+        assertEquals("Tra 300 metri, svolta a destra in Via Roma.", announcements.first().text)
+    }
 
-        val initial = controller.nextAnnouncement(
-            base.copy(distanceToNextManeuverMeters = 650.0),
+    @Test
+    fun fasterVehiclesAreWarnedEarlierAndSpeedChangesCannotRepeatStages() {
+        val route = route("speed-voice")
+        val base = NavigationState(
+            phase = NavigationPhase.NAVIGATING, route = route,
+            currentManeuver = route.maneuvers.first(),
+            distanceToNextManeuverMeters = 800.0,
+            navigationPosition = position(route.origin, speed = 10.0),
         )
-        assertEquals(AnnouncementStage.INITIAL, initial?.stage)
-        assertEquals("Tra 650 metri, svolta a destra in Via Roma.", initial?.text)
-        assertNull(controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 590.0)))
-        val fiveHundred = controller.nextAnnouncement(
-            base.copy(distanceToNextManeuverMeters = 499.0),
+        val controller = ManeuverController()
+        assertNull(controller.nextAnnouncement(base))
+        val fast = base.copy(navigationPosition = position(route.origin, speed = 30.0))
+        assertEquals(AnnouncementStage.INITIAL, controller.nextAnnouncement(fast)?.stage)
+        assertNull(controller.nextAnnouncement(base))
+        assertNull(controller.nextAnnouncement(fast))
+        assertEquals(AnnouncementStage.NOW,
+            controller.nextAnnouncement(fast.copy(distanceToNextManeuverMeters = 20.0))?.stage)
+        assertNull(controller.nextAnnouncement(fast.copy(distanceToNextManeuverMeters = 350.0)))
+    }
+
+    @Test
+    fun startingNearAManeuverSkipsEarlierStages() {
+        val route = route("near-voice")
+        val controller = ManeuverController()
+        val state = NavigationState(
+            phase = NavigationPhase.NAVIGATING, route = route,
+            currentManeuver = route.maneuvers.first(),
+            navigationPosition = position(route.origin, speed = 10.0),
         )
-        assertEquals(AnnouncementStage.FIVE_HUNDRED_METERS, fiveHundred?.stage)
-        assertEquals("Tra 500 metri, svolta a destra in Via Roma.", fiveHundred?.text)
-        assertNull(controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 400.0)))
-        assertEquals(
-            AnnouncementStage.TWO_HUNDRED_FIFTY_METERS,
-            controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 249.0))?.stage,
-        )
-        assertEquals(
-            AnnouncementStage.ONE_HUNDRED_METERS,
-            controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 99.0))?.stage,
-        )
-        val fifty = controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 49.0))
-        assertEquals(AnnouncementStage.FIFTY_METERS, fifty?.stage)
-        assertEquals("A breve, svolta a destra in Via Roma.", fifty?.text)
-        val immediate = controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 9.0))
-        assertEquals(AnnouncementStage.NOW, immediate?.stage)
-        assertEquals("Tra 10 metri, svolta a destra in Via Roma.", immediate?.text)
-        assertNull(controller.nextAnnouncement(base.copy(distanceToNextManeuverMeters = 8.0)))
+        assertEquals(AnnouncementStage.NOW,
+            controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = 15.0))?.stage)
+        for (distance in listOf(500.0, 250.0, 100.0, 10.0)) {
+            assertNull(controller.nextAnnouncement(state.copy(distanceToNextManeuverMeters = distance)))
+        }
     }
 
     @Test
@@ -158,7 +174,7 @@ class NavigationStage3Test {
             controller.nextAnnouncement(
                 base.copy(
                     currentManeuver = route.maneuvers.last(),
-                    distanceToNextManeuverMeters = 700.0,
+                    distanceToNextManeuverMeters = 280.0,
                 ),
             )?.stage,
         )
