@@ -15,6 +15,7 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.LocalParking
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
@@ -211,6 +212,7 @@ internal fun ActiveNavigationScreen(
     onCompleteIntermediateStop: () -> Unit,
     onStopNavigation: () -> Unit,
     onOpenOptions: () -> Unit,
+    onSaveParking: () -> Unit,
 ) {
     val navigationView = LocalView.current
     DisposableEffect(navigationView) {
@@ -517,6 +519,7 @@ internal fun ActiveNavigationScreen(
                     onRemoveNextStop = onRemoveNextStop,
                     onAddStop = onAddStop,
                     onOpenOptions = onOpenOptions,
+                    onSaveParking = onSaveParking,
                     onStopNavigation = {
                         confirmStopNavigation = true
                         Log.i(
@@ -1074,6 +1077,7 @@ private fun MapModeControls(
     onAddStop: () -> Unit,
     onStopNavigation: () -> Unit,
     onOpenOptions: () -> Unit,
+    onSaveParking: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val policy = cameraMode.mapControlPolicy()
@@ -1186,6 +1190,13 @@ private fun MapModeControls(
                         },
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = null)
+                    }
+                    MapIconControlButton(
+                        testTag = "navigation_save_parking",
+                        contentDescription = "Salva parcheggio",
+                        onClick = { actionsExpanded = false; onSaveParking() },
+                    ) {
+                        Icon(Icons.Rounded.LocalParking, contentDescription = null)
                     }
                     MapIconControlButton(
                         testTag = "navigation_options",

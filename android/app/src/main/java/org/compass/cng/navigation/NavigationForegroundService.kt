@@ -319,6 +319,11 @@ class NavigationForegroundService : Service(), LocationListener {
 
     private fun processNavigationState(nowEpochMillis: Long) {
         val state = session.state.value
+        if (state.phase == NavigationPhase.ARRIVED) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
         if (state.offRouteStatus != lastLoggedOffRouteStatus) {
             Log.i(
                 LOG_TAG,

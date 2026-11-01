@@ -84,6 +84,58 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
     @Test
+    fun directNavigationRequestsStartAndCanBeConsumedWithoutChangingRoute() = runTest {
+        val vm = RoutePlannerViewModel(FakeRoutingRepository(baseResult = Result.success(sampleRoute())))
+        runCurrent()
+        vm.requestDirectNavigation()
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, vm.uiState.value.stage)
+        assertTrue(vm.uiState.value.directNavigationRequested)
+        vm.consumeDirectNavigationRequest()
+        assertFalse(vm.uiState.value.directNavigationRequested)
+        vm.startNavigation()
+        assertEquals(NavigationPhase.NAVIGATING, vm.navigationState.value.phase)
+        vm.stopNavigation()
+        assertEquals(PlannerStage.FOLLOW, vm.uiState.value.stage)
+    }
+
+    @Test
+    fun parkingRequiresReplacementConsentAndPersistsAsOneFavorite() = runTest {
+        val favorites = InMemoryFavoritePlaceRepository()
+        val vm = RoutePlannerViewModel(
+            FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+            favoritePlaceRepository = favorites,
+        )
+        runCurrent()
+        val first = Coordinate(45.43, 10.99)
+        val second = Coordinate(45.44, 11.0)
+        vm.updateFollowLocation(NavigationLocation(first, 5.0, null, null, System.currentTimeMillis()))
+        vm.requestSaveParking()
+        assertEquals(first, favorites.load().single().location)
+        assertTrue(favorites.load().single().isParking)
+        assertTrue(vm.uiState.value.parkingNotice!!.contains("preferite"))
+        vm.dismissParkingDialog()
+        vm.updateFollowLocation(NavigationLocation(second, 5.0, null, null, System.currentTimeMillis()))
+        vm.requestSaveParking()
+        assertEquals(first, favorites.load().single().location)
+        assertEquals(second, vm.uiState.value.pendingParking)
+        vm.dismissParkingDialog()
+        assertEquals(first, favorites.load().single().location)
+        vm.requestSaveParking()
+        vm.confirmReplaceParking()
+        assertEquals(second, favorites.load().single().location)
+        val restored = RoutePlannerViewModel(
+            FakeRoutingRepository(baseResult = Result.success(sampleRoute())),
+            favoritePlaceRepository = favorites,
+        )
+        assertEquals("Parcheggio", restored.uiState.value.favoritePlaces.single().name)
+        vm.updateFollowLocation(NavigationLocation(first, 5.0, null, null, 1L))
+        vm.dismissParkingDialog()
+        vm.requestSaveParking()
+        assertNull(vm.uiState.value.pendingParking)
+        assertEquals(second, favorites.load().single().location)
+    }
+
+    @Test
     fun changingToBicycleRecalculatesWithSameEndpointsAndBlocksCngActions() = runTest {
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
         val viewModel = RoutePlannerViewModel(repository)

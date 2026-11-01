@@ -22,8 +22,8 @@ import androidx.compose.ui.unit.sp
 internal val CompassLightColors = lightColorScheme(
     primary = Color(0xFF006C4C),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF8FF8C5),
-    onPrimaryContainer = Color(0xFF002116),
+    primaryContainer = Color(0xFF006C4C),
+    onPrimaryContainer = Color.White,
     secondary = Color(0xFF4C6358),
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFCFE9DA),

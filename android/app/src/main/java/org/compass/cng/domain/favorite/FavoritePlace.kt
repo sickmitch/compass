@@ -7,6 +7,8 @@ data class FavoritePlace(
     val name: String,
     val location: Coordinate,
 ) {
+    val isParking: Boolean get() = id == PARKING_PLACE_ID
+
     init {
         require(id.isNotBlank()) { "favorite place id must not be blank" }
         require(name.isNotBlank() && name.length <= MAX_FAVORITE_PLACE_NAME_LENGTH) {
@@ -43,13 +45,14 @@ class InMemoryFavoritePlaceRepository(
 }
 
 internal fun validateAndSort(places: List<FavoritePlace>): List<FavoritePlace> {
-    require(places.size <= MAX_FAVORITE_PLACES) {
+    require(places.count { !it.isParking } <= MAX_FAVORITE_PLACES) {
         "at most $MAX_FAVORITE_PLACES favorite places may be stored"
     }
     require(places.map(FavoritePlace::id).distinct().size == places.size) {
         "favorite place ids must be unique"
     }
-    require(places.map { it.name.trim().lowercase() }.distinct().size == places.size) {
+    require(places.filterNot { it.isParking }.map { it.name.trim().lowercase() }.distinct().size ==
+        places.count { !it.isParking }) {
         "favorite place names must be unique"
     }
     return places.sortedBy { it.name.lowercase() }
@@ -57,3 +60,5 @@ internal fun validateAndSort(places: List<FavoritePlace>): List<FavoritePlace> {
 
 const val MAX_FAVORITE_PLACES = 50
 const val MAX_FAVORITE_PLACE_NAME_LENGTH = 60
+
+const val PARKING_PLACE_ID = "compass:saved-parking"

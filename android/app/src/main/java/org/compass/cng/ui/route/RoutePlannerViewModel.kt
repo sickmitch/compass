@@ -19,6 +19,7 @@ import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RoutingRepository
 import org.compass.cng.domain.favorite.FavoritePlace
+import org.compass.cng.domain.favorite.PARKING_PLACE_ID
 import org.compass.cng.domain.favorite.FavoritePlaceRepository
 import org.compass.cng.domain.favorite.InMemoryFavoritePlaceRepository
 import org.compass.cng.domain.favorite.MAX_FAVORITE_PLACE_NAME_LENGTH
@@ -171,6 +172,9 @@ data class RoutePlannerUiState(
     val destinationCurrentLocationStatus: CurrentLocationAcquisitionStatus =
         CurrentLocationAcquisitionStatus.IDLE,
     val favoritePlaces: List<FavoritePlace> = emptyList(),
+    val pendingParking: Coordinate? = null,
+    val parkingNotice: String? = null,
+    val directNavigationRequested: Boolean = false,
     val favoritePlaceTarget: RouteEndpoint = RouteEndpoint.DESTINATION,
     val favoritePlaceNameInput: String = "",
     val editingFavoritePlaceId: String? = null,
@@ -721,6 +725,7 @@ class RoutePlannerViewModel(
         val name = state.favoritePlaceNameInput.trim()
         val coordinate = state.favoriteDraftCoordinate
         val editingId = state.editingFavoritePlaceId
+        if (editingId == PARKING_PLACE_ID) return
         when {
             coordinate == null -> {
                 mutableUiState.value = state.copy(
@@ -3072,6 +3077,7 @@ class RoutePlannerViewModel(
     }
 
     fun navigateBack() {
+        consumeDirectNavigationRequest()
         val busyState = mutableUiState.value
         if (busyState.isBusy) {
             val canCancelInPlace = busyState.stage == PlannerStage.MAP_POINT_PICKER &&
@@ -3305,6 +3311,60 @@ class RoutePlannerViewModel(
         }
     }
 
+    fun requestDirectNavigation() {
+        openNavigationPreview()
+        val state = mutableUiState.value
+        if (state.stage == PlannerStage.NAVIGATION_PREVIEW &&
+            state.plannedIntermediateStops.isEmpty() &&
+            state.selectedRoute == null && state.selectedItineraryRoute == null &&
+            state.intermediateStopRoute == null && state.intermediateStopsRoute == null
+        ) mutableUiState.value = state.copy(directNavigationRequested = true)
+    }
+
+    fun consumeDirectNavigationRequest() {
+        mutableUiState.value = mutableUiState.value.copy(directNavigationRequested = false)
+    }
+
+    fun requestSaveParking() {
+        val location = navigationState.value.rawLocation ?: mutableUiState.value.followLocation
+        if (location == null || System.currentTimeMillis() - location.timestampEpochMillis !in 0..60_000 ||
+            !location.accuracyMeters.isFinite() || location.accuracyMeters !in 0.0..50.0
+        ) {
+            mutableUiState.value = mutableUiState.value.copy(
+                parkingNotice = "Posizione GPS non disponibile o poco precisa. Riprova tra poco.",
+            )
+            return
+        }
+        try {
+            if (favoritePlaceRepository.load().any { it.isParking }) {
+                mutableUiState.value = mutableUiState.value.copy(pendingParking = location.coordinate)
+            } else persistParking(location.coordinate)
+        } catch (_: Exception) {
+            mutableUiState.value = mutableUiState.value.copy(parkingNotice = "Impossibile salvare il parcheggio.")
+        }
+    }
+
+    private fun persistParking(coordinate: Coordinate) {
+        val places = favoritePlaceRepository.save(FavoritePlace(PARKING_PLACE_ID, "Parcheggio", coordinate))
+        mutableUiState.value = mutableUiState.value.copy(
+            favoritePlaces = places, pendingParking = null,
+            parkingNotice = "Parcheggio salvato. Lo trovi nelle posizioni preferite.",
+        )
+    }
+
+    fun confirmReplaceParking() {
+        val coordinate = mutableUiState.value.pendingParking ?: return
+        try { persistParking(coordinate) } catch (_: Exception) {
+            mutableUiState.value = mutableUiState.value.copy(
+                pendingParking = null, parkingNotice = "Impossibile salvare il parcheggio.",
+            )
+        }
+    }
+
+    fun dismissParkingDialog() {
+        mutableUiState.value = mutableUiState.value.copy(pendingParking = null, parkingNotice = null)
+    }
+
     fun openNavigationPreview() {
         if (
             mutableUiState.value.isBusy ||
@@ -3369,6 +3429,7 @@ class RoutePlannerViewModel(
     }
 
     fun stopNavigation() {
+        consumeDirectNavigationRequest()
         navigationSession.clear()
         pendingIntermediateResolution = null
         mutableUiState.value = mutableUiState.value.copy(

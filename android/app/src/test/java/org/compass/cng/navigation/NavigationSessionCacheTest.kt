@@ -40,6 +40,19 @@ class NavigationSessionCacheTest {
     }
 
     @Test
+    fun destinationArrivalClearsRestorationWithoutWaitingForAnotherCheckpoint() {
+        val store = MemoryRouteStore()
+        val session = NavigationSession(routeStore = store, clock = { 1_000L })
+        val route = route()
+        session.preview(route)
+        session.start()
+        session.updateLocation(NavigationLocation(route.destination, 4.0, 0.0, null, 1_000L))
+        assertEquals(NavigationPhase.ARRIVED, session.state.value.phase)
+        assertNull(store.cached)
+        assertEquals(NavigationPhase.IDLE, NavigationSession(routeStore = store).state.value.phase)
+    }
+
+    @Test
     fun restoredPreviewReportsThatNavigationWasNotActive() {
         val store = MemoryRouteStore()
         NavigationSession(routeStore = store).preview(route())

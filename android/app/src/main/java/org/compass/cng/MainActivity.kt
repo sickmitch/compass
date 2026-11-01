@@ -6,6 +6,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import org.compass.cng.navigation.NavigationPhase
 import org.compass.cng.navigation.shouldOfferNavigationPip
 import android.Manifest
 import android.annotation.SuppressLint
@@ -97,6 +98,11 @@ class MainActivity : ComponentActivity() {
             combine(routePlannerViewModel.uiState, routePlannerViewModel.navigationState) { ui, nav ->
                 shouldOfferNavigationPip(ui.stage == PlannerStage.NAVIGATION_PREVIEW, nav.phase)
             }.distinctUntilChanged().collect { updatePipParams() }
+        }
+        lifecycleScope.launch {
+            routePlannerViewModel.navigationState.collect { state ->
+                if (state.phase == NavigationPhase.ARRIVED) stopNavigationService()
+            }
         }
         window.decorView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             updatePipParams()

@@ -152,6 +152,29 @@ fun RoutePlannerScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigationState by viewModel.navigationState.collectAsStateWithLifecycle()
+    LaunchedEffect(state.directNavigationRequested, state.isBusy, state.highwayConfirmationPromptVisible) {
+        if (state.directNavigationRequested && !state.isBusy && !state.highwayConfirmationPromptVisible &&
+            state.stage == PlannerStage.NAVIGATION_PREVIEW) {
+            viewModel.consumeDirectNavigationRequest()
+            onStartNavigation()
+        }
+    }
+    if (state.pendingParking != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissParkingDialog,
+            title = { Text("Sostituire il parcheggio?") },
+            text = { Text("Il parcheggio già salvato verrà sostituito con questa posizione.") },
+            confirmButton = { CompassButton(onClick = viewModel::confirmReplaceParking) { Text("Sostituisci") } },
+            dismissButton = { CompassTextButton(onClick = viewModel::dismissParkingDialog) { Text("Annulla") } },
+        )
+    }
+    state.parkingNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissParkingDialog,
+            text = { Text(notice) },
+            confirmButton = { CompassButton(onClick = viewModel::dismissParkingDialog) { Text("OK") } },
+        )
+    }
     val systemUsesGestures = systemUsesGestureNavigation(LocalContext.current.resources)
     BackHandler(
         enabled = state.stage != PlannerStage.FOLLOW,
@@ -261,6 +284,7 @@ fun RoutePlannerScreen(
                 onCompleteIntermediateStop = onCompleteIntermediateStop,
                 onStopNavigation = onStopNavigation,
                 onOpenOptions = viewModel::openOptions,
+                onSaveParking = viewModel::requestSaveParking,
             )
         }
         return
@@ -469,7 +493,7 @@ fun RoutePlannerScreen(
                     )
                     PlannerStage.PREVIEW -> PreviewContent(
                         route = baseRoute,
-                        onStartNavigation = viewModel::openNavigationPreview,
+                        onStartNavigation = viewModel::requestDirectNavigation,
                         onEditRoute = viewModel::openRouteConfiguration,
                         onExtendedPlanning = viewModel::openPredictiveRange,
                         onAddIntermediateStops = viewModel::addIntermediateStop,
@@ -592,6 +616,7 @@ fun RoutePlannerScreen(
                             onDeleteCngStop = viewModel::deleteCngStopFromSummary,
                             onStopNavigation = onStopNavigation,
                             onOpenOptions = viewModel::openOptions,
+                            onSaveParking = viewModel::requestSaveParking,
                         )
                     }
                 }
@@ -1043,7 +1068,7 @@ private fun FavoritePlacesContent(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End,
                         ) {
-                            CompassTextButton(onClick = { onEdit(place.id) }) {
+                            if (!place.isParking) CompassTextButton(onClick = { onEdit(place.id) }) {
                                 Text("Modifica")
                             }
                             CompassTextButton(onClick = { onDelete(place.id) }) {
@@ -1653,6 +1678,7 @@ private fun NavigationPreviewContent(
     onDeleteCngStop: (String) -> Unit,
     onStopNavigation: () -> Unit,
     onOpenOptions: () -> Unit,
+    onSaveParking: () -> Unit,
 ) {
     if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
         ActiveNavigationScreen(
@@ -1667,6 +1693,7 @@ private fun NavigationPreviewContent(
             onCompleteIntermediateStop = onCompleteIntermediateStop,
             onStopNavigation = onStopNavigation,
             onOpenOptions = onOpenOptions,
+            onSaveParking = onSaveParking,
         )
         return
     }

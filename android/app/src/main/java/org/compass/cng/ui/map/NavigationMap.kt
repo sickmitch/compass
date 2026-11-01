@@ -857,7 +857,7 @@ private fun navigationCalloutBitmap(
         0xF2FFFFFF.toInt()
     }
     val accent = when (callout.kind) {
-        NavigationCalloutKind.MANEUVER -> NAVIGATION_REMAINING_ROUTE_COLOR
+        NavigationCalloutKind.MANEUVER -> appearance.navigationRouteColor()
         NavigationCalloutKind.CNG_STOP -> appearance.palette.cng
         NavigationCalloutKind.INTERMEDIATE_STOP -> appearance.palette.selectedCng
     }

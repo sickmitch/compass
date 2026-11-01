@@ -26,6 +26,18 @@ class FavoritePlaceDocumentCodecTest {
     }
 
     @Test
+    fun parkingRoundTripRetainsItsIdentityAlongsideOrdinaryFavorites() {
+        val places = listOf(
+            FavoritePlace("home", "Parcheggio", Coordinate(45.0, 10.0)),
+            FavoritePlace(org.compass.cng.domain.favorite.PARKING_PLACE_ID,
+                "Parcheggio", Coordinate(46.0, 11.0)),
+        )
+        val restored = codec.decode(codec.encode(places))
+        assertEquals(2, restored.size)
+        assertEquals(Coordinate(46.0, 11.0), restored.single { it.isParking }.location)
+    }
+
+    @Test
     fun corruptOrUnsupportedDocumentsAreIgnoredSafely() {
         assertTrue(codec.decode("not-json").isEmpty())
         assertTrue(codec.decode("""{"schemaVersion":2,"places":[]}""").isEmpty())

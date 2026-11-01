@@ -184,6 +184,10 @@ class NavigationSession(
 
     private fun persistCheckpoint(force: Boolean) {
         val current = state.value
+        if (current.phase == NavigationPhase.ARRIVED) {
+            routeStore.clear()
+            return
+        }
         val route = current.route ?: return
         if (current.phase == NavigationPhase.IDLE || current.phase == NavigationPhase.ROUTE_PREVIEW) {
             return
