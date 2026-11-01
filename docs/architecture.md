@@ -87,3 +87,8 @@ Fixture/unit tests validate local contracts. Database integration, external-prov
 behavior and physical navigation require their own environments and evidence. Current
 operational instructions are in [deployment](deployment.md) and [Android](android.md);
 [history](history.md) summarizes older milestones without treating them as current proof.
+
+## Enforcement inventory (integration gate)
+
+The [source-preserving PostGIS catalog](phases/enforcement-inventory.md) is not yet
+connected to Android or navigation alerts. Directed-road association remains pending.

@@ -685,6 +685,81 @@
         "title": "CngItineraryStopResponse",
         "type": "object"
       },
+      "Control": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_eligible": {
+            "const": false,
+            "default": false,
+            "title": "Alert Eligible",
+            "type": "boolean"
+          },
+          "association_state": {
+            "const": "unmatched",
+            "default": "unmatched",
+            "title": "Association State",
+            "type": "string"
+          },
+          "direction_degrees": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction Degrees"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fixed",
+              "average_speed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "speed_limit_kph": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Kph"
+          }
+        },
+        "required": [
+          "source_key",
+          "kind",
+          "latitude",
+          "longitude",
+          "direction_degrees",
+          "speed_limit_kph",
+          "fetched_at"
+        ],
+        "title": "Control",
+        "type": "object"
+      },
       "CoordinateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2245,6 +2320,33 @@
           "intermediate_stops"
         ],
         "title": "IntermediateStopsRouteRequest",
+        "type": "object"
+      },
+      "Inventory": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "default": "\u00a9 OpenStreetMap contributors \u2014 ODbL 1.0",
+            "title": "Attribution",
+            "type": "string"
+          },
+          "controls": {
+            "items": {
+              "$ref": "#/components/schemas/Control"
+            },
+            "title": "Controls",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "controls",
+          "truncated"
+        ],
+        "title": "Inventory",
         "type": "object"
       },
       "ManeuverResponse": {
@@ -6873,6 +6975,88 @@
         "summary": "Destination Suggest",
         "tags": [
           "place-search"
+        ]
+      }
+    },
+    "/api/v1/enforcement": {
+      "get": {
+        "operationId": "inventory_api_v1_enforcement_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "latitude",
+            "required": true,
+            "schema": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Latitude",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "required": true,
+            "schema": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Longitude",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_meters",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "maximum": 10000,
+              "minimum": 100,
+              "title": "Radius Meters",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inventory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Inventory",
+        "tags": [
+          "enforcement"
         ]
       }
     },

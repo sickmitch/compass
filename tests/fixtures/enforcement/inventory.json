@@ -1,0 +1,6 @@
+{"elements":[
+{"type":"node","id":900000000001,"lat":45.0,"lon":9.0,"tags":{"highway":"speed_camera","maxspeed":"50","direction":"90"}},
+{"type":"node","id":900000000002,"lat":45.0001,"lon":9.0,"tags":{"highway":"speed_camera","direction":"270"}},
+{"type":"node","id":900000000003,"lat":45.0,"lon":9.01,"tags":{}},
+{"type":"relation","id":900000000004,"tags":{"type":"enforcement","enforcement":"average_speed","maxspeed":"90"},"members":[{"type":"node","ref":900000000001,"role":"from"},{"type":"node","ref":900000000003,"role":"to"}]}
+]}

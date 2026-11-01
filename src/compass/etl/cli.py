@@ -82,6 +82,23 @@ def _osm(args: argparse.Namespace) -> dict[str, object]:
         )
 
 
+def _enforcement(args: argparse.Namespace) -> dict[str, object]:
+    from compass.enforcement.importer import ingest
+    from compass.enforcement.osm import query
+
+    settings = get_settings()
+    payload = _file_payload(args.input_file, "application/json") if args.input_file else download(
+        settings.overpass_url,
+        timeout_seconds=settings.http_timeout_seconds,
+        max_bytes=settings.overpass_max_download_bytes,
+        user_agent=settings.http_user_agent,
+        method="POST",
+        data={"data": query(settings.overpass_area_iso3166_1)},
+    )
+    with SessionLocal() as session:
+        return ingest(session, payload, settings.overpass_area_iso3166_1)
+
+
 def _normalize(_args: argparse.Namespace) -> dict[str, object]:
     with SessionLocal() as session:
         return normalize_and_reconcile(session)
@@ -112,6 +129,9 @@ def parser() -> argparse.ArgumentParser:
     osm = subcommands.add_parser("osm", help="ingest OSM CNG fuel features through Overpass")
     osm.add_argument("--input-file", type=Path)
     osm.set_defaults(handler=_osm)
+    enforcement = subcommands.add_parser("enforcement", help="import OSM enforcement inventory")
+    enforcement.add_argument("--input-file", type=Path)
+    enforcement.set_defaults(handler=_enforcement)
     normalize = subcommands.add_parser(
         "normalize", help="normalize latest raw imports and reconcile MIMIT with OSM"
     )

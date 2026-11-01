@@ -21,6 +21,7 @@ from compass.api.auth import (
     router as auth_router,
 )
 from compass.api.contracts import ErrorResponse
+from compass.api.enforcement import router as enforcement_router
 from compass.api.predictive import router as predictive_router
 from compass.api.ranking import router as ranking_router
 from compass.api.routes import router as routes_router
@@ -63,6 +64,11 @@ protected_api_responses = {
         "model": ErrorResponse,
     }
 }
+app.include_router(
+    enforcement_router,
+    dependencies=protected_api_dependencies,
+    responses=protected_api_responses,
+)
 app.include_router(auth_router)
 app.include_router(
     routes_router,
