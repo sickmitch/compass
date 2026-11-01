@@ -796,6 +796,7 @@ private fun OptionsContent(
                         AppThemePreference.SYSTEM to "Sistema",
                         AppThemePreference.DARK to "Scuro",
                         AppThemePreference.LIGHT to "Chiaro",
+                        AppThemePreference.AUTOMATIC to "Automatica",
                     ).forEach { (option, label) ->
                         if (theme == option) {
                             CompassButton(onClick = { onThemeChanged(option) }) { Text(label) }
@@ -805,6 +806,12 @@ private fun OptionsContent(
                             }
                         }
                     }
+                }
+                if (theme == AppThemePreference.AUTOMATIC) {
+                    Text(
+                        "Segue la luce ambiente. Senza sensore di luminosità usa il tema di sistema.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }

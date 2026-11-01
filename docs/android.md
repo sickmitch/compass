@@ -15,6 +15,10 @@ Camera look-ahead reads only the required route points instead of copying the co
 geometry on each frame. See [performance validation](phases/android-0.28.50-performance.md)
 for the backend connection-pooling changes and operator checks.
 
+Theme options include automatic ambient-light selection with hysteresis and a two-second
+stability delay. Devices without a light sensor fall back to the system theme; see the
+[device checks](phases/android-0.28.51-ambient-theme.md).
+
 ## Build and local validation
 
 Use JDK 17, Android SDK Platform 37, compatible AGP-selected Build-Tools and the pinned

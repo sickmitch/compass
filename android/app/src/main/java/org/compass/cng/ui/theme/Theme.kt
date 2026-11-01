@@ -231,6 +231,7 @@ fun CompassTheme(
         AppThemePreference.SYSTEM -> systemDarkTheme
         AppThemePreference.LIGHT -> false
         AppThemePreference.DARK -> true
+        AppThemePreference.AUTOMATIC -> ambientDarkTheme(systemDarkTheme)
     }
     CompositionLocalProvider(
         LocalCompassDarkTheme provides darkTheme,

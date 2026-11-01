@@ -4,6 +4,7 @@ enum class AppThemePreference {
     SYSTEM,
     LIGHT,
     DARK,
+    AUTOMATIC,
 }
 
 data class AppPreferences(
