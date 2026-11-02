@@ -104,7 +104,7 @@ async def association_evidence(
     try:
         identity = await graph_identity(request.app.state.routing_http_client, get_settings())
         row = session.execute(text("""
-            SELECT c.import_id AS current_import_id,a.import_id,a.graph_identity,
+            SELECT c.raw,c.import_id AS current_import_id,a.import_id,a.graph_identity,
                    a.state,a.reason,a.evidence
             FROM enforcement_controls c
             LEFT JOIN enforcement_associations a ON a.source_key=c.source_key
@@ -115,7 +115,9 @@ async def association_evidence(
     if row is None:
         return error_response(404, "enforcement_not_found", "Enforcement control not found.")
     state, reason, evidence = "unmatched", "not_processed", {}
-    if row["graph_identity"] is not None:
+    if row.get("raw", {}).get("type") == "relation" and "road_ways" not in row["raw"]:
+        state, reason = "missing_source_geometry", "enriched_import_required"
+    elif row["graph_identity"] is not None:
         if row["graph_identity"] != identity or row["import_id"] != row["current_import_id"]:
             state, reason = "stale", "graph_or_source_changed"
         else:

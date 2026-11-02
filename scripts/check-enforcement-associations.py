@@ -20,11 +20,17 @@ with SessionLocal() as session:
     counts = session.execute(text(
         "SELECT state,count(*) AS count FROM enforcement_associations GROUP BY state"
     )).mappings().all()
+    geometry = session.execute(text("""
+        SELECT count(*) AS active_relations,
+               count(*) FILTER (WHERE NOT (raw ? 'road_ways')) AS missing_source_geometry
+        FROM enforcement_controls WHERE active AND raw->>'type'='relation'
+    """)).mappings().one()
     keys = session.execute(text("""
         SELECT a.source_key FROM enforcement_associations a
         JOIN enforcement_controls c USING (source_key) WHERE c.active
         ORDER BY CASE WHEN a.state='matched' THEN 0 ELSE 1 END,a.source_key LIMIT 3
     """)).scalars().all()
+print("source_geometry", json.dumps(dict(geometry)))
 print("stored_states", json.dumps([dict(row) for row in counts]))
 for key in keys:
     request = urllib.request.Request(

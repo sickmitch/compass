@@ -22,6 +22,8 @@ class Association:
 def source_path(raw: dict) -> Association:
     if raw.get("type") != "relation":
         return Association("unknown_direction", "explicit_from_to_required", {})
+    if "road_ways" not in raw:
+        return Association("missing_source_geometry", "enriched_import_required", {})
     members = raw.get("members", [])
     endpoints = [
         {m["ref"] for m in members if m.get("role") == role and m.get("type") == "node"}

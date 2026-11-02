@@ -125,6 +125,7 @@ def test_batch_discards_all_results_if_graph_changes(monkeypatch):
 
     sessions = MagicMock()
     reader = sessions.return_value.__enter__.return_value
+    reader.execute.return_value.scalar_one.return_value = 0
     reader.execute.return_value.mappings.return_value.all.return_value = [
         {"source_key": "osm:relation:7", "raw": raw(), "import_id": 1},
     ]
@@ -152,14 +153,15 @@ def test_valid_edge_ids_do_not_override_wrong_matched_endpoints():
     assert result.reason == "matched_endpoint_mismatch"
 
 
-@pytest.mark.parametrize("graph,import_id,expected", [
-    ("3.8.3:123", 1, "matched"),
-    ("3.8.3:456", 1, "stale"),
-    ("3.8.3:123", 2, "stale"),
-    (None, None, "unmatched"),
+@pytest.mark.parametrize("graph,import_id,legacy,expected", [
+    ("3.8.3:123", 1, False, "matched"),
+    ("3.8.3:123", 1, True, "missing_source_geometry"),
+    ("3.8.3:456", 1, False, "stale"),
+    ("3.8.3:123", 2, False, "stale"),
+    (None, None, False, "unmatched"),
 ])
 def test_read_api_never_exposes_old_graph_or_source_evidence(
-    monkeypatch, graph, import_id, expected,
+    monkeypatch, graph, import_id, legacy, expected,
 ):
     from unittest.mock import MagicMock
 
@@ -176,6 +178,7 @@ def test_read_api_never_exposes_old_graph_or_source_evidence(
     app.state.routing_http_client = object()
     session = MagicMock()
     session.execute.return_value.mappings.return_value.one_or_none.return_value = {
+        "raw": {"type": "relation"} if legacy else raw(),
         "current_import_id": 1, "import_id": import_id, "graph_identity": graph,
         "state": "matched", "reason": "fixture", "evidence": {"edge_ids": ["100"]},
     }
@@ -185,3 +188,31 @@ def test_read_api_never_exposes_old_graph_or_source_evidence(
     assert result.state == expected
     assert bool(result.evidence) == (expected == "matched")
     assert result.alert_eligible is False
+
+
+def test_legacy_import_is_distinct_from_attempted_but_ambiguous_topology():
+    data = raw()
+    del data["road_ways"]
+    result = source_path(data)
+    assert result.state == "missing_source_geometry"
+    assert result.reason == "enriched_import_required"
+    assert not result.evidence
+
+
+def test_batch_requires_enriched_import_before_persisting_associations(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from compass.enforcement import association_job
+
+    sessions = MagicMock()
+    sessions.return_value.__enter__.return_value.execute.return_value.scalar_one.return_value = 100
+    match = AsyncMock()
+    monkeypatch.setattr(association_job, "SessionLocal", sessions)
+    monkeypatch.setattr(association_job, "graph_identity", AsyncMock(return_value="3.8.3:123"))
+    monkeypatch.setattr(association_job, "associate", match)
+    result = asyncio.run(association_job.run(Settings(), 100))
+    assert result["status"] == "source_geometry_required"
+    assert result["processed"] == 0
+    assert result["missing_source_geometry"] == 100
+    match.assert_not_called()
+    sessions.begin.assert_not_called()

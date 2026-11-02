@@ -5,17 +5,31 @@ import re
 from dataclasses import dataclass
 
 
-def query(country: str) -> str:
+def query(country: str, *, include_roads: bool = True) -> str:
     if not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("Expected ISO 3166-1 alpha-2 country")
-    return (
+    base = (
         '[out:json][timeout:180];'
         f'area["ISO3166-1"="{country}"]["admin_level"="2"]->.country;'
         '(node(area.country)["highway"="speed_camera"];'
         'rel(area.country)["type"="enforcement"]["enforcement"~"^(maxspeed|average_speed)$"];)'
+    )
+    if not include_roads:
+        return base + ";out body; >; out body;"
+    return base + (
         '->.controls; .controls > ->.members;'
         '(.controls;.members;way(bn.members)["highway"];);'
         'out body; >; out body;'
+    )
+
+
+def roads_query(node_ids: list[int]) -> str:
+    if not node_ids or len(node_ids) > 200 or any(type(i) is not int or i <= 0 for i in node_ids):
+        raise ValueError("Expected 1–200 positive node IDs")
+    ids = ",".join(str(i) for i in node_ids)
+    return (
+        f'[out:json][timeout:90];node(id:{ids});'
+        'way(bn)["highway"];out body; >; out body;'
     )
 
 

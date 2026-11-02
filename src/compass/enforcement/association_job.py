@@ -15,6 +15,14 @@ async def run(settings: Settings, limit: int) -> dict:
     async with httpx.AsyncClient(headers={"User-Agent": settings.http_user_agent}) as client:
         identity = await graph_identity(client, settings)
         with SessionLocal() as session:
+            missing = session.execute(text("""
+                SELECT count(*) FROM enforcement_controls
+                WHERE active AND raw->>'type'='relation' AND NOT (raw ? 'road_ways')
+            """)).scalar_one()
+            if missing:
+                return {"status": "source_geometry_required", "graph_identity": identity,
+                        "processed": 0,
+                        "missing_source_geometry": missing, "states": {}, "matched_sample": []}
             controls = session.execute(text("""
                 SELECT c.source_key,c.import_id,c.raw FROM enforcement_controls c
                 LEFT JOIN enforcement_associations a ON a.source_key=c.source_key

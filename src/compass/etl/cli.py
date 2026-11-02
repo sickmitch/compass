@@ -83,17 +83,13 @@ def _osm(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _enforcement(args: argparse.Namespace) -> dict[str, object]:
+    from compass.enforcement.acquisition import download_inventory
     from compass.enforcement.importer import ingest
-    from compass.enforcement.osm import query
 
     settings = get_settings()
-    payload = _file_payload(args.input_file, "application/json") if args.input_file else download(
-        settings.overpass_url,
-        timeout_seconds=settings.http_timeout_seconds,
-        max_bytes=settings.overpass_max_download_bytes,
-        user_agent=settings.http_user_agent,
-        method="POST",
-        data={"data": query(settings.overpass_area_iso3166_1)},
+    payload = (
+        _file_payload(args.input_file, "application/json")
+        if args.input_file else download_inventory(settings)
     )
     with SessionLocal() as session:
         return ingest(session, payload, settings.overpass_area_iso3166_1)
