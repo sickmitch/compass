@@ -82,11 +82,43 @@ and the enriched Overpass query require server validation; no live success is cl
 Local validation for the acquisition repair: 422 tests passed, six database integration tests
 deselected; Ruff and OpenAPI consistency checks passed. No live association/import or Android
 device test was executed by the agent.
-The operator reported HTTP 502 before import, followed by 100 ambiguous associations.
-These results do not establish road ambiguity: older imports can lack road membership.
-The diagnostic script now reports missing_source_geometry explicitly.
+## Operator evidence — 2026-11-02
 
-## Operator handoff
+The operator completed acquisition and the first association batch after the acquisition repair:
+
+- Import 2: 7,106 accepted source records, nine unresolved relations quarantined. These are
+  source records, not necessarily distinct physical devices.
+- All 16 road-enrichment batches completed despite retried upstream failures. Road enrichment
+  took about 15 minutes; this is one observed run, not a performance guarantee.
+- 1,900 active relations; zero missing road_ways keys. This proves enrichment was attempted,
+  not that every relation has sufficient or unambiguous road geometry.
+- Graph identity 3.8.3:1793503103: first 100 records produced 42 matched, 48 ambiguous and
+  10 unmatched. The batch is ordered, not randomly sampled; 42% is not national coverage.
+- Protected association API returned HTTP 200 and matched evidence for relations 10048062
+  and 10048063 (five edges, 68 m each), and 10089048 (two edges, 42 m).
+- Every sample retained alert_eligible=false, as intended for this backend-only increment.
+
+This validates acquisition recovery, persistence and association/API integration on the supported
+subset. It does not validate all carriageway directions, ambiguous records, Tutor traversal,
+Android warnings or offline operation. Equal edge counts/lengths for two relations do not prove
+that they refer to the same directed edges; their identities must not be merged on that basis.
+
+The next inventory pass can use the already imported data, without another Overpass download.
+For this reported snapshot, 1,800 relations remain after the first 100. Run the commands below
+only while the source import and graph identity remain unchanged; the job automatically selects
+outdated associations first if either changes:
+
+    cd ~/docker/compass
+    docker compose --profile jobs run --rm etl enforcement-associate --limit 1000 && \
+      docker compose --profile jobs run --rm etl enforcement-associate --limit 800
+    docker compose exec -T api python3 < scripts/check-enforcement-associations.py
+
+Return both job summaries and the diagnostic output. With unchanged source/graph, expect 1,900
+stored relation results in total, not necessarily 1,900 matched results. Standalone camera nodes
+remain outside this pass and cannot be enabled for directional warnings merely by proximity.
+No rebuild, migration or APK is required for this additional processing.
+
+## Deployment/reference handoff
 
 Working directory ~/docker/compass, existing .env credentials and database backup available.
 Sync, rebuild shared API/ETL image, apply migration, and reimport once to acquire road membership:
