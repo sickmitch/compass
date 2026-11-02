@@ -29,6 +29,7 @@ are distinct constraints.
 | [API](docs/api.md) / [OpenAPI](docs/openapi.json) | Requests, responses, units and errors |
 | [Android](docs/android.md) | Toolchain, configuration and device diagnostics |
 | [Client updates](docs/client-updates.md) | APK publishing, signing and installation |
+| [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
 | [Current release gate](docs/phases/android-0.28.46-nominal-routing-gate.md) | Operator deployment/device acceptance |

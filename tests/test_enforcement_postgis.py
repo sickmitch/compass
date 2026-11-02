@@ -42,6 +42,25 @@ def test_enforcement_import_is_atomic_idempotent_and_spatial(monkeypatch):
                 AND ST_DWithin(location,ST_SetSRID(ST_MakePoint(9,45),4326)::geography,1000)
             """)).scalar_one()
             assert rows == 3
+            # Real spatial join, including an obsolete graph proof that must not leak.
+            from compass.enforcement.packages import read_package
+
+            session.execute(text("""
+                INSERT INTO enforcement_associations
+                    (source_key,import_id,graph_identity,state,reason,evidence)
+                VALUES ('osm:relation:900000000004',:id,'old:1','matched','fixture','{}')
+                ON CONFLICT(source_key) DO UPDATE SET graph_identity='old:1',
+                    import_id=excluded.import_id
+            """), {"id": first["import_id"]})
+            package = read_package(session, "current:2", 45, 9, 1000)
+            controls = {c.source_key: c for c in package.controls}
+            assert "osm:node:900000000001" in controls
+            control = controls["osm:relation:900000000004"]
+            assert control.association_state == "stale"
+            assert control.directed_path is None
+            assert not control.alert_eligible
+            outside = read_package(session, "current:2", 0, 0, 100)
+            assert not outside.controls
             session.rollback()
             with pytest.raises(ValueError):
                 ingest(session, DownloadedPayload(b'{"remark":"timeout","elements":[]}',

@@ -10,6 +10,7 @@ from compass.api.contracts import StrictModel, error_response
 from compass.config import get_settings
 from compass.db import get_session
 from compass.enforcement.identity import physical_control_key
+from compass.enforcement.packages import ControlPackage, read_package
 from compass.enforcement.road_context import (
     RoadContext,
     RoadContextRequest,
@@ -124,3 +125,34 @@ async def association_evidence(
             state, reason, evidence = row["state"], row["reason"], row["evidence"]
     return AssociationResponse(source_key=source_key, graph_identity=identity,
                                state=state, reason=reason, evidence=evidence)
+
+
+@router.get("/map-package", response_model=ControlPackage)
+async def map_package(
+    latitude: Annotated[float, Query(ge=-90, le=90)],
+    longitude: Annotated[float, Query(ge=-180, le=180)],
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    radius_meters: Annotated[int, Query(ge=100, le=10_000)] = 2_000,
+):
+    import httpx
+    from starlette.concurrency import run_in_threadpool
+
+    from compass.enforcement.association import graph_identity
+
+    response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+    settings = get_settings()
+    client = request.app.state.routing_http_client
+    try:
+        identity = await graph_identity(client, settings)
+        result = await run_in_threadpool(
+            read_package, session, identity, latitude, longitude, radius_meters,
+        )
+        if identity != await graph_identity(client, settings):
+            return error_response(503, "enforcement_graph_changed", "Road graph changed; retry.")
+        return result
+    except (SQLAlchemyError, httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
+        return error_response(
+            503, "enforcement_package_unavailable", "Control package unavailable.",
+        )

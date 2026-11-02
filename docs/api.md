@@ -377,3 +377,12 @@ If enrichment is disabled, unavailable or malformed, the source is `null`, the l
 the otherwise valid route remains available. The same fields exist on every selected-stop and
 predictive-itinerary leg. Values `0` (unknown) and `255` (unlimited) are never serialized as numeric
 limits.
+
+## Enforcement snapshots
+
+`GET /api/v1/enforcement/map-package?latitude=45&longitude=9&radius_meters=2000`
+returns up to 200 controls with source metadata and current directed-road association evidence.
+Radius is bounded to 100–10000 meters. Source/graph version changes suppress obsolete geometry;
+a graph replacement during the request produces HTTP 503. Every record retains
+`alert_eligible=false`; this contract is not a vehicle-approach decision. See the
+[contract, limits and server check](phases/enforcement-packages.md).

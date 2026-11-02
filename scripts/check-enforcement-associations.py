@@ -5,6 +5,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 
 from sqlalchemy import text
 
@@ -46,3 +47,35 @@ for key in keys:
             print(response.status, json.dumps(result))
     except urllib.error.HTTPError as error:
         print(error.code, error.read().decode())
+
+# Test the bounded client package around a known control, without another OSM download.
+if keys:
+    with SessionLocal() as session:
+        center = session.execute(text("""
+            SELECT ST_Y(location::geometry) AS latitude,ST_X(location::geometry) AS longitude
+            FROM enforcement_controls WHERE source_key=:key AND active
+        """), {"key": keys[0]}).mappings().one_or_none()
+    if center:
+        request = urllib.request.Request(
+            "http://127.0.0.1:8000/api/v1/enforcement/map-package?" +
+            urllib.parse.urlencode({**dict(center), "radius_meters": 2000}), headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                package = json.load(response)
+                controls = package["controls"]
+                print("map_package", response.status, json.dumps({
+                    "graph_identity": package["graph_identity"],
+                    "count": len(controls), "truncated": package["truncated"],
+                    "states": dict(Counter(c["association_state"] for c in controls)),
+                    "any_alert_eligible": any(c["alert_eligible"] for c in controls),
+                    "matched_sample": [{
+                        "source_key": c["source_key"],
+                        "physical_control_key": c["physical_control_key"],
+                        "forward": c["directed_path"]["forward"],
+                        "edge_ids": c["directed_path"]["edge_ids"][:5],
+                        "length_meters": c["directed_path"]["length_meters"],
+                    } for c in controls if c["directed_path"] is not None][:5],
+                }))
+        except urllib.error.HTTPError as error:
+            print("map_package", error.code, error.read().decode())

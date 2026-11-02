@@ -812,6 +812,71 @@
         "title": "Control",
         "type": "object"
       },
+      "ControlPackage": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "default": "\u00a9 OpenStreetMap contributors \u2014 ODbL 1.0",
+            "title": "Attribution",
+            "type": "string"
+          },
+          "controls": {
+            "items": {
+              "$ref": "#/components/schemas/PackageControl"
+            },
+            "title": "Controls",
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "graph_identity": {
+            "title": "Graph Identity",
+            "type": "string"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "radius_meters": {
+            "title": "Radius Meters",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "spatial_basis": {
+            "const": "control_location",
+            "default": "control_location",
+            "title": "Spatial Basis",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "graph_identity",
+          "generated_at",
+          "latitude",
+          "longitude",
+          "radius_meters",
+          "controls",
+          "truncated"
+        ],
+        "title": "ControlPackage",
+        "type": "object"
+      },
       "CoordinateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1731,6 +1796,62 @@
           "candidates"
         ],
         "title": "DetourCandidatesResponse",
+        "type": "object"
+      },
+      "DirectedControlPath": {
+        "additionalProperties": false,
+        "properties": {
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 512,
+            "minItems": 1,
+            "title": "Edge Ids",
+            "type": "array"
+          },
+          "encoded_polyline": {
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Encoded Polyline",
+            "type": "string"
+          },
+          "forward": {
+            "title": "Forward",
+            "type": "boolean"
+          },
+          "from_node": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "From Node",
+            "type": "string"
+          },
+          "length_meters": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 50000.0,
+            "title": "Length Meters",
+            "type": "number"
+          },
+          "osm_way_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Osm Way Id",
+            "type": "string"
+          },
+          "to_node": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "To Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "osm_way_id",
+          "forward",
+          "from_node",
+          "to_node",
+          "edge_ids",
+          "encoded_polyline",
+          "length_meters"
+        ],
+        "title": "DirectedControlPath",
         "type": "object"
       },
       "EligibleDetourCandidateResponse": {
@@ -3045,6 +3166,118 @@
           "warnings"
         ],
         "title": "OpeningHoursEvaluationResponse",
+        "type": "object"
+      },
+      "PackageControl": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_eligible": {
+            "const": false,
+            "default": false,
+            "title": "Alert Eligible",
+            "type": "boolean"
+          },
+          "association_reason": {
+            "title": "Association Reason",
+            "type": "string"
+          },
+          "association_state": {
+            "enum": [
+              "matched",
+              "ambiguous",
+              "unmatched",
+              "unknown_direction",
+              "stale",
+              "missing_source_geometry",
+              "invalid_evidence"
+            ],
+            "title": "Association State",
+            "type": "string"
+          },
+          "directed_path": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectedControlPath"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction_degrees": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction Degrees"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fixed",
+              "average_speed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "physical_control_key": {
+            "title": "Physical Control Key",
+            "type": "string"
+          },
+          "source_import_id": {
+            "title": "Source Import Id",
+            "type": "string"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "speed_limit_kph": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Kph"
+          }
+        },
+        "required": [
+          "source_key",
+          "physical_control_key",
+          "source_import_id",
+          "kind",
+          "latitude",
+          "longitude",
+          "direction_degrees",
+          "speed_limit_kph",
+          "fetched_at",
+          "association_state",
+          "association_reason"
+        ],
+        "title": "PackageControl",
         "type": "object"
       },
       "PlaceSearchResponse": {
@@ -7361,6 +7594,88 @@
           }
         ],
         "summary": "Association Evidence",
+        "tags": [
+          "enforcement"
+        ]
+      }
+    },
+    "/api/v1/enforcement/map-package": {
+      "get": {
+        "operationId": "map_package_api_v1_enforcement_map_package_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "latitude",
+            "required": true,
+            "schema": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Latitude",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "required": true,
+            "schema": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Longitude",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_meters",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "maximum": 10000,
+              "minimum": 100,
+              "title": "Radius Meters",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlPackage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Map Package",
         "tags": [
           "enforcement"
         ]

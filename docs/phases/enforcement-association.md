@@ -103,20 +103,16 @@ subset. It does not validate all carriageway directions, ambiguous records, Tuto
 Android warnings or offline operation. Equal edge counts/lengths for two relations do not prove
 that they refer to the same directed edges; their identities must not be merged on that basis.
 
-The next inventory pass can use the already imported data, without another Overpass download.
-For this reported snapshot, 1,800 relations remain after the first 100. Run the commands below
-only while the source import and graph identity remain unchanged; the job automatically selects
-outdated associations first if either changes:
+The operator subsequently completed the remaining 1,800 relations against the same graph:
+- batch of 1,000: 451 matched, 482 ambiguous, 67 unmatched;
+- batch of 800: 292 matched, 471 ambiguous, 37 unmatched;
+- total: **785 matched, 1,001 ambiguous, 114 unmatched**, all 1,900 relations processed;
+- the API continued to return current matched evidence with alerts disabled.
 
-    cd ~/docker/compass
-    docker compose --profile jobs run --rm etl enforcement-associate --limit 1000 && \
-      docker compose --profile jobs run --rm etl enforcement-associate --limit 800
-    docker compose exec -T api python3 < scripts/check-enforcement-associations.py
-
-Return both job summaries and the diagnostic output. With unchanged source/graph, expect 1,900
-stored relation results in total, not necessarily 1,900 matched results. Standalone camera nodes
-remain outside this pass and cannot be enabled for directional warnings merely by proximity.
-No rebuild, migration or APK is required for this additional processing.
+The acquisition/association integration gate is accepted for this supported subset. There is no
+need to repeat the import or these batches for the unchanged snapshot. Standalone camera nodes
+remain outside that pass. The next contract and live check are documented in
+[versioned client snapshots](enforcement-packages.md).
 
 ## Deployment/reference handoff
 

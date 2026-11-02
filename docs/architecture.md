@@ -99,3 +99,7 @@ matching endpoint and explicit OSM device aliases. It does not yet enable driver
 [Versioned enforcement associations](phases/enforcement-association.md) now support explicit
 single-way from/to relations. Evidence is invalidated on source/graph changes; Android alerts,
 offline packages and multi-way Tutor handling are still pending.
+
+[Versioned control snapshots](phases/enforcement-packages.md) expose bounded spatial inventories
+with current directed-association evidence, preserving source/graph identities and truncation.
+They do not certify vehicle approach or enable Android warnings; those integrations remain pending.
