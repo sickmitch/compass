@@ -95,3 +95,7 @@ connected to Android or navigation alerts. Directed-road association remains pen
 
 [Bounded road context](phases/enforcement-road-context.md) provides a backend GPS-trace
 matching endpoint and explicit OSM device aliases. It does not yet enable driver alerts.
+
+[Versioned enforcement associations](phases/enforcement-association.md) now support explicit
+single-way from/to relations. Evidence is invalidated on source/graph changes; Android alerts,
+offline packages and multi-way Tutor handling are still pending.

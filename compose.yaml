@@ -210,6 +210,7 @@ services:
     image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     entrypoint: ["compass-etl"]
     environment:
+      VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://compass:compass-local-only@db:5432/compass}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-180}
       HTTP_USER_AGENT: ${HTTP_USER_AGENT:-compass-cng/0.1.0}

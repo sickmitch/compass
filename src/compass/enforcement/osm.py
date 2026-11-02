@@ -12,7 +12,9 @@ def query(country: str) -> str:
         '[out:json][timeout:180];'
         f'area["ISO3166-1"="{country}"]["admin_level"="2"]->.country;'
         '(node(area.country)["highway"="speed_camera"];'
-        'rel(area.country)["type"="enforcement"]["enforcement"~"^(maxspeed|average_speed)$"];);'
+        'rel(area.country)["type"="enforcement"]["enforcement"~"^(maxspeed|average_speed)$"];)'
+        '->.controls; .controls > ->.members;'
+        '(.controls;.members;way(bn.members)["highway"];);'
         'out body; >; out body;'
     )
 
@@ -44,6 +46,17 @@ def parse_report(content: bytes) -> ParseReport:
     if payload.get("remark") or not isinstance(payload.get("elements"), list):
         raise ValueError("Incomplete or invalid Overpass response")
     elements = {(e["type"], e["id"]): e for e in payload["elements"]}
+    roads_by_node = {}
+    for (element_type, _), way in elements.items():
+        if element_type == "way" and way.get("tags", {}).get("highway"):
+            nodes = way.get("nodes", [])
+            geometry = [elements.get(("node", ref)) for ref in nodes]
+            road = {"id": way["id"], "nodes": nodes, "geometry": [
+                {"lat": node.get("lat"), "lon": node.get("lon")} if node else None
+                for node in geometry
+            ]}
+            for ref in set(nodes):
+                roads_by_node.setdefault(ref, []).append(road)
     result = []
     rejected = []
     for (kind, osm_id), element in elements.items():
@@ -69,7 +82,11 @@ def parse_report(content: bytes) -> ParseReport:
             if item["role"] in {"device", "from", "to"} and item["element"] is not None
         ]
         points = [p for p in points if "lat" in p and "lon" in p]
-        raw = dict(element, resolved_members=resolved)
+        anchor_ids = {osm_id} if is_node else {
+            member["ref"] for member in members if member["type"] == "node"
+        }
+        roads = {road["id"]: road for ref in anchor_ids for road in roads_by_node.get(ref, [])}
+        raw = dict(element, resolved_members=resolved, road_ways=list(roads.values()))
         reason = None
         if not points:
             reason = "unresolved_location"
@@ -94,7 +111,7 @@ def parse_report(content: bytes) -> ParseReport:
             "latitude": lat, "longitude": lon,
             "direction_degrees": direction % 360 if direction is not None else None,
             "speed_limit_kph": speed if speed and speed > 0 else None,
-            "raw": dict(element, resolved_members=resolved),
+            "raw": raw,
         })
     return ParseReport(
         sorted(result, key=lambda item: item["source_key"]),

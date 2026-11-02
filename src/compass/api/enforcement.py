@@ -78,3 +78,47 @@ async def road_context(body: RoadContextRequest, request: Request, response: Res
         return await match_context(body, request.app.state.routing_http_client, get_settings())
     except RoadContextUnavailable:
         return error_response(503, "road_context_unavailable", "Road context unavailable.")
+
+
+class AssociationResponse(StrictModel):
+    source_key: str
+    graph_identity: str
+    state: str
+    reason: str
+    evidence: dict
+    alert_eligible: Literal[False] = False
+
+
+@router.get("/association", response_model=AssociationResponse)
+async def association_evidence(
+    source_key: Annotated[str, Query(pattern=r"^osm:(node|relation):[0-9]{1,20}$")],
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+):
+    import httpx
+
+    from compass.enforcement.association import graph_identity
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        identity = await graph_identity(request.app.state.routing_http_client, get_settings())
+        row = session.execute(text("""
+            SELECT c.import_id AS current_import_id,a.import_id,a.graph_identity,
+                   a.state,a.reason,a.evidence
+            FROM enforcement_controls c
+            LEFT JOIN enforcement_associations a ON a.source_key=c.source_key
+            WHERE c.source_key=:key AND c.active
+        """), {"key": source_key}).mappings().one_or_none()
+    except (SQLAlchemyError, httpx.HTTPError, ValueError, TypeError, AttributeError):
+        return error_response(503, "association_unavailable", "Association evidence unavailable.")
+    if row is None:
+        return error_response(404, "enforcement_not_found", "Enforcement control not found.")
+    state, reason, evidence = "unmatched", "not_processed", {}
+    if row["graph_identity"] is not None:
+        if row["graph_identity"] != identity or row["import_id"] != row["current_import_id"]:
+            state, reason = "stale", "graph_or_source_changed"
+        else:
+            state, reason, evidence = row["state"], row["reason"], row["evidence"]
+    return AssociationResponse(source_key=source_key, graph_identity=identity,
+                               state=state, reason=reason, evidence=evidence)

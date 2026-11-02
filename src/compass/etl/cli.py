@@ -99,6 +99,14 @@ def _enforcement(args: argparse.Namespace) -> dict[str, object]:
         return ingest(session, payload, settings.overpass_area_iso3166_1)
 
 
+def _associate_enforcement(args: argparse.Namespace) -> dict[str, object]:
+    import asyncio
+
+    from compass.enforcement.association_job import run
+
+    return asyncio.run(run(get_settings(), args.limit))
+
+
 def _normalize(_args: argparse.Namespace) -> dict[str, object]:
     with SessionLocal() as session:
         return normalize_and_reconcile(session)
@@ -132,6 +140,9 @@ def parser() -> argparse.ArgumentParser:
     enforcement = subcommands.add_parser("enforcement", help="import OSM enforcement inventory")
     enforcement.add_argument("--input-file", type=Path)
     enforcement.set_defaults(handler=_enforcement)
+    association = subcommands.add_parser("enforcement-associate")
+    association.add_argument("--limit", type=int, default=100)
+    association.set_defaults(handler=_associate_enforcement)
     normalize = subcommands.add_parser(
         "normalize", help="normalize latest raw imports and reconcile MIMIT with OSM"
     )
