@@ -92,3 +92,6 @@ operational instructions are in [deployment](deployment.md) and [Android](androi
 
 The [source-preserving PostGIS catalog](phases/enforcement-inventory.md) is not yet
 connected to Android or navigation alerts. Directed-road association remains pending.
+
+[Bounded road context](phases/enforcement-road-context.md) provides a backend GPS-trace
+matching endpoint and explicit OSM device aliases. It does not yet enable driver alerts.

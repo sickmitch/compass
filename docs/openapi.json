@@ -732,6 +732,17 @@
             "title": "Longitude",
             "type": "number"
           },
+          "physical_control_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Control Key"
+          },
           "source_key": {
             "title": "Source Key",
             "type": "string"
@@ -4485,6 +4496,165 @@
         "title": "RankingPolicyResponse",
         "type": "object"
       },
+      "RoadContext": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_eligible": {
+            "const": false,
+            "default": false,
+            "title": "Alert Eligible",
+            "type": "boolean"
+          },
+          "current_edge_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Edge Index"
+          },
+          "distance_from_trace_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance From Trace Meters"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/RoadEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "persistable": {
+            "const": false,
+            "default": false,
+            "title": "Persistable",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "candidate",
+              "uncertain",
+              "insufficient_movement"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "reason"
+        ],
+        "title": "RoadContext",
+        "type": "object"
+      },
+      "RoadContextRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/TracePoint"
+            },
+            "maxItems": 12,
+            "minItems": 3,
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "RoadContextRequest",
+        "type": "object"
+      },
+      "RoadEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "begin_heading": {
+            "title": "Begin Heading",
+            "type": "number"
+          },
+          "edge_id": {
+            "title": "Edge Id",
+            "type": "string"
+          },
+          "end_heading": {
+            "title": "End Heading",
+            "type": "number"
+          },
+          "forward": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forward"
+          },
+          "osm_way_id": {
+            "title": "Osm Way Id",
+            "type": "string"
+          },
+          "speed_limit_kph": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Kph"
+          }
+        },
+        "required": [
+          "edge_id",
+          "osm_way_id",
+          "forward",
+          "begin_heading",
+          "end_heading",
+          "speed_limit_kph"
+        ],
+        "title": "RoadEdge",
+        "type": "object"
+      },
       "RouteContextRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6009,6 +6179,43 @@
         "title": "SuggestionResponse",
         "type": "object"
       },
+      "TracePoint": {
+        "additionalProperties": false,
+        "properties": {
+          "accuracy_meters": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 100.0,
+            "title": "Accuracy Meters",
+            "type": "number"
+          },
+          "elapsed_seconds": {
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "elapsed_seconds",
+          "accuracy_meters"
+        ],
+        "title": "TracePoint",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -7055,6 +7262,62 @@
           }
         ],
         "summary": "Inventory",
+        "tags": [
+          "enforcement"
+        ]
+      }
+    },
+    "/api/v1/enforcement/road-context": {
+      "post": {
+        "operationId": "road_context_api_v1_enforcement_road_context_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoadContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoadContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Road Context",
         "tags": [
           "enforcement"
         ]
