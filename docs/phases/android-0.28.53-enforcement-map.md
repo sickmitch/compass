@@ -1,5 +1,9 @@
 # Android 0.28.53 — shared enforcement map packages
 
+Historical delivery: the operator confirmed the two camera positions in the free-follow screenshot.
+The persistent badge and map-only behavior below are superseded by
+[0.28.54 approach warnings](android-0.28.54-enforcement-approach.md).
+
 ## Confirmed server prerequisite
 
 The operator returned map_package HTTP 200 for graph 3.8.3:1793503103, four controls,

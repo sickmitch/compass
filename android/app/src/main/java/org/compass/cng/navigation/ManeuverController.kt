@@ -14,6 +14,7 @@ enum class AnnouncementKind {
     MANEUVER,
     FUEL_STOP,
     ARRIVAL,
+    ENFORCEMENT,
 }
 
 data class VoiceAnnouncement(

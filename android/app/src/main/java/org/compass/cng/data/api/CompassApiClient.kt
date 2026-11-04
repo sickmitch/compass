@@ -88,6 +88,12 @@ class CompassApiClient(
             ).validated()
         }
 
+    suspend fun checkEnforcementApproach(trace: org.compass.cng.enforcement.ApproachTrace):
+        org.compass.cng.enforcement.ApproachResult = post(
+            resolve("api/v1/enforcement/approach"), json.encodeToString(trace),
+            client = enforcementHttpClient, maxBytes = 64_000L,
+        )
+
     suspend fun getBackendSystemInfo(): ApiBackendSystemInfo {
         val health = get<HealthResponseDto>(resolve("health/live"))
         return ApiBackendSystemInfo(
@@ -417,6 +423,7 @@ class CompassApiClient(
         url: HttpUrl,
         requestJson: String,
         client: OkHttpClient = httpClient,
+        maxBytes: Long? = null,
     ): ResponseDto = withContext(Dispatchers.IO) {
         val endpoint = url.encodedPath
         val startedAtNanos = monotonicNanos()
@@ -432,6 +439,9 @@ class CompassApiClient(
         )
         try {
             client.newCall(request).execute().use { response ->
+                if (maxBytes != null && response.body.source().request(maxBytes + 1)) {
+                    throw ApiClientException.InvalidResponse(IllegalArgumentException("Response too large"))
+                }
                 val body = response.body.string()
                 eventLogger(
                     "request completed: method=POST endpoint=$endpoint status=${response.code} " +

@@ -104,7 +104,10 @@ Android consumes these snapshots for [map display and a bounded last-area cache]
 in both navigation and free follow, reusing existing GPS fixes and HTTP/authentication settings.
 Directional evidence stays separate from physical-device deduplication for map icons.
 
-Still pending: continuous vehicle-road matching in Android, approach/voice warnings, offline
-road-network packages and Tutor average-speed tracking. Displayed inventory points alone do
-not authorize an alert. Multi-way associations, MIT ingestion and scheduled enforcement jobs
-also remain outside the implemented subset.
+[Approach checks](phases/android-0.28.54-enforcement-approach.md) combine a bounded GPS trace,
+Valhalla directed matching and competing-road checks with current control associations. Android
+consumes the resulting short corridor for local visual/voice warnings in guidance and free follow,
+with speed-based thresholds and passage deduplication. Inventory points alone do not authorize alerts.
+Offline continuation is limited to a recently verified in-memory corridor, not fresh road matching.
+Full offline road-network packages, multi-way associations, Tutor average-speed tracking, MIT
+ingestion and scheduled enforcement jobs remain outside the implemented subset.

@@ -13,6 +13,7 @@ Jetpack Compose and MapLibre client.
   timestamps, price units and unknown opening hours remain explicit.
 - Arrival-aware station availability and explainable ranking after spatial pruning.
 - GPS guidance, voice, stop management, PiP, saved-route recovery and automatic APK updates.
+- OSM camera markers and directional approach warnings for verified controls, in guidance and free follow.
 
 Durations use nominal Valhalla graph costs plus planned dwell. Android shows a pastel
 green ETA and journey progress ring. Loaded routes can support guidance during an outage;
@@ -32,7 +33,7 @@ are distinct constraints.
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/phases/android-0.28.53-enforcement-map.md) | Operator deployment/device acceptance |
+| [Current release gate](docs/phases/android-0.28.54-enforcement-approach.md) | Operator deployment/device acceptance |
 
 ## Local validation
 

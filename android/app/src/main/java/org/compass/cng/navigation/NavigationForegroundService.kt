@@ -39,6 +39,7 @@ import org.compass.cng.domain.model.Coordinate
 class NavigationForegroundService : Service(), LocationListener {
     private lateinit var session: NavigationSession
     private lateinit var routeRecalculator: NavigationRouteRecalculator
+    private lateinit var enforcementApproach: org.compass.cng.enforcement.ApproachCoordinator
     private lateinit var voiceGuidance: VoiceGuidance
     private lateinit var locationManager: LocationManager
     private lateinit var connectivityManager: ConnectivityManager
@@ -82,6 +83,7 @@ class NavigationForegroundService : Service(), LocationListener {
         super.onCreate()
         val container = (application as CompassApplication).container
         session = container.navigationSession
+        enforcementApproach = container.enforcementApproach
         routeRecalculator = container.navigationRouteRecalculator
         voiceGuidance = AndroidTextToSpeechVoiceGuidance(this)
         locationManager = getSystemService(LocationManager::class.java)
@@ -359,6 +361,7 @@ class NavigationForegroundService : Service(), LocationListener {
 
     private fun processNavigationState(nowEpochMillis: Long) {
         val state = session.state.value
+        enforcementApproach.update(state.rawLocation)
         if (state.phase == NavigationPhase.ARRIVED) {
             finishAtDestination(state)
             return
@@ -375,6 +378,7 @@ class NavigationForegroundService : Service(), LocationListener {
             )
             lastLoggedOffRouteStatus = state.offRouteStatus
         }
+        enforcementApproach.claimSpeech(state.voiceGuidanceEnabled)?.let { voiceGuidance.speak(it) }
         if (state.voiceGuidanceEnabled) {
             maneuverController.nextAnnouncement(state)?.let { announcement ->
                 Log.i(

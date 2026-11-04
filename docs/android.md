@@ -24,8 +24,10 @@ Maneuvers use at most three speed-dependent voice alerts; see the
 [guidance checks](phases/android-0.28.52-guidance.md).
 
 Autovelox/Tutor inventory icons now share a bounded package repository and local last-area cache
-between navigation and free follow. They are informational: approach/voice alerts and Tutor
-average-speed tracking remain pending. See [the map/cache device checks](phases/android-0.28.53-enforcement-map.md).
+between navigation and free follow. Verified directional approaches now show a distance/limit card
+and one spoken warning per passage. Inventory points without road/direction proof remain map-only.
+Tutor average-speed tracking is still pending; offline alerts are limited to a recently verified
+in-memory corridor. See [the approach device checks](phases/android-0.28.54-enforcement-approach.md).
 
 ## Build and local validation
 

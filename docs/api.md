@@ -386,3 +386,14 @@ Radius is bounded to 100–10000 meters. Source/graph version changes suppress o
 a graph replacement during the request produces HTTP 503. Every record retains
 `alert_eligible=false`; this contract is not a vehicle-approach decision. See the
 [contract, limits and server check](phases/enforcement-packages.md).
+
+### Vehicle approach warnings
+
+`POST /api/v1/enforcement/approach` uses the authenticated `RoadContextRequest` trace schema.
+It returns `state` (`approach`, `none`, `uncertain`), `reason`, nullable `graph_identity`,
+`observed_at` (UTC evaluation time) and nullable `alert`. An alert includes source/physical IDs,
+kind, directed OSM way, optional km/h limit, road distance in meters, polyline6 approach geometry
+and target coordinates. Inventory/package `alert_eligible=false` remains unchanged: only this
+vehicle-specific check supplies approach evidence. The endpoint makes no persistence changes.
+Responses use `Cache-Control: no-store`; failures return 503 `enforcement_approach_unavailable`.
+See [eligibility, timing and offline limits](phases/android-0.28.54-enforcement-approach.md).

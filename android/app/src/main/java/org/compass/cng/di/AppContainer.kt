@@ -78,6 +78,17 @@ class AppContainer(context: Context) {
         routeStore = SharedPreferencesNavigationRouteStore(context),
         eventLogger = { event -> Log.i(COMPASS_NAVIGATION_LOG_TAG, event) },
     )
+    val enforcementApproach = org.compass.cng.enforcement.ApproachCoordinator(
+        repository = enforcementRepository,
+        fetch = apiClient::checkEnforcementApproach,
+        owner = {
+            val connection = serverConnectionRepository.load()
+            org.compass.cng.enforcement.EnforcementRepository.ownerKey(connection.baseUrl, connection.username)
+        },
+        navigation = { navigationSession.state.value },
+        scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() +
+            kotlinx.coroutines.Dispatchers.Main.immediate),
+    )
     val navigationRouteRecalculator: NavigationRouteRecalculator =
         CompassNavigationRouteRecalculator(routingRepository)
 

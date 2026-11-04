@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from compass.api.contracts import StrictModel, error_response
 from compass.config import get_settings
 from compass.db import get_session
+from compass.enforcement.approach import ApproachResult, check_approach
 from compass.enforcement.identity import physical_control_key
 from compass.enforcement.packages import ControlPackage, read_package
 from compass.enforcement.road_context import (
@@ -155,4 +157,28 @@ async def map_package(
     except (SQLAlchemyError, httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
         return error_response(
             503, "enforcement_package_unavailable", "Control package unavailable.",
+        )
+
+
+@router.post("/approach", response_model=ApproachResult)
+async def enforcement_approach(
+    body: RoadContextRequest,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+):
+    import httpx
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        result = await check_approach(body, request.app.state.routing_http_client,
+                                      get_settings(), session)
+        logging.getLogger("compass.enforcement.approach").info(
+            "approach state=%s reason=%s", result.state, result.reason,
+        )
+        return result
+    except (RoadContextUnavailable, SQLAlchemyError, httpx.HTTPError,
+            ValueError, TypeError, KeyError, AttributeError):
+        return error_response(
+            503, "enforcement_approach_unavailable", "Approach check unavailable.",
         )

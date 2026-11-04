@@ -3,8 +3,9 @@ package org.compass.cng.ui.map
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -20,7 +21,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -78,6 +78,26 @@ internal fun rememberEnforcementState(location: NavigationLocation?): Enforcemen
             }
         }
     }
+    val container = application.container
+    val navigation by container.navigationSession.state.collectAsStateWithLifecycle()
+    val freeFollow = navigation.phase in setOf(
+        org.compass.cng.navigation.NavigationPhase.IDLE,
+        org.compass.cng.navigation.NavigationPhase.ROUTE_PREVIEW,
+    )
+    LaunchedEffect(container, lifecycle, freeFollow) {
+        if (freeFollow) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            val voice = org.compass.cng.navigation.AndroidTextToSpeechVoiceGuidance(application)
+            try {
+                while (isActive) {
+                    container.enforcementApproach.update(currentLocation)
+                    container.enforcementApproach.claimSpeech(
+                        container.appPreferencesRepository.load().voiceGuidanceDefault,
+                    )?.let { voice.speak(it) }
+                    delay(1_000)
+                }
+            } finally { voice.shutdown() }
+        }
+    }
     return repository.state.collectAsStateWithLifecycle().value
 }
 
@@ -125,7 +145,9 @@ internal fun EnforcementMapOverlay(mapView: MapView, state: EnforcementMapState,
     var selected by remember { mutableStateOf<EnforcementControl?>(null) }
     val currentState by rememberUpdatedState(state)
     val uriHandler = LocalUriHandler.current
-    val compact = LocalConfiguration.current.screenWidthDp < 250
+    val application = LocalContext.current.applicationContext as? CompassApplication
+    val approach = application?.container?.enforcementApproach?.notice
+        ?.collectAsStateWithLifecycle()?.value
     LaunchedEffect(mapView, state.data) {
         selected = selected?.let { old -> currentState.data?.mapControls()?.firstOrNull {
             it.physicalControlKey == old.physicalControlKey && it.kind == old.kind
@@ -153,16 +175,18 @@ internal fun EnforcementMapOverlay(mapView: MapView, state: EnforcementMapState,
         }
         onDispose { disposed = true; mapReference?.removeOnMapClickListener(listener) }
     }
-    if (!compact) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        shape = MaterialTheme.shapes.small,
-        modifier = modifier.clickable { selected = null; details = true }) {
-        Text(when {
-            state.data == null -> "Autovelox · dati non disponibili"
-            state.data.truncated -> "Autovelox · copertura parziale"
-            state.saved -> "Autovelox · dati salvati"
-            else -> "Autovelox · solo mappa"
-        }, style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+    if (approach != null) Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        shape = MaterialTheme.shapes.medium,
+        modifier = modifier.widthIn(max = 280.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text("${approach.label} · ${approach.roundedDistance} m",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.titleMedium)
+            Text(approach.control.speedLimitKph?.let { "Limite ${it.toInt()} km/h" }
+                ?: "Limite non disponibile", style = MaterialTheme.typography.bodyMedium)
+        }
     }
     if (details) {
         val data = state.data
@@ -178,7 +202,7 @@ internal fun EnforcementMapOverlay(mapView: MapView, state: EnforcementMapState,
                 if (control != null) append(control.speedLimitKph?.let {
                     "Limite segnalato: ${it.toInt()} km/h.\n"
                 } ?: "Limite non disponibile.\n")
-                append("Le icone indicano le posizioni censite. Gli avvisi di avvicinamento non sono ancora attivi.\n")
+                append("Le icone indicano le posizioni censite. Gli avvisi richiedono strada e direzione verificate; i controlli non associati restano visibili solo sulla mappa.\n")
                 if (state.saved) append("Dati salvati sul telefono; aggiornamento non verificato.\n")
                 if (state.unavailable) append("Aggiornamento non disponibile.\n")
                 if (data == null) append("Nessun pacchetto disponibile per questa posizione.\n")

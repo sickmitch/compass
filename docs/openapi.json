@@ -332,6 +332,128 @@
         "title": "AlongRouteSearchResponse",
         "type": "object"
       },
+      "ApproachAlert": {
+        "additionalProperties": false,
+        "properties": {
+          "distance_meters": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1200.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "encoded_polyline": {
+            "title": "Encoded Polyline",
+            "type": "string"
+          },
+          "forward": {
+            "title": "Forward",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "fixed",
+              "average_speed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "osm_way_id": {
+            "title": "Osm Way Id",
+            "type": "string"
+          },
+          "physical_control_key": {
+            "title": "Physical Control Key",
+            "type": "string"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "speed_limit_kph": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Limit Kph"
+          },
+          "target_latitude": {
+            "title": "Target Latitude",
+            "type": "number"
+          },
+          "target_longitude": {
+            "title": "Target Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "source_key",
+          "physical_control_key",
+          "kind",
+          "osm_way_id",
+          "forward",
+          "speed_limit_kph",
+          "distance_meters",
+          "encoded_polyline",
+          "target_latitude",
+          "target_longitude"
+        ],
+        "title": "ApproachAlert",
+        "type": "object"
+      },
+      "ApproachResult": {
+        "additionalProperties": false,
+        "properties": {
+          "alert": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApproachAlert"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "graph_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Identity"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "approach",
+              "none",
+              "uncertain"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "reason"
+        ],
+        "title": "ApproachResult",
+        "type": "object"
+      },
       "AssociationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7536,6 +7658,62 @@
           }
         ],
         "summary": "Inventory",
+        "tags": [
+          "enforcement"
+        ]
+      }
+    },
+    "/api/v1/enforcement/approach": {
+      "post": {
+        "operationId": "enforcement_approach_api_v1_enforcement_approach_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoadContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproachResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Enforcement Approach",
         "tags": [
           "enforcement"
         ]
