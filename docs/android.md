@@ -23,6 +23,10 @@ Base follow includes parking saving. Arrival notices auto-dismiss after five sec
 Maneuvers use at most three speed-dependent voice alerts; see the
 [guidance checks](phases/android-0.28.52-guidance.md).
 
+Autovelox/Tutor inventory icons now share a bounded package repository and local last-area cache
+between navigation and free follow. They are informational: approach/voice alerts and Tutor
+average-speed tracking remain pending. See [the map/cache device checks](phases/android-0.28.53-enforcement-map.md).
+
 ## Build and local validation
 
 Use JDK 17, Android SDK Platform 37, compatible AGP-selected Build-Tools and the pinned

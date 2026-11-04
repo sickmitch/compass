@@ -2,6 +2,10 @@ package org.compass.cng.ui.map
 
 import android.graphics.PointF
 import android.util.Log
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +54,8 @@ fun FollowMap(
     modifier: Modifier = Modifier,
 ) {
     val appearance = compassMapAppearance()
+    val enforcement = rememberEnforcementState(location)
+    val currentEnforcement by rememberUpdatedState(enforcement)
     val mapView = rememberMapViewWithLifecycle()
     val puckAnimator = remember { MapPuckAnimator() }
     val scaleGestureActive = remember(mapView) { mutableStateOf(false) }
@@ -57,7 +63,11 @@ fun FollowMap(
     val currentCameraMode by rememberUpdatedState(cameraMode)
     val currentOnCameraModeChange by rememberUpdatedState(onCameraModeChange)
     val currentLocation by rememberUpdatedState(location)
-    AndroidView(factory = { mapView }, modifier = modifier)
+    Box(modifier) {
+        AndroidView(factory = { mapView }, modifier = Modifier.matchParentSize())
+        EnforcementMapOverlay(mapView, enforcement,
+            Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 170.dp))
+    }
 
     DisposableEffect(mapView, puckAnimator) {
         var registeredMap: MapLibreMap? = null
@@ -115,6 +125,7 @@ fun FollowMap(
     LaunchedEffect(mapView, appearance) {
         mapView.getMapAsync { map ->
             map.setStyle(appearance.styleUrl) { style ->
+                installEnforcementLayer(style, currentEnforcement)
                 localizeMapLabelsInItalian(style)
                 filterMapPoisForNavigation(style)
                 style.addImage(

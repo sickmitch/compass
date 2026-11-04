@@ -88,18 +88,23 @@ behavior and physical navigation require their own environments and evidence. Cu
 operational instructions are in [deployment](deployment.md) and [Android](android.md);
 [history](history.md) summarizes older milestones without treating them as current proof.
 
-## Enforcement inventory (integration gate)
+## Enforcement data and client maps
 
-The [source-preserving PostGIS catalog](phases/enforcement-inventory.md) is not yet
-connected to Android or navigation alerts. Directed-road association remains pending.
+The [source-preserving PostGIS catalog](phases/enforcement-inventory.md) imports OSM camera
+nodes and enforcement relations, preserving unknown fields and quarantining unresolved records.
+[Versioned associations](phases/enforcement-association.md) match explicit single-way from/to
+relations to directed Valhalla edges and invalidate evidence on source/graph changes.
 
-[Bounded road context](phases/enforcement-road-context.md) provides a backend GPS-trace
-matching endpoint and explicit OSM device aliases. It does not yet enable driver alerts.
+[Bounded road context](phases/enforcement-road-context.md) provides a backend GPS-trace match;
+a plausible match alone is not evidence of unique vehicle carriageway or warning eligibility.
+[Control snapshots](phases/enforcement-packages.md) expose bounded spatial inventories with
+current association evidence, source/graph identities, attribution and explicit truncation.
 
-[Versioned enforcement associations](phases/enforcement-association.md) now support explicit
-single-way from/to relations. Evidence is invalidated on source/graph changes; Android alerts,
-offline packages and multi-way Tutor handling are still pending.
+Android consumes these snapshots for [map display and a bounded last-area cache](phases/android-0.28.53-enforcement-map.md)
+in both navigation and free follow, reusing existing GPS fixes and HTTP/authentication settings.
+Directional evidence stays separate from physical-device deduplication for map icons.
 
-[Versioned control snapshots](phases/enforcement-packages.md) expose bounded spatial inventories
-with current directed-association evidence, preserving source/graph identities and truncation.
-They do not certify vehicle approach or enable Android warnings; those integrations remain pending.
+Still pending: continuous vehicle-road matching in Android, approach/voice warnings, offline
+road-network packages and Tutor average-speed tracking. Displayed inventory points alone do
+not authorize an alert. Multi-way associations, MIT ingestion and scheduled enforcement jobs
+also remain outside the implemented subset.

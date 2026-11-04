@@ -53,6 +53,18 @@ class AppContainer(context: Context) {
             json = json,
             eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
         )
+    val enforcementRepository = org.compass.cng.enforcement.EnforcementRepository(
+        owner = {
+            val connection = serverConnectionRepository.load()
+            org.compass.cng.enforcement.EnforcementRepository.ownerKey(
+                connection.baseUrl, connection.username,
+            )
+        },
+        fetch = apiClient::getEnforcementPackage,
+        cache = org.compass.cng.enforcement.FileEnforcementCache(
+            java.io.File(context.noBackupFilesDir, "enforcement-map.json"), json,
+        ),
+    )
     val routingRepository: RoutingRepository = HttpRoutingRepository(
         apiClient,
         eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },

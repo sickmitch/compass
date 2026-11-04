@@ -13,6 +13,14 @@ continuous local matching, visual/voice warnings and Tutor tracking are not impl
 No APK is built. alert_eligible remains false even for matched controls: matching a control to
 an OSM/Valhalla road does not establish that a particular vehicle is approaching it.
 
+## Operator acceptance
+
+The operator returned HTTP 200 for the new endpoint: four controls, two matched and two unmatched,
+truncated=false and any_alert_eligible=false. Both matched relations for physical device
+osm:node:5739547477 retain opposite forward flags and distinct edge IDs. This accepts the live
+snapshot contract on that sample. See [Android map consumption](android-0.28.53-enforcement-map.md)
+for the subsequent client increment and its remaining limits.
+
 ## Contract
 
 Authenticated query parameters are latitude, longitude, radius_meters (100–10000; default 2000).

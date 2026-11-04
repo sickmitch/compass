@@ -32,7 +32,7 @@ are distinct constraints.
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/phases/android-0.28.46-nominal-routing-gate.md) | Operator deployment/device acceptance |
+| [Current release gate](docs/phases/android-0.28.53-enforcement-map.md) | Operator deployment/device acceptance |
 
 ## Local validation
 

@@ -8,6 +8,10 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.Log
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -96,6 +100,8 @@ fun NavigationMap(
 ) {
     val route = requireNotNull(state.route)
     val appearance = compassMapAppearance()
+    val enforcement = rememberEnforcementState(state.rawLocation)
+    val currentEnforcement by rememberUpdatedState(enforcement)
     val mapView = rememberMapViewWithLifecycle()
     val cameraController = remember(cameraConfig) { NavigationCameraController(cameraConfig) }
     val puckAnimator = remember(route.routeId) { MapPuckAnimator() }
@@ -106,7 +112,15 @@ fun NavigationMap(
     val currentOnCameraModeChange by rememberUpdatedState(onCameraModeChange)
     val currentNavigationState by rememberUpdatedState(state)
     val currentBottomObstructionPixels by rememberUpdatedState(bottomObstructionPixels)
-    AndroidView(factory = { mapView }, modifier = modifier)
+    Box(modifier) {
+        AndroidView(factory = { mapView }, modifier = Modifier.matchParentSize())
+        EnforcementMapOverlay(
+            mapView, enforcement,
+            Modifier.align(Alignment.BottomStart).padding(
+                start = 12.dp, bottom = (bottomObstructionPixels / density).dp + 170.dp,
+            ),
+        )
+    }
 
     DisposableEffect(mapView, puckAnimator) {
         var registeredMap: MapLibreMap? = null
@@ -184,6 +198,7 @@ fun NavigationMap(
     LaunchedEffect(mapView, appearance, route.routeId) {
         mapView.getMapAsync { map ->
             map.setStyle(appearance.styleUrl) { style ->
+                installEnforcementLayer(style, currentEnforcement)
                 val localizedLayerCount = localizeMapLabelsInItalian(style)
                 val filteredPoiLayerCount = filterMapPoisForNavigation(style)
                 Log.i(

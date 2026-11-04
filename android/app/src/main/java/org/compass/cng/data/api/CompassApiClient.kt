@@ -74,6 +74,20 @@ class CompassApiClient(
         .callTimeout(PREDICTIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    private val enforcementHttpClient = httpClient.newBuilder()
+        .callTimeout(12, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+
+    suspend fun getEnforcementPackage(position: Coordinate): org.compass.cng.enforcement.EnforcementPackage =
+        withContext(Dispatchers.IO) {
+            val url = resolve("api/v1/enforcement/map-package").newBuilder()
+                .addQueryParameter("latitude", position.latitude.toString())
+                .addQueryParameter("longitude", position.longitude.toString())
+                .addQueryParameter("radius_meters", "3000").build()
+            get<org.compass.cng.enforcement.EnforcementPackage>(
+                url, maxBytes = 2_000_000L, client = enforcementHttpClient,
+            ).validated()
+        }
+
     suspend fun getBackendSystemInfo(): ApiBackendSystemInfo {
         val health = get<HealthResponseDto>(resolve("health/live"))
         return ApiBackendSystemInfo(
@@ -493,15 +507,21 @@ class CompassApiClient(
         const val PREDICTIVE_TIMEOUT_SECONDS = 240L
     }
 
-    private suspend inline fun <reified ResponseDto> get(url: HttpUrl): ResponseDto =
+    private suspend inline fun <reified ResponseDto> get(
+        url: HttpUrl, maxBytes: Long? = null, client: OkHttpClient = httpClient,
+    ): ResponseDto =
         withContext(Dispatchers.IO) {
             val endpoint = url.encodedPath
             val startedAtNanos = monotonicNanos()
             val request = authenticatedRequestBuilder().url(url).get().build()
             eventLogger("request started: method=GET endpoint=$endpoint")
             try {
-                httpClient.newCall(request).execute().use { response ->
-                    val body = response.body.string()
+                client.newCall(request).execute().use { response ->
+                    val body = if (maxBytes == null) response.body.string() else {
+                        val source = response.body.source()
+                        require(!source.request(maxBytes + 1)) { "Response exceeds byte limit" }
+                        source.readUtf8()
+                    }
                     eventLogger(
                         "request completed: method=GET endpoint=$endpoint status=${response.code} " +
                             "duration_ms=${elapsedMillis(startedAtNanos)}",
