@@ -21,6 +21,10 @@ import org.compass.cng.navigation.CompassNavigationRouteRecalculator
 import org.compass.cng.navigation.NavigationRouteRecalculator
 
 class AppContainer(context: Context) {
+    val voiceSearch by lazy {
+        org.compass.cng.voice.VoiceSearchController(context.applicationContext,
+            org.compass.cng.voice.VoiceModels(java.io.File(context.noBackupFilesDir, "voice-models")))
+    }
     val plannerEventLogger: (String) -> Unit = { event ->
         Log.i(COMPASS_PLANNER_LOG_TAG, event)
     }

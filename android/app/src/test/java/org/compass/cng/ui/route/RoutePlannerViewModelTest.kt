@@ -84,6 +84,93 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
     @Test
+    fun spokenMetanoOpensExistingCngWorkflowWithoutPlacesSearch() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository)
+        runCurrent()
+        viewModel.openDestinationSearch()
+        viewModel.acceptVoiceQuery("Cerca distributori di metano")
+        assertEquals(PlannerStage.CONFIGURE_CNG, viewModel.uiState.value.stage)
+        assertEquals(0, repository.destinationSuggestCalls)
+        assertEquals(0, repository.destinationResolveCalls)
+    }
+
+    @Test
+    fun spokenWorkSelectsPrivateFavoriteWithoutProviderCallsOrAutomaticNavigation() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val work = FavoritePlace("work", "Lavoro", Coordinate(45.3, 10.8))
+        val viewModel = RoutePlannerViewModel(repository,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(listOf(work)),
+            serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+        viewModel.openDestinationSearch()
+        viewModel.acceptVoiceQuery("Portami al lavoro")
+        advanceTimeBy(1000); runCurrent()
+        assertEquals("Lavoro", viewModel.uiState.value.destinationDisplayName)
+        assertEquals(RouteLocationMethod.FAVORITES, viewModel.uiState.value.destinationLocationMethod)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(0, repository.destinationSuggestCalls)
+        assertEquals(0, repository.destinationResolveCalls)
+        assertEquals(NavigationPhase.IDLE, viewModel.navigationState.value.phase)
+    }
+
+    @Test
+    fun spokenAmbiguousFavoriteRequiresChoiceAndCngNeedsExistingRoute() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val places = listOf(FavoritePlace("1", "Caffè", Coordinate(45.0, 9.0)),
+            FavoritePlace("2", "Caffe", Coordinate(46.0, 9.0)))
+        val viewModel = RoutePlannerViewModel(repository,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(places),
+            serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+        viewModel.openDestinationSearch()
+        viewModel.acceptVoiceQuery("Portami al caffè")
+        assertEquals(PlannerStage.FAVORITE_PLACES, viewModel.uiState.value.stage)
+        assertEquals(2, viewModel.uiState.value.favoritePlaces.size)
+        assertNull(viewModel.uiState.value.destinationLocationMethod)
+        viewModel.openDestinationSearch()
+        viewModel.acceptVoiceQuery("Trova un distributore di metano")
+        advanceTimeBy(1000); runCurrent()
+        assertTrue(viewModel.uiState.value.message!!.contains("imposta prima un percorso"))
+        assertEquals(0, repository.destinationSuggestCalls)
+    }
+
+    @Test
+    fun spokenPartialFavoriteRequiresSelectionEvenWithOneCandidate() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val viewModel = RoutePlannerViewModel(repository,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(listOf(
+                FavoritePlace("work", "Lavoro Milano", Coordinate(45.3, 10.8)))),
+            serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+        viewModel.openDestinationSearch()
+        viewModel.acceptVoiceQuery("Portami al lavoro")
+        advanceTimeBy(1000); runCurrent()
+        assertEquals(PlannerStage.FAVORITE_PLACES, viewModel.uiState.value.stage)
+        assertEquals(1, viewModel.uiState.value.favoritePlaces.size)
+        assertNull(viewModel.uiState.value.destinationLocationMethod)
+        assertEquals(0, repository.destinationSuggestCalls)
+    }
+
+    @Test
+    fun spokenExternalQueryUsesExistingDebounceAndGeographicBias() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val clock = Clock.fixed(Instant.parse("2026-11-05T10:00:00Z"), ZoneOffset.UTC)
+        val viewModel = RoutePlannerViewModel(repository, clock = clock,
+            serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+        val here = Coordinate(45.4, 10.9)
+        viewModel.updateFollowLocation(NavigationLocation(here, 5.0, 0.0, null, clock.millis()))
+        viewModel.openDestinationSearch()
+        repository.destinationSuggestionsResult = Result.success(DestinationSuggestions(
+            requireNotNull(viewModel.uiState.value.destinationSearchSessionId), 2, emptyList()))
+        viewModel.acceptVoiceQuery("Cerca farmacia")
+        runCurrent(); advanceTimeBy(799); runCurrent()
+        assertEquals(0, repository.destinationSuggestCalls)
+        advanceTimeBy(1); runCurrent()
+        assertEquals(1, repository.destinationSuggestCalls)
+        assertEquals("farmacia", repository.lastDestinationSuggestRequest!!.query)
+        assertEquals(here, repository.lastDestinationSuggestRequest!!.context.location)
+        assertEquals(0, repository.destinationResolveCalls)
+    }
+
+    @Test
     fun arrivalNoticeReturnsToFollowAndCanBeDismissedWithoutRestartingGuidance() = runTest {
         val session = NavigationSession()
         val vm = RoutePlannerViewModel(

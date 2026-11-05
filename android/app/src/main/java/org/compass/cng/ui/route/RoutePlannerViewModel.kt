@@ -1054,6 +1054,42 @@ class RoutePlannerViewModel(
 
     fun openDestinationSearch() = openPlaceSearch(RouteEndpoint.DESTINATION)
 
+    fun acceptVoiceQuery(spoken: String) {
+        val previous = mutableUiState.value
+        if (previous.stage != PlannerStage.DESTINATION_SEARCH ||
+            (previous.isBusy && previous.operation != PlannerOperation.PLACE_SEARCH)) return
+        val query = org.compass.cng.voice.ItalianVoiceQuery.normalize(spoken)
+        if (query.isBlank()) return
+        destinationSearchJob?.cancel()
+        mutableUiState.value = previous.copy(operation = null,
+            destinationSearchRevision = previous.destinationSearchRevision + 1)
+        val state = mutableUiState.value
+        val favorites = org.compass.cng.voice.ItalianVoiceQuery.favorites(query, favoritePlaceRepository.load())
+        if (favorites.isNotEmpty()) {
+            destinationSearchJob?.cancel()
+            openFavoritePlaces(state.placeSearchTarget)
+            if (favorites.size == 1 && org.compass.cng.voice.ItalianVoiceQuery.isExactFavorite(query, favorites.single()))
+                selectFavoritePlace(favorites.single().id)
+            else mutableUiState.value = mutableUiState.value.copy(
+                favoritePlaces = favorites, message = "Preferiti corrispondenti alla richiesta: scegli quale usare.")
+            return
+        }
+        if (org.compass.cng.voice.ItalianVoiceQuery.isCng(query)) {
+            destinationSearchJob?.cancel()
+            mutableUiState.value = state.copy(operation = null, destinationSuggestions = emptyList(),
+                destinationSearchRevision = state.destinationSearchRevision + 1)
+            if (state.routeTravelMode == RouteTravelMode.DRIVING && state.baseRoute != null && !state.routeInputsDirty) {
+                cngSelectionReturnsToStops = state.placeSearchTarget == RouteEndpoint.INTERMEDIATE_STOP
+                openAddStop()
+            } else {
+                mutableUiState.value = mutableUiState.value.copy(
+                    message = "Per cercare distributori di metano in Compass, imposta prima un percorso in auto, poi scegli Aggiungi metano.")
+            }
+            return
+        }
+        if (query == state.placeSearchQuery) searchDestinations() else updatePlaceSearchQuery(query)
+    }
+
     fun updatePlaceSearchQuery(value: String) {
         if (value.length <= 200 && value != mutableUiState.value.placeSearchQuery) {
             val nextRevision = mutableUiState.value.destinationSearchRevision + 1

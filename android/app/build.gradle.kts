@@ -1,3 +1,6 @@
+import java.net.URI
+import java.io.File
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import com.android.build.api.artifact.SingleArtifact
 import groovy.json.JsonSlurper
@@ -8,6 +11,34 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+
+abstract class FetchSherpaAar : DefaultTask() {
+    @get:org.gradle.api.tasks.OutputFile abstract val archive: org.gradle.api.file.RegularFileProperty
+    @TaskAction fun fetch() {
+        val target = archive.get().asFile
+        val expected = "07e042d97f3a6bd5b7fe74d4eef0513dc01a714b16c15a903250095aba43a575"
+        fun digest(file: File): String {
+            val sha = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(65536)
+                while (true) { val n = input.read(buffer); if (n < 0) break; sha.update(buffer, 0, n) }
+            }
+            return sha.digest().joinToString("") { "%02x".format(it) }
+        }
+        if (target.isFile && digest(target) == expected) return
+        target.parentFile.mkdirs()
+        val staging = File(target.path + ".part")
+        try {
+            val connection = URI("https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
+                "v2.0.1/sherpa-onnx-static-link-onnxruntime-2.0.1.aar").toURL().openConnection()
+            connection.connectTimeout = 30000
+            connection.readTimeout = 60000
+            connection.getInputStream().use { input -> staging.outputStream().use { input.copyTo(it) } }
+            check(digest(staging) == expected) { "sherpa-onnx AAR checksum mismatch" }
+            Files.move(staging.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } finally { staging.delete() }
+    }
+}
 
 abstract class PublishCompassApk : DefaultTask() {
     @get:InputDirectory abstract val apkDirectory: DirectoryProperty
@@ -104,8 +135,8 @@ android {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 100
-        versionName = "0.28.54"
+        versionCode = 101
+        versionName = "0.28.55"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())
@@ -158,6 +189,7 @@ android {
     }
 
     packaging {
+        jniLibs.useLegacyPackaging = true // Compress all ABIs; keep the downloadable universal APK below 100 MiB.
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 
@@ -166,7 +198,13 @@ android {
     }
 }
 
+val sherpaAar = tasks.register<FetchSherpaAar>("fetchSherpaAar") {
+    archive.set(layout.buildDirectory.file("dependencies/sherpa-onnx-2.0.1.aar"))
+    outputs.upToDateWhen { false } // Verify cached native code on every build, download only if missing.
+}
+
 dependencies {
+    implementation(files(sherpaAar.flatMap { it.archive }))
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
     implementation(composeBom)

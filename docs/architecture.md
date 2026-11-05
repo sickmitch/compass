@@ -76,6 +76,13 @@ belong in the mobile app. Provider attribution and storage constraints remain di
 from routing geometry. Android's updater uses a separate download client without API
 authentication; see [client updates](client-updates.md).
 
+Optional Android voice input runs AudioRecord, Silero VAD and Italian Whisper base on a dedicated
+CPU worker. After editable confirmation, exact local favorites are selected through the existing
+favorite repository; external queries enter the existing destination/along-route search; CNG
+requests enter existing route-based planning. Models are private, downloadable and SHA-256 pinned.
+No audio reaches the backend and no speech server is introduced. Offline transcription does not
+provide offline geocoding/routing. See [ADR 0023](adr/0023-offline-voice-destination-search.md).
+
 ## Runtime and verification
 
 Compose separates the API, PostgreSQL/PostGIS, Valhalla and one-shot migration/import/

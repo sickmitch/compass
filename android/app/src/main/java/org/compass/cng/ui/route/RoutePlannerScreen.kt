@@ -438,6 +438,7 @@ fun RoutePlannerScreen(
                     pendingResolvedDestination = state.pendingResolvedDestination,
                     canLoadMore = state.alongRouteSearchResults?.nextPageCursor != null,
                     onQueryChanged = viewModel::updatePlaceSearchQuery,
+                    onVoiceQuery = viewModel::acceptVoiceQuery,
                     onSearch = viewModel::searchDestinations,
                     onSelect = viewModel::selectDestinationSuggestion,
                     onLoadMore = viewModel::loadMoreAlongRouteResults,
@@ -2383,6 +2384,7 @@ private fun DestinationSearchContent(
     pendingResolvedDestination: ResolvedDestination?,
     canLoadMore: Boolean,
     onQueryChanged: (String) -> Unit,
+    onVoiceQuery: (String) -> Unit,
     onSearch: () -> Unit,
     onSelect: (DestinationSuggestion) -> Unit,
     onLoadMore: () -> Unit,
@@ -2432,6 +2434,13 @@ private fun DestinationSearchContent(
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
+                trailingIcon = {
+                    org.compass.cng.voice.VoiceSearchButton(!isBusy) { spoken ->
+                        // A confirmed voice query replaces any unfinished IME composition.
+                        input = input.copy(composition = null)
+                        onVoiceQuery(spoken)
+                    }
+                },
                 value = input,
                 onValueChange = { value ->
                     input = value

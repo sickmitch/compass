@@ -1,5 +1,22 @@
 # Data sources, provenance and attribution
 
+## Offline voice models and runtime
+
+Android 0.28.55 uses the official sherpa-onnx 2.0.1 CPU AAR (Apache-2.0), ONNX Runtime
+(MIT), multilingual OpenAI Whisper base exported to int8 ONNX (MIT), and Silero VAD (MIT).
+The complete corresponding license texts and upstream links are packaged in
+`android/app/src/main/assets/voice-licenses.txt`, accessible through `Licenze` in the voice dialog.
+Dataset/map/provider terms elsewhere in this document remain separate.
+
+Whisper assets are pinned to Hugging Face repository `csukuangfj/sherpa-onnx-whisper-base`,
+revision `bb53ee204431c90d314c1cc08d28d23e5b7927cc`; model SHA-256 values and exact sizes are
+in `VoiceModelCatalog` (`voice/VoiceModels.kt`). Silero comes from the official sherpa
+`asr-models` release, also with a pinned checksum. The official runtime AAR is separately
+SHA-256 pinned in `android/app/build.gradle.kts`. The app downloads models only after consent
+and validates them before installation/loading; no model weights are stored in Git.
+See [ADR 0023](adr/0023-offline-voice-destination-search.md) for official API/model references
+and [the device gate](phases/android-0.28.55-offline-voice.md) for unmeasured runtime limits.
+
 ## MIMIT / Osservaprezzi Carburanti
 
 MIMIT is authoritative in Compass for active station identity (`idImpianto`) and reported fuel

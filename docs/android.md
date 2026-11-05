@@ -11,6 +11,14 @@ progress ring are green. Cached geometry permits guidance on an already loaded r
 it does not provide an offline routing engine or guarantee downloaded map coverage.
 
 Automatic place search waits 800 ms after the last edit; explicit search remains immediate.
+The search microphone transcribes Italian locally with sherpa-onnx/Whisper base after an explicit
+approximately 162 MB model download. Review/edit the recognized text before `Usa testo`.
+`Portami al lavoro` selects the saved Lavoro favorite; ambiguous favorites require a choice.
+External POIs use the existing online search; metano requests use CNG planning for an existing
+driving route. Models can be removed in the voice dialog. The supported recording input is the
+phone microphone, including with Bluetooth connected. See the
+[voice acceptance and benchmark](phases/android-0.28.55-offline-voice.md) for limits and diagnostics.
+
 Camera look-ahead reads only the required route points instead of copying the complete
 geometry on each frame. See [performance validation](phases/android-0.28.50-performance.md)
 for the backend connection-pooling changes and operator checks.
@@ -109,7 +117,9 @@ reverse`, which the checked-in runner configures automatically.
 
 ## Device validation and diagnostics
 
-The [current release checklist](phases/android-0.28.46-nominal-routing-gate.md) covers
+The [voice release checklist](phases/android-0.28.55-offline-voice.md) covers offline transcription,
+favorites, permissions, audio interruptions and CPU benchmarking. The
+[routing checklist](phases/android-0.28.46-nominal-routing-gate.md) covers
 route creation, CNG planning, navigation and saved-route compatibility. Local tests
 are not physical-device acceptance. Older scenario runners remain optional diagnostic
 tools, not the installation/update workflow; some build and replace the APK, so inspect
