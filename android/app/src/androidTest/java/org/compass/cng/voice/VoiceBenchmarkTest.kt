@@ -19,6 +19,12 @@ class VoiceBenchmarkTest {
         val argument = InstrumentationRegistry.getArguments().getString("voiceBenchmarkFile")
         assumeTrue("Supply voiceBenchmarkFile with a private mono 16kHz PCM16 WAV", argument != null)
         val root = context.filesDir.canonicalFile
+        val expectedArgument = InstrumentationRegistry.getArguments().getString("voiceBenchmarkExpectedFile")
+        val expected = expectedArgument?.let {
+            val file = File(root, it).canonicalFile
+            require(file.parentFile == root && file.length() in 1..4096)
+            file.readText(Charsets.UTF_8).trim().also { value -> require(value.isNotBlank()) }
+        }
         val wav = File(root, requireNotNull(argument)).canonicalFile
         require(wav.parentFile == root && wav.length() in 44..700_000)
         val bytes = wav.readBytes()
@@ -52,6 +58,15 @@ class VoiceBenchmarkTest {
                 { metric, value -> Log.i("CompassVoiceBenchmark", "run=$run $metric=$value") }, samples)
             assertTrue("Recognition returned no text", text.isNotBlank())
             Log.i("CompassVoiceBenchmark", "run=$run total_ms=${SystemClock.elapsedRealtime() - start}")
+            Log.i("CompassVoiceBenchmark", "run=$run accuracy_measured=${if (expected == null) 0 else 1}")
+            if (expected != null) {
+                val expectedQuery = ItalianVoiceQuery.key(ItalianVoiceQuery.normalize(expected))
+                val exact = if (expectedQuery.isNotEmpty()) expectedQuery ==
+                    ItalianVoiceQuery.key(ItalianVoiceQuery.normalize(text))
+                else ItalianVoiceQuery.key(expected) == ItalianVoiceQuery.key(text)
+                Log.i("CompassVoiceBenchmark", "run=$run normalized_query_exact=${if (exact) 1 else 0}")
+                assertTrue("Recognized query differs from expected; transcripts are not logged", exact)
+            }
         }
         samples.fill(0f); bytes.fill(0)
     }

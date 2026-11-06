@@ -14,6 +14,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VoiceTest {
+    @Test fun splitNavigationCommandsDoNotHideFavoritesOrRewritePlaceNames() {
+        for (command in listOf("Portami", "Porta mi", "Accompagna mi", "Mostra mi", "Per favore porta mi")) {
+            val query = ItalianVoiceQuery.normalize("$command al lavoro")
+            assertEquals("lavoro", query)
+            val work = FavoritePlace("work", "Lavoro", Coordinate(45.0, 9.0))
+            assertEquals(work, FavoriteVoiceResolver.resolve(query, listOf(work)).selected)
+        }
+        for (name in listOf("Porta Milano", "Porta Milanese", "Porta Mimosa", "Mostra Milano"))
+            assertEquals(name, ItalianVoiceQuery.normalize(name))
+        // Recognition errors must not be turned into arbitrary geographic guesses.
+        assertEquals("Vietro Vanni pascoli", ItalianVoiceQuery.normalize("Vietro Vanni pascoli"))
+        assertEquals("Buon navigo via 5 case", ItalianVoiceQuery.normalize("Buon navigo via 5 case"))
+        assertEquals("Piazza braverona", ItalianVoiceQuery.normalize("piazza braverona"))
+    }
+
     @Test fun italianCommandsPreserveProperNamesAndOnlyConvertExplicitCivics() {
         assertEquals("lavoro", ItalianVoiceQuery.normalize("Portami al lavoro."))
         assertEquals("casa", ItalianVoiceQuery.normalize("Portami a casa"))
@@ -30,13 +45,13 @@ class VoiceTest {
     @Test fun exactFavoriteMatchesPrecedeExternalSearchAndCollisionsStayAmbiguous() {
         val coordinate = Coordinate(45.0, 9.0)
         val work = FavoritePlace("1", "Lavoro", coordinate)
-        assertEquals(listOf(work), ItalianVoiceQuery.favorites("lavoro", listOf(work)))
-        assertTrue(ItalianVoiceQuery.favorites("lavor", listOf(work)).isEmpty())
+        assertEquals(work, FavoriteVoiceResolver.resolve("lavoro", listOf(work)).selected)
+        assertNull(FavoriteVoiceResolver.resolve("lavor", listOf(work)).selected)
         val cafe = listOf(FavoritePlace("2", "Caffè", coordinate), FavoritePlace("3", "Caffe", coordinate))
-        assertEquals(2, ItalianVoiceQuery.favorites("caffe", cafe).size)
+        assertEquals(2, FavoriteVoiceResolver.resolve("caffe", cafe).candidates.size)
         val partial = work.copy(name = "Lavoro Milano")
-        assertEquals(listOf(partial), ItalianVoiceQuery.favorites("lavoro", listOf(partial)))
-        assertFalse(ItalianVoiceQuery.isExactFavorite("lavoro", partial))
+        assertEquals(listOf(partial), FavoriteVoiceResolver.resolve("lavoro", listOf(partial)).candidates)
+        assertNull(FavoriteVoiceResolver.resolve("lavoro", listOf(partial)).selected)
     }
     @Test fun metanoIsAnIntentNotAnyPlaceNameContainingTheWord() {
         assertTrue(ItalianVoiceQuery.isCng("distributore di metano vicino a me"))

@@ -1059,19 +1059,21 @@ class RoutePlannerViewModel(
         if (previous.stage != PlannerStage.DESTINATION_SEARCH ||
             (previous.isBusy && previous.operation != PlannerOperation.PLACE_SEARCH)) return
         val query = org.compass.cng.voice.ItalianVoiceQuery.normalize(spoken)
-        if (query.isBlank()) return
+        val favorites = org.compass.cng.voice.FavoriteVoiceResolver.resolve(spoken, favoritePlaceRepository.load())
+        if (query.isBlank() && favorites.candidates.isEmpty() && !favorites.explicitFavoriteRequest) return
         destinationSearchJob?.cancel()
         mutableUiState.value = previous.copy(operation = null,
             destinationSearchRevision = previous.destinationSearchRevision + 1)
         val state = mutableUiState.value
-        val favorites = org.compass.cng.voice.ItalianVoiceQuery.favorites(query, favoritePlaceRepository.load())
-        if (favorites.isNotEmpty()) {
+        if (favorites.candidates.isNotEmpty() || favorites.explicitFavoriteRequest) {
             destinationSearchJob?.cancel()
             openFavoritePlaces(state.placeSearchTarget)
-            if (favorites.size == 1 && org.compass.cng.voice.ItalianVoiceQuery.isExactFavorite(query, favorites.single()))
-                selectFavoritePlace(favorites.single().id)
+            if (favorites.selected != null) selectFavoritePlace(favorites.selected.id)
+            else if (favorites.candidates.isNotEmpty()) mutableUiState.value = mutableUiState.value.copy(
+                favoritePlaces = favorites.candidates,
+                message = "Ho trovato questi preferiti corrispondenti o simili: conferma quale usare.")
             else mutableUiState.value = mutableUiState.value.copy(
-                favoritePlaces = favorites, message = "Preferiti corrispondenti alla richiesta: scegli quale usare.")
+                message = "Non ho riconosciuto il nome del preferito. Sceglilo dall’elenco dei luoghi salvati.")
             return
         }
         if (org.compass.cng.voice.ItalianVoiceQuery.isCng(query)) {

@@ -4,6 +4,8 @@
 
 Implemented for Android 0.28.55. Physical-device recognition, audio routing and performance
 acceptance remain pending; compilation and fixture tests do not establish those results.
+The operator reported poor recognition on FP4 on 6 November 2026: the quality gate has failed.
+See [0.28.56 investigation and general favorite matching](../phases/android-0.28.56-voice-quality.md).
 
 ## Existing architecture inspected before implementation
 
@@ -90,6 +92,11 @@ through the existing method, without starting navigation. Whole-word partial mat
 collisions require a choice. Parking also resolves by `parcheggio`. No fuzzy automatic selection
 or additional LLM is used. A metano/CNG intent opens existing CNG planning, preserving its
 reachability/detour rules; absent a driving route it explains that prerequisite.
+
+In 0.28.56, `FavoriteVoiceResolver` expands this catalog lookup to contextual articles/possessives,
+spoken numbers and joined/split names. Bounded spelling-distance suggestions require explicit
+selection. Unknown explicit favorite requests stay in the local saved-places screen. This is
+post-recognition resolution; favorite names are not injected as acoustic decoder prompts.
 
 The user can inspect/edit the raw transcript before `Usa testo`. Only after confirmation does
 the normalized external query enter the existing network search. Offline transcription and

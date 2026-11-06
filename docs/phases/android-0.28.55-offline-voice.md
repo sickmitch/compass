@@ -1,5 +1,9 @@
 # Android 0.28.55 — offline Italian voice search
 
+Field update, 6 November 2026: the operator reported unusable recognition on FP4 / Android 15.
+The quality gate has failed; see [the investigation and 0.28.56 favorite-resolution fix](android-0.28.56-voice-quality.md).
+The local results below remain integration/build evidence, not speech-accuracy evidence.
+
 ## Scope and acceptance stages
 
 This Android-only increment adds an explicit microphone to the existing destination, origin and

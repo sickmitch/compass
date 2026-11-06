@@ -2,12 +2,13 @@ package org.compass.cng.voice
 
 import java.text.Normalizer
 import java.util.Locale
-import org.compass.cng.domain.favorite.FavoritePlace
 
 /** Rule-based and conservative: preserve proper names; no fuzzy automatic destination selection. */
 object ItalianVoiceQuery {
-    private val commands = Regex("^(?:per favore\\s+)?(?:portami|accompagnami|naviga|vai|andiamo|cerca|trova|mostrami)\\b\\s*", RegexOption.IGNORE_CASE)
-    private val preposition = Regex("^(?:(?:fino\\s+)?(?:alla|alle|allo|agli|al|ai|a|in|verso)\\s+|all['’]\\s*|(?:il|la|un|una)\\s+)", RegexOption.IGNORE_CASE)
+    // ASR can separate the enclitic pronoun: "porta mi", "accompagna mi", "mostra mi".
+    // Require a full command word so names such as Porta Milano remain unchanged.
+    private val commands = Regex("^(?:per favore\\s+)?(?:porta\\s*mi|accompagna\\s*mi|mostra\\s*mi|guida\\s*mi|(?:vorrei|voglio)\\s+andare|avvia\\s+(?:la\\s+)?navigazione|raggiungi|naviga|vai|andiamo|cerca|trova)\\b\\s*", RegexOption.IGNORE_CASE)
+    private val preposition = Regex("^(?:(?:fino\\s+)?(?:alla|alle|allo|agli|al|ai|a|in|verso|dalla|dalle|dallo|dagli|dal|dai|da)\\s+|(?:all|dall)['’]\\s*|(?:il|lo|la|i|gli|le|un|una)\\s+)", RegexOption.IGNORE_CASE)
     private val ones = listOf("zero", "uno", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove",
         "dieci", "undici", "dodici", "tredici", "quattordici", "quindici", "sedici", "diciassette", "diciotto", "diciannove")
     private val numbers = buildMap {
@@ -37,7 +38,7 @@ object ItalianVoiceQuery {
             .replace(Regex("^via\\s+", RegexOption.IGNORE_CASE), "Via ")
         return text.trim().take(200)
     }
-    private fun civic(value: String): Int? {
+    internal fun civic(value: String): Int? {
         val word = key(value)
         word.toIntOrNull()?.let { return it.takeIf { n -> n in 0..9999 } }
         numbers[word]?.let { return it }
@@ -62,16 +63,6 @@ object ItalianVoiceQuery {
     }
     fun key(text: String): String = Normalizer.normalize(text.lowercase(Locale.ITALIAN), Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "").replace('’', '\'').replace(Regex("\\s+"), " ").trim()
-    fun favorites(query: String, places: List<FavoritePlace>): List<FavoritePlace> {
-        val queryKey = key(query)
-        val exact = places.filter { isExactFavorite(query, it) }
-        if (exact.isNotEmpty()) return exact
-        // Only whole-word prefixes/suffixes, never fuzzy/geographic guesses.
-        if (queryKey.length < 3) return emptyList()
-        return places.filter { key(it.name).startsWith("$queryKey ") || key(it.name).endsWith(" $queryKey") }
-    }
-    fun isExactFavorite(query: String, place: FavoritePlace): Boolean =
-        key(place.name) == key(query) || (place.isParking && key(query) == "parcheggio")
     fun isCng(query: String): Boolean = key(query).let {
         Regex("\\b(metano|cng)\\b").containsMatchIn(it) &&
             (Regex("\\b(distributore|distributori|rifornimento|rifornire|stazione|stazioni|fare il pieno)\\b").containsMatchIn(it) ||

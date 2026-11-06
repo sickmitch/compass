@@ -13,7 +13,11 @@ it does not provide an offline routing engine or guarantee downloaded map covera
 Automatic place search waits 800 ms after the last edit; explicit search remains immediate.
 The search microphone transcribes Italian locally with sherpa-onnx/Whisper base after an explicit
 approximately 162 MB model download. Review/edit the recognized text before `Usa testo`.
-`Portami al lavoro` selects the saved Lavoro favorite; ambiguous favorites require a choice.
+Voice favorite resolution uses the whole saved catalog, including articles/possessives, number
+forms and joined/split words. Partial names, minor spelling errors and ambiguous favorites require
+a choice. The FP4 field test exposed poor raw recognition quality, which remains under
+[investigation](phases/android-0.28.56-voice-quality.md); improved favorite lookup is not a claim
+that acoustic transcription is fixed.
 External POIs use the existing online search; metano requests use CNG planning for an existing
 driving route. Models can be removed in the voice dialog. The supported recording input is the
 phone microphone, including with Bluetooth connected. See the
@@ -117,7 +121,8 @@ reverse`, which the checked-in runner configures automatically.
 
 ## Device validation and diagnostics
 
-The [voice release checklist](phases/android-0.28.55-offline-voice.md) covers offline transcription,
+The [voice quality checklist](phases/android-0.28.56-voice-quality.md) covers favorite resolution
+and the failed field-quality gate. The [initial voice checklist](phases/android-0.28.55-offline-voice.md) covers offline transcription,
 favorites, permissions, audio interruptions and CPU benchmarking. The
 [routing checklist](phases/android-0.28.46-nominal-routing-gate.md) covers
 route creation, CNG planning, navigation and saved-route compatibility. Local tests

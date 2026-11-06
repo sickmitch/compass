@@ -134,6 +134,67 @@ class RoutePlannerViewModelTest {
     }
 
     @Test
+    fun spokenSplitPortaMiSelectsWorkInsteadOfSearchingTheLiteralTranscript() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val work = FavoritePlace("work", "Lavoro", Coordinate(45.3, 10.8))
+        val viewModel = RoutePlannerViewModel(repository,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(listOf(work)),
+            serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+        viewModel.openDestinationSearch()
+        viewModel.acceptVoiceQuery("porta mi al lavoro")
+        advanceTimeBy(1000); runCurrent()
+        assertEquals("Lavoro", viewModel.uiState.value.destinationDisplayName)
+        assertEquals(RouteLocationMethod.FAVORITES, viewModel.uiState.value.destinationLocationMethod)
+        assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+        assertEquals(0, repository.destinationSuggestCalls)
+        assertEquals(0, repository.destinationResolveCalls)
+        assertEquals(NavigationPhase.IDLE, viewModel.navigationState.value.phase)
+    }
+
+    @Test
+    fun spokenFavoriteCatalogUsesCoordinatesForDifferentNamesAndPhrasings() = runTest {
+        val catalog = listOf(FavoritePlace("a", "Officina Rossi", Coordinate(45.3, 10.8)),
+            FavoritePlace("b", "Casa mamma", Coordinate(45.2, 10.9)),
+            FavoritePlace("c", "Studio 2", Coordinate(45.1, 10.7)))
+        for ((spoken, expected) in listOf("Vai da Officina Rossi" to catalog[0],
+            "Portami a casamamma" to catalog[1], "Vorrei andare al mio studio due" to catalog[2])) {
+            val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+            val viewModel = RoutePlannerViewModel(repository,
+                favoritePlaceRepository = InMemoryFavoritePlaceRepository(catalog),
+                serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+            viewModel.openDestinationSearch()
+            viewModel.acceptVoiceQuery(spoken)
+            advanceTimeBy(1000); runCurrent()
+            assertEquals(expected.name, viewModel.uiState.value.destinationDisplayName)
+            assertEquals(expected.location.latitude, viewModel.uiState.value.destinationLatitudeInput.toDouble(), 0.000001)
+            assertEquals(expected.location.longitude, viewModel.uiState.value.destinationLongitudeInput.toDouble(), 0.000001)
+            assertEquals(RouteLocationMethod.FAVORITES, viewModel.uiState.value.destinationLocationMethod)
+            assertEquals(PlannerStage.CONFIGURE_ROUTE, viewModel.uiState.value.stage)
+            assertEquals(0, repository.destinationSuggestCalls)
+            assertEquals(0, repository.destinationResolveCalls)
+            assertEquals(NavigationPhase.IDLE, viewModel.navigationState.value.phase)
+        }
+    }
+
+    @Test
+    fun approximateAndUnknownExplicitFavoritesStayLocalAndRequireAChoice() = runTest {
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val catalog = listOf(FavoritePlace("gym", "Palestra", Coordinate(45.3, 10.8)))
+        val viewModel = RoutePlannerViewModel(repository,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(catalog),
+            serverConnectionRepository = configuredServerRepository(), startInFollowMode = true)
+        for (spoken in listOf("Vai a Palesra", "Portami al preferito xyz")) {
+            viewModel.openDestinationSearch()
+            viewModel.acceptVoiceQuery(spoken)
+            advanceTimeBy(1000); runCurrent()
+            assertEquals(PlannerStage.FAVORITE_PLACES, viewModel.uiState.value.stage)
+            assertEquals(catalog, viewModel.uiState.value.favoritePlaces)
+            assertNull(viewModel.uiState.value.destinationLocationMethod)
+            assertEquals(0, repository.destinationSuggestCalls)
+        }
+    }
+
+    @Test
     fun spokenPartialFavoriteRequiresSelectionEvenWithOneCandidate() = runTest {
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
         val viewModel = RoutePlannerViewModel(repository,
