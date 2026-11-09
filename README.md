@@ -34,7 +34,7 @@ are distinct constraints.
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/phases/android-0.28.56-voice-quality.md) | General favorite matching; open voice-quality investigation |
+| [Current release gate](docs/phases/android-0.28.57-enforcement-visibility.md) | Pastel-yellow camera visibility; device checks pending |
 
 ## Local validation
 

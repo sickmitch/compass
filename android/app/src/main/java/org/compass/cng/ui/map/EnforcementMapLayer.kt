@@ -3,6 +3,7 @@ package org.compass.cng.ui.map
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.util.DisplayMetrics
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.widthIn
@@ -20,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
@@ -44,9 +46,14 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression.get
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.Property.ICON_PITCH_ALIGNMENT_VIEWPORT
+import org.maplibre.android.style.layers.Property.TEXT_PITCH_ALIGNMENT_VIEWPORT
 import org.maplibre.android.style.layers.PropertyFactory.iconImage
 import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconPitchAlignment
+import org.maplibre.android.style.layers.PropertyFactory.textPitchAlignment
+import org.maplibre.android.style.layers.PropertyFactory.textOptional
 import org.maplibre.android.style.layers.PropertyFactory.textField
 import org.maplibre.android.style.layers.PropertyFactory.textFont
 import org.maplibre.android.style.layers.PropertyFactory.textSize
@@ -62,6 +69,8 @@ import org.maplibre.geojson.Point
 private const val SOURCE = "compass-enforcement"
 private const val LAYER = "compass-enforcement-markers"
 private const val IMAGE = "compass-enforcement-camera"
+private val ENFORCEMENT_YELLOW = 0xFFFFE69A.toInt()
+private val ENFORCEMENT_INK = 0xFF302915.toInt()
 
 @Composable
 internal fun rememberEnforcementState(location: NavigationLocation?): EnforcementMapState {
@@ -105,24 +114,31 @@ internal fun rememberEnforcementState(location: NavigationLocation?): Enforcemen
 internal fun installEnforcementLayer(style: Style, state: EnforcementMapState) {
     if (style.getSource(SOURCE) == null) {
         style.addSource(GeoJsonSource(SOURCE, enforcementFeatures(state)))
-        val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        // MapLibre divides bitmap pixels by density / 160: 80 px at xhdpi = 40 dp
+        // on every device, independent of Bitmap.createBitmap's device default density.
+        val bitmap = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888).apply {
+            density = DisplayMetrics.DENSITY_XHIGH
+        }
         val canvas = Canvas(bitmap)
+        canvas.scale(1.25f, 1.25f)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.color = 0xFFFFFFFF.toInt()
+        paint.color = ENFORCEMENT_INK
         canvas.drawCircle(32f, 32f, 30f, paint)
-        paint.color = 0xFF165F8C.toInt()
+        paint.color = ENFORCEMENT_YELLOW
         canvas.drawCircle(32f, 32f, 26f, paint)
-        paint.color = 0xFFFFFFFF.toInt()
+        paint.color = ENFORCEMENT_INK
         canvas.drawRoundRect(15f, 23f, 49f, 44f, 4f, 4f, paint)
         canvas.drawRect(22f, 18f, 33f, 25f, paint)
-        paint.color = 0xFF165F8C.toInt()
+        paint.color = ENFORCEMENT_YELLOW
         canvas.drawCircle(33f, 33f, 8f, paint)
         style.addImage(IMAGE, bitmap)
         style.addLayer(SymbolLayer(LAYER, SOURCE).withProperties(
-            iconImage(IMAGE), iconSize(0.5f), iconAllowOverlap(false),
+            iconImage(IMAGE), iconSize(1f), iconAllowOverlap(true),
+            iconPitchAlignment(ICON_PITCH_ALIGNMENT_VIEWPORT),
+            textPitchAlignment(TEXT_PITCH_ALIGNMENT_VIEWPORT), textOptional(true),
             textField(get("label")), textFont(arrayOf("Noto Sans Regular")),
-            textSize(11f), textOffset(arrayOf(0f, 2f)),
-            textColor(0xFF143A4A.toInt()), textHaloColor(0xFFFFFFFF.toInt()), textHaloWidth(2f),
+            textSize(14f), textOffset(arrayOf(0f, 2.1f)),
+            textColor(ENFORCEMENT_INK), textHaloColor(ENFORCEMENT_YELLOW), textHaloWidth(2f),
         ).apply { minZoom = 11.0f })
     } else {
         style.getSourceAs<GeoJsonSource>(SOURCE)?.setGeoJson(enforcementFeatures(state))
@@ -135,7 +151,7 @@ private fun enforcementFeatures(state: EnforcementMapState): FeatureCollection =
             addStringProperty("key", control.physicalControlKey)
             addStringProperty("kind", control.kind)
             val label = if (control.kind == "average_speed") "Tutor" else "Velox"
-            addStringProperty("label", control.speedLimitKph?.let { "$label ${it.toInt()}" } ?: label)
+            addStringProperty("label", control.speedLimitKph?.let { "$label · ${it.toInt()} km/h" } ?: label)
         }
     })
 
@@ -176,13 +192,13 @@ internal fun EnforcementMapOverlay(mapView: MapView, state: EnforcementMapState,
         onDispose { disposed = true; mapReference?.removeOnMapClickListener(listener) }
     }
     if (approach != null) Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        color = Color(ENFORCEMENT_YELLOW),
+        contentColor = Color(ENFORCEMENT_INK),
         shape = MaterialTheme.shapes.medium,
         modifier = modifier.widthIn(max = 280.dp),
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Text("${approach.label} · ${approach.roundedDistance} m",
-                color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.titleMedium)
             Text(approach.control.speedLimitKph?.let { "Limite ${it.toInt()} km/h" }
                 ?: "Limite non disponibile", style = MaterialTheme.typography.bodyMedium)

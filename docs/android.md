@@ -40,6 +40,8 @@ between navigation and free follow. Verified directional approaches now show a d
 and one spoken warning per passage. Inventory points without road/direction proof remain map-only.
 Tutor average-speed tracking is still pending; offline alerts are limited to a recently verified
 in-memory corridor. See [the approach device checks](phases/android-0.28.54-enforcement-approach.md).
+Markers now use a stable 40 dp pastel-yellow camera and larger limit labels; verified approach
+cards share that palette. See [visibility checks](phases/android-0.28.57-enforcement-visibility.md).
 
 ## Build and local validation
 
