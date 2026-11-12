@@ -80,9 +80,10 @@ and `.env` must remain available in the mounted deployment directory.
 Access to the Docker socket gives this maintenance service control of the Docker daemon.
 No `privileged` container is used; the API and client receive no Docker socket. Treat the
 scheduler image and mounted repository as trusted administrative code. The supported setup
-is the local Linux Docker daemon at `/var/run/docker.sock` with the checked-in Compose file;
-remote daemons and custom override files require explicit adaptation. For a local rootless
-daemon, set `COMPASS_DOCKER_SOCKET` to its actual host Unix socket in `.env`. The socket
+is local Linux Docker, defaulting to the rootless UID 1000 socket at
+`/run/user/1000/docker.sock`, mounted inside the container at `/var/run/docker.sock`.
+Set `COMPASS_DOCKER_SOCKET` in `.env` for another UID or to `/var/run/docker.sock` for
+rootful Docker. Remote daemons and custom override files require explicit adaptation. The socket
 source must already exist: Compose must not silently create a directory in its place.
 
 ## Deploy — operator only
@@ -152,8 +153,10 @@ image build, actual import and graph switch still require operator validation.
 ## Scheduler cannot connect to Docker
 
 The container must mount the socket of the same daemon used to deploy this project.
-The default is `/var/run/docker.sock`; rootless/context-based installations may use a
-different location. Startup checks distinguish missing/non-socket paths, permission
+The default host source is `/run/user/1000/docker.sock`; the container target remains
+`/var/run/docker.sock`. Existing `.env` settings override this default, so update an old
+`COMPASS_DOCKER_SOCKET=/var/run/docker.sock` entry when using rootless Docker. Startup checks
+distinguish missing/non-socket paths, permission
 failures and connection failures. The scheduler remains unhealthy and retries every
 30 seconds without launching jobs until initialization succeeds.
 
@@ -188,6 +191,24 @@ docker compose --profile routing run --rm --no-deps --entrypoint sh scheduled-up
 
 Do not enable `privileged` or `chmod 666` the socket to mask an access error. Check
 user-namespace/rootless ownership policies if the diagnostic reports permission denied.
+
+For rootless UID 1000, set `COMPASS_DOCKER_SOCKET=/run/user/1000/docker.sock` in the existing
+`.env`, then run from `~/docker/compass` (no image rebuild is needed for this mount change):
+
+```bash
+test -S /run/user/1000/docker.sock
+docker compose --profile routing up -d --no-deps --force-recreate scheduled-updates
+docker compose exec -T scheduled-updates sh -c 'test -S /var/run/docker.sock && docker version --format "{{.Server.Version}}"'
+docker compose logs --tail 40 scheduled-updates
+```
+
+Expected: both socket checks succeed, Docker prints a server version and the scheduler
+logs `Scheduler ready`. If the host socket check fails, stop and inspect the active Docker
+context with the commands above; do not create a placeholder file/directory. A `not a Unix
+socket` error describes the mounted object, not a missing permission: do not mask it by
+changing permissions. The long bind syntax keeps `create_host_path: false` so a missing
+host socket fails clearly instead of creating a directory. Return the check output and
+scheduler logs if startup still fails.
 
 ## Deploy the nightly enforcement increment
 
