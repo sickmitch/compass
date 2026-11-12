@@ -74,8 +74,8 @@ without transport encryption and the Android app requires an explicit warning ac
 
 ## Automatic updates
 
-The [container scheduler](scheduled-updates.md) runs map rebuilds at 03:00 and CNG
-imports every hour from 07:00 through 20:00, Europe/Rome. Build `scheduled-updates`
+The [container scheduler](scheduled-updates.md) runs map rebuilds at 03:00, followed by autovelox/Tutor
+import and road association, and CNG imports every hour from 07:00 through 20:00, Europe/Rome. Build `scheduled-updates`
 and start the `routing` profile with Compose; no host timers are needed.
 
 ## Database and source data

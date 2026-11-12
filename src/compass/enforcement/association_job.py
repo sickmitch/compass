@@ -1,4 +1,5 @@
 import json
+import logging
 from collections import Counter
 
 import httpx
@@ -7,6 +8,33 @@ from sqlalchemy import text
 from compass.config import Settings
 from compass.db import SessionLocal
 from compass.enforcement.association import associate, graph_identity
+
+
+async def run_all(settings: Settings, limit: int) -> dict:
+    """Drain stale/missing associations in bounded, committed batches, including nodes."""
+    identity = None
+    processed = 0
+    states = Counter()
+    sample = []
+    while True:
+        batch = await run(settings, limit)
+        if batch.get("status") == "source_geometry_required":
+            raise ValueError("Enforcement source geometry missing; reimport inventory first")
+        if identity is not None and identity != batch["graph_identity"]:
+            raise ValueError("Valhalla graph changed between association batches; retry")
+        identity = batch["graph_identity"]
+        if batch["states"].get("source_changed", 0):
+            raise ValueError("Enforcement inventory changed during association; retry")
+        processed += batch["processed"]
+        states.update(batch["states"])
+        sample.extend(batch["matched_sample"][:max(0, 5 - len(sample))])
+        logging.getLogger(__name__).info(
+            "Enforcement association batch processed=%s total_processed=%s states=%s",
+            batch["processed"], processed, batch["states"],
+        )
+        if batch["processed"] == 0:
+            return {"graph_identity": identity, "processed": processed,
+                    "states": dict(states), "matched_sample": sample}
 
 
 async def run(settings: Settings, limit: int) -> dict:

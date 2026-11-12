@@ -65,6 +65,20 @@ def update_cng() -> None:
     compose("run", "--rm", "--no-deps", "etl", "normalize")
 
 
+def update_enforcement() -> None:
+    import_error = None
+    try:
+        compose("run", "--rm", "--no-deps", "etl", "enforcement")
+    except subprocess.CalledProcessError as error:
+        import_error = error
+        print("Enforcement import failed; associating retained inventory to the active graph",
+              flush=True)
+    compose("run", "--rm", "--no-deps", "etl", "enforcement-associate", "--all", "--limit", "500")
+    if import_error is not None:
+        # Association recovery is not a successful source refresh.
+        raise import_error
+
+
 def select_volume(path: Path, volume: str) -> None:
     """Change only the graph-volume setting; preserve credentials and other settings."""
     original = path.read_text()
@@ -178,15 +192,29 @@ def update_map() -> None:
 
 def execute(job: str) -> None:
     STATE.mkdir(mode=0o700, exist_ok=True)
-    with (STATE / f"{job}.lock").open("w") as lock:
+    # Map activation and association must not race, including manual scheduler runs.
+    lock_name = "routing-maintenance" if job in {"map", "enforcement"} else job
+    with (STATE / f"{lock_name}.lock").open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print("Update already running; skipped", flush=True)
             return
-        print(f"{job} update started at {datetime.now(UTC).isoformat()}", flush=True)
-        (update_map if job == "map" else update_cng)()
-        (STATE / f"{job}.last-success").write_text(datetime.now(UTC).isoformat() + "\n")
+        jobs = ("map", "enforcement") if job == "map" else (job,)
+        actions = {"map": update_map, "cng": update_cng, "enforcement": update_enforcement}
+        errors = []
+        for current in jobs:
+            print(f"{current} update started at {datetime.now(UTC).isoformat()}", flush=True)
+            try:
+                actions[current]()
+                (STATE / f"{current}.last-success").write_text(
+                    datetime.now(UTC).isoformat() + "\n"
+                )
+            except Exception as error:
+                print(f"{current} update failed: {type(error).__name__}; see job logs", flush=True)
+                errors.append(error)
+        if errors:
+            raise errors[0]
 
 
 def due_jobs(now: datetime) -> list[tuple[str, str]]:
@@ -261,7 +289,8 @@ def serve() -> None:
         ) as error:
             print(f"Scheduler unavailable: {error}; retry in 30 seconds", flush=True)
             time.sleep(30)
-    print("Scheduler ready: Europe/Rome; map 03:00; CNG hourly 07:00–20:00", flush=True)
+    print("Scheduler ready: Europe/Rome; map 03:00 then enforcement; CNG hourly 07:00–20:00",
+          flush=True)
     running = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
         while True:
@@ -286,7 +315,7 @@ def serve() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["map", "cng", "serve", "health"])
+    parser.add_argument("job", choices=["map", "cng", "enforcement", "serve", "health"])
     args = parser.parse_args()
     if args.job == "health":
         try:

@@ -98,9 +98,9 @@ def _enforcement(args: argparse.Namespace) -> dict[str, object]:
 def _associate_enforcement(args: argparse.Namespace) -> dict[str, object]:
     import asyncio
 
-    from compass.enforcement.association_job import run
+    from compass.enforcement.association_job import run, run_all
 
-    return asyncio.run(run(get_settings(), args.limit))
+    return asyncio.run((run_all if args.all else run)(get_settings(), args.limit))
 
 
 def _normalize(_args: argparse.Namespace) -> dict[str, object]:
@@ -138,6 +138,8 @@ def parser() -> argparse.ArgumentParser:
     enforcement.set_defaults(handler=_enforcement)
     association = subcommands.add_parser("enforcement-associate")
     association.add_argument("--limit", type=int, default=100)
+    association.add_argument("--all", action="store_true",
+                             help="process all pending associations; --limit is the batch size")
     association.set_defaults(handler=_associate_enforcement)
     normalize = subcommands.add_parser(
         "normalize", help="normalize latest raw imports and reconcile MIMIT with OSM"

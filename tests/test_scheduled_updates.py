@@ -1,3 +1,4 @@
+import fcntl
 import importlib.util
 import subprocess
 from datetime import datetime
@@ -44,6 +45,65 @@ def test_mimit_failure_does_not_normalize(monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         module.update_cng()
     assert calls == ["mimit"]
+
+
+@pytest.mark.parametrize("import_fails", [False, True])
+def test_enforcement_always_associates_all_even_after_download_failure(monkeypatch, import_fails):
+    calls = []
+
+    def compose(*args):
+        calls.append(args)
+        if args[-1] == "enforcement" and import_fails:
+            raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(module, "compose", compose)
+    if import_fails:
+        with pytest.raises(subprocess.CalledProcessError):
+            module.update_enforcement()
+    else:
+        module.update_enforcement()
+    assert calls == [
+        ("run", "--rm", "--no-deps", "etl", "enforcement"),
+        ("run", "--rm", "--no-deps", "etl", "enforcement-associate", "--all", "--limit", "500"),
+    ]
+
+
+@pytest.mark.parametrize("failed_job", [None, "map", "enforcement"])
+def test_nightly_order_and_independent_success_markers(tmp_path, monkeypatch, failed_job):
+    monkeypatch.setattr(module, "STATE", tmp_path)
+    calls = []
+
+    def action(name):
+        calls.append(name)
+        if name == failed_job:
+            raise RuntimeError(name)
+
+    monkeypatch.setattr(module, "update_map", lambda: action("map"))
+    monkeypatch.setattr(module, "update_enforcement", lambda: action("enforcement"))
+    if failed_job:
+        with pytest.raises(RuntimeError, match=failed_job):
+            module.execute("map")
+    else:
+        module.execute("map")
+    assert calls == ["map", "enforcement"]
+    for job in calls:
+        assert (tmp_path / f"{job}.last-success").exists() == (job != failed_job)
+
+
+@pytest.mark.parametrize("job", ["map", "enforcement"])
+def test_map_and_enforcement_share_lock_but_cng_is_independent(tmp_path, monkeypatch, job):
+    monkeypatch.setattr(module, "STATE", tmp_path)
+    calls = []
+    monkeypatch.setattr(module, "update_map", lambda: calls.append("map"))
+    monkeypatch.setattr(module, "update_enforcement", lambda: calls.append("enforcement"))
+    monkeypatch.setattr(module, "update_cng", lambda: calls.append("cng"))
+    with (tmp_path / "routing-maintenance.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        module.execute(job)
+        module.execute("cng")
+    assert calls == ["cng"]
+    module.execute("enforcement")
+    assert calls == ["cng", "enforcement"]
 
 
 @pytest.mark.parametrize("fail_at", ["build", "probe", "activation", None])

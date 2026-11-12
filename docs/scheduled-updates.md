@@ -7,19 +7,46 @@ no cron, systemd units or host Python installation are required.
 | Job | Europe/Rome schedule | Work |
 | --- | --- | --- |
 | Map | Daily at 03:00 | Fresh PBF and isolated Valhalla graph build, configuration, health/routing probe, activation |
+| Velox/Tutor | Daily, after the 03:00 map job finishes (including failure) | OSM inventory import and all pending Valhalla associations, in batches of 500 |
 | CNG | Hourly, 07:00 through 20:00 inclusive | MIMIT station/prices, OSM enrichment, normalization |
 
-The scheduler polls every 15 seconds and follows Italian daylight saving time. Jobs start
-within the scheduled minute. Missed slots while the container is off are not replayed.
+The scheduler polls every 15 seconds and follows Italian daylight saving time. Map/CNG jobs
+start within the scheduled minute; enforcement follows the map job. Missed slots while
+the container is off are not replayed.
 Attempt slots and last-success timestamps persist in `scheduled_update_state`, preventing
-a restart within the same minute from launching the same slot again. Jobs are independent,
-but a map build or import is never overlapped with another invocation of that same job.
+a restart within the same minute from launching the same slot again. CNG runs independently.
+Map and enforcement share a maintenance lock: a manual scheduler
+invocation cannot race a graph replacement or another enforcement refresh. The nightly map
+job always attempts enforcement afterwards, even if the map build/activation fails. The
+previous graph is used when rollback succeeds. Direct ETL commands bypass this scheduler
+lock and must not be run concurrently with maintenance.
 A failed job is logged and the next scheduled slot retries. Health checks verify the
 scheduler loop; last-success timestamps and logs report job outcomes separately.
 
 MIMIT may publish only daily: hourly imports reuse unchanged snapshots and do not invent
 new price observations. A failed MIMIT import stops the job. A failed OSM enrichment is
 logged but normalization still uses the retained OSM snapshot.
+
+## Nightly autovelox and Tutor
+
+The 03:00 cycle runs the map job first, then `etl enforcement`, then
+`etl enforcement-associate --all --limit 500`. The start of the camera refresh depends on
+map-build duration; it is not a second fixed-time job that could run against the old graph.
+Manual scheduler `map` runs also perform this follow-up. `enforcement` can be invoked
+separately without rebuilding the map.
+
+The existing OSM importer preserves the prior inventory on download/parse failure. Even
+when the import command fails, association is attempted on that retained inventory so a
+newly activated graph does not unnecessarily leave all existing controls stale. Such a run
+still reports failure and does **not** advance `enforcement.last-success`. Association
+failure also leaves this timestamp untouched; a successful map timestamp remains independent.
+
+`--all` processes missing/source-stale/graph-stale records until an empty batch, including
+nodes with unknown direction. Ambiguous/unmatched results are retained as explicit states;
+completion does not mean every camera becomes alert-eligible. Geometry omissions, graph
+changes, source changes during a batch and routing/DB errors stop the job with a failure.
+Committed batches survive and the next run can resume pending work. No road/direction
+eligibility rules, Android code, DB schema or external commercial service is changed.
 
 ## Map activation and retention
 
@@ -72,7 +99,7 @@ docker compose --profile routing ps
 docker compose logs --tail 50 scheduled-updates
 ```
 
-Expect a healthy scheduler and the log `Scheduler ready: Europe/Rome; map 03:00; CNG hourly
+Expect a healthy scheduler and the log `Scheduler ready: Europe/Rome; map 03:00 then enforcement; CNG hourly
 07:00–20:00`. Starting Compose outside the scheduled minute does not trigger a build/import.
 On a new host bootstrap the graph using [deployment](deployment.md), then use the same
 Compose commands. There is no additional host scheduling installation.
@@ -99,7 +126,8 @@ docker compose --profile routing ps
 ```
 
 Last-success timestamps are UTC and written only on completion. The map job must leave
-Valhalla healthy; the CNG job must complete normalization. Verify a route and a CNG search
+Valhalla healthy; the CNG job must complete normalization; enforcement must finish both
+import and all association batches. `enforcement.last-success` records their completion. Verify a route and a CNG search
 from the app. Return relevant bounded logs, timestamps and service status, without secrets.
 
 For an immediate operator test, run each separately. These download data; the map test
@@ -108,6 +136,7 @@ can take hours and causes the activation restart:
 ```bash
 docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py cng
 docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py enforcement
 ```
 
 Manual runs use the same per-job lock. Leave the scheduler running during builds. To stop
@@ -159,3 +188,40 @@ docker compose --profile routing run --rm --no-deps --entrypoint sh scheduled-up
 
 Do not enable `privileged` or `chmod 666` the socket to mask an access error. Check
 user-namespace/rootless ownership policies if the diagnostic reports permission denied.
+
+## Deploy the nightly enforcement increment
+
+In `~/docker/compass` on the server, with the existing `.env`, initialized enforcement
+schema, DB and Valhalla running; wait for any active maintenance job to finish:
+
+```bash
+git pull --ff-only
+docker compose --profile routing build api scheduled-updates
+docker compose --profile routing up -d --no-deps scheduled-updates
+docker compose logs --tail 40 scheduled-updates
+```
+
+Building `api` updates the shared image used by the one-shot ETL jobs, including the new
+`--all` option. Recreating API is not necessary; there are no API/schema changes or APK.
+Expected startup log: `map 03:00 then enforcement`. To validate without another map build
+(this downloads OSM inventory and updates associations), run:
+
+```bash
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py enforcement
+docker compose exec -T scheduled-updates cat /state/enforcement.last-success
+docker compose exec -T api python3 < scripts/check-enforcement-associations.py
+```
+
+Expected: import result, per-batch progress ending with zero pending, exit code zero and a
+new UTC success timestamp. Matching rates depend on source topology; ambiguous controls
+must not be promoted to matched. If it fails, return command output, association diagnostic
+and `docker compose logs --since 24h --tail 200 scheduled-updates`. Manual exec output is
+not necessarily included in container logs. Confirm the next unattended nightly cycle
+also advances the timestamp after the map job. Local mocked tests do not certify that run.
+
+Local validation for this increment: 469 tests passed with six DB integration tests excluded
+(`.venv/bin/pytest -q -m 'not integration'`). Ruff, OpenAPI synchronization and
+`docker compose --profile routing --profile jobs config --quiet` passed. Tests cover nightly
+ordering, map/import failures, independent success timestamps, shared locking, complete
+batch draining and graph/source changes. Live download, database and nightly execution
+remain operator checks.
