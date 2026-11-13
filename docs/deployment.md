@@ -3,6 +3,34 @@
 Run deployment commands only on the operator's server, from the synchronized repository.
 Local fixture tests do not establish live provider or device acceptance.
 
+## Container names
+
+Services declare explicit `compass-<service>` names, including `compass-api`, `compass-db`,
+`compass-valhalla`, `compass-scheduled-updates`, `compass-migrate`, `compass-etl`,
+`compass-valhalla-tiles` and `compass-valhalla-config`. Service names and network settings
+are unchanged, so existing Compose commands and internal service URLs remain valid.
+The scheduler discovers containers by service ID, without relying on the old generated names.
+
+One-shot `docker compose run --rm` jobs still use temporary generated names, unless `--name`
+is supplied ([Compose implementation](https://github.com/docker/compose/blob/v2.32.4/pkg/compose/run.go#L109)).
+This allows concurrent CNG/enforcement jobs; the candidate map container already uses its own
+explicit temporary name. `container_name` applies to containers created with `compose up`.
+
+After syncing in `~/docker/compass`, with the existing `.env` and no active maintenance job:
+
+```bash
+git pull --ff-only
+docker compose --profile routing config --quiet
+docker compose --profile routing up -d
+docker compose --profile routing ps -a
+```
+
+Compose recreates services whose names changed, causing a brief interruption. No image build,
+volume deletion or new import is needed. Expect the persistent containers to use the declared
+names and become healthy. If not, return `docker compose --profile routing ps -a` and
+`docker compose logs --tail 80 api valhalla scheduled-updates`. Local validation covers
+Compose configuration and scheduler unit tests; live recreation is an operator check.
+
 ## Prerequisites
 
 - Linux host with Docker Engine and the Compose plugin;

@@ -2,6 +2,7 @@ name: compass
 
 services:
   db:
+    container_name: compass-db
     image: postgis/postgis:16-3.5
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-compass}
@@ -18,6 +19,7 @@ services:
     restart: unless-stopped
 
   migrate:
+    container_name: compass-migrate
     image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     command: ["alembic", "upgrade", "head"]
     environment:
@@ -28,6 +30,7 @@ services:
     restart: "no"
 
   api:
+    container_name: compass-api
     image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     build:
       context: .
@@ -117,6 +120,7 @@ services:
     restart: unless-stopped
 
   valhalla-tiles:
+    container_name: compass-valhalla-tiles
     profiles: ["routing-build"]
     image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
     environment:
@@ -136,6 +140,7 @@ services:
     restart: "no"
 
   valhalla-config:
+    container_name: compass-valhalla-config
     profiles: ["routing"]
     image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
     entrypoint: ["python3", "/usr/local/bin/configure-valhalla-runtime.py"]
@@ -146,6 +151,7 @@ services:
     restart: "no"
 
   valhalla:
+    container_name: compass-valhalla
     profiles: ["routing"]
     image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
     environment:
@@ -174,6 +180,7 @@ services:
     restart: unless-stopped
 
   scheduled-updates:
+    container_name: compass-scheduled-updates
     profiles: ["routing"]
     image: compass-scheduler:0.1.0
     build:
@@ -206,6 +213,7 @@ services:
     restart: unless-stopped
 
   etl:
+    container_name: compass-etl
     profiles: ["jobs"]
     image: ${COMPASS_IMAGE:-compass-app:0.1.0}
     entrypoint: ["compass-etl"]
