@@ -360,3 +360,79 @@ def test_import_invalid_or_missing_source_never_starts_copy(monkeypatch, source)
     monkeypatch.setattr(module, "run", missing)
     with pytest.raises((ValueError, subprocess.CalledProcessError)):
         module.import_map(source)
+
+
+def dataset_compose_fixture():
+    manager = "/usr/local/bin/valhalla-datasets.py"
+    return {
+        "volumes": {"valhalla_data": {"name": "compass_valhalla_datasets"}},
+        "networks": {"compass-backend": {"external": True}, "proxy": {"external": True}},
+        "services": {name: {
+            "entrypoint": ["python3", manager], "command": [command],
+            "networks": {"compass-backend": {}},
+            "volumes": [
+                {"type": "bind", "target": manager},
+                {"type": "bind", "target": "/usr/local/bin/configure-valhalla-runtime.py"},
+                {"type": "volume", "source": "valhalla_data", "target": "/custom_files",
+                 "read_only": name == "valhalla"},
+            ],
+        } for name, command in (("valhalla-config", "prepare"), ("valhalla-tiles", "build"),
+                               ("valhalla", "serve"))},
+    }
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "old_compose", "missing_mount", "writable", "missing_tool"],
+)
+def test_dataset_preflight_accepts_custom_networks_and_rejects_incompatible_compose(
+    monkeypatch, tmp_path, failure,
+):
+    import json
+
+    config = dataset_compose_fixture()
+    (tmp_path / "tools").mkdir()
+    for tool in ("valhalla-datasets.py", "configure-valhalla-runtime.py"):
+        (tmp_path / "tools" / tool).touch()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    if failure == "old_compose":
+        config["volumes"]["valhalla_data"]["name"] = "compass_valhalla_data-scheduled-20261113"
+        config["services"]["valhalla-config"]["entrypoint"] = [
+            "python3", "/usr/local/bin/configure-valhalla-runtime.py",
+        ]
+    elif failure == "missing_mount":
+        config["services"]["valhalla-tiles"]["volumes"].pop(0)
+    elif failure == "writable":
+        config["services"]["valhalla"]["volumes"][-1]["read_only"] = False
+    elif failure == "missing_tool":
+        (tmp_path / "tools" / "valhalla-datasets.py").unlink()
+
+    def compose(*args, **kwargs):
+        assert args == ("config", "--format", "json")  # No Docker mutation allowed.
+        assert kwargs == {"capture": True}
+        return json.dumps(config)
+
+    monkeypatch.setattr(module, "compose", compose)
+    if failure:
+        with pytest.raises(RuntimeError, match="No dataset operation has started") as error:
+            module.validate_dataset_compose()
+        if failure == "old_compose":
+            assert "volumes.valhalla_data.name" in str(error.value)
+            assert "valhalla-config.entrypoint" in str(error.value)
+    else:
+        module.validate_dataset_compose()
+
+
+def test_initialize_rejects_mixed_versions_before_job(monkeypatch):
+    calls = []
+    monkeypatch.setattr(module, "check_docker_connection", lambda: calls.append("docker"))
+    monkeypatch.setattr(module, "discover_host_repository", lambda: "/host/compass")
+    monkeypatch.setenv("COMPASS_HOST_REPOSITORY", "unused")
+
+    def incompatible():
+        calls.append("config")
+        raise RuntimeError("incompatible")
+
+    monkeypatch.setattr(module, "validate_dataset_compose", incompatible)
+    with pytest.raises(RuntimeError, match="incompatible"):
+        module.initialize()
+    assert calls == ["docker", "config"]

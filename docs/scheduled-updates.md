@@ -342,12 +342,40 @@ actual native read-only serving and build duration/disk use, are not established
 
 ## Validation of the stable-store increment
 
-Repository-local validation: `pytest -q -m 'not integration'` passed 504 tests; six PostGIS
+Repository-local validation: `pytest -q -m 'not integration'` passed 510 tests; six PostGIS
 integration tests were deselected because no isolated test database was provisioned.
-The 64 dataset/scheduler tests include real temporary tar archives and files, manifest
+The 70 dataset/scheduler tests include real temporary tar archives and files, manifest
 recovery, read leases across process execution, source-copy preservation, path relocation,
 failed candidate/activation rollback and migration without restarting the old router.
 Docker calls and health/routing responses are mocked. `ruff check src tests scripts tools`
 and Compose configuration validation passed; network assignments and container names were
 preserved. Server migration, native Valhalla serving and a full nightly build remain the
 operator acceptance checks described above.
+
+
+## Scheduler image and Compose configuration must match
+
+An updated scheduler with an older `compose.yaml` cannot migrate datasets. The signature is
+`configure-valhalla-runtime.py: error: unrecognized arguments: recover`, often accompanied
+by warnings still selecting a dated volume. Failure occurs before copying the source graph.
+Rebuilding the scheduler image alone does not update the Compose file mounted at `/workspace`.
+Synchronize the service entrypoints, commands, script mounts and fixed volume name together.
+Preserve deployment-specific networks: all services currently use the external
+`compass-backend` network; API additionally uses external `proxy`. These networks must already
+exist on the operator's daemon. No automatic network creation or replacement is performed.
+
+Startup now checks the resolved dataset configuration and required local tool files before
+running jobs. A mismatch reports the incompatible fields and starts no dataset operation.
+The check does not print resolved environment variables or secrets.
+
+Before retrying import, from the server repository check:
+
+```bash
+docker compose --profile routing config --format json | jq '{volume: .volumes.valhalla_data.name, entrypoint: .services["valhalla-config"].entrypoint, command: .services["valhalla-config"].command}'
+```
+
+Expected volume: `compass_valhalla_datasets`, entrypoint:
+`["python3", "/usr/local/bin/valhalla-datasets.py"]`, command: `["prepare"]`.
+Keep the existing router running, rebuild `scheduled-updates`, then repeat `map-import`
+using the upgrade procedure above. Do not recreate Valhalla until import is verified.
+Overpass 502 errors in previous CNG updates are independent of this configuration mismatch.

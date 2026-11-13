@@ -290,9 +290,45 @@ def check_docker_connection() -> None:
         raise RuntimeError("Docker API check failed; inspect the Docker CLI error above") from error
 
 
+def validate_dataset_compose() -> None:
+    """Reject mixed scheduler/Compose versions before touching datasets or containers."""
+    config = json.loads(compose("config", "--format", "json", capture=True))
+    problems = []
+    volume_name = config.get("volumes", {}).get("valhalla_data", {}).get("name")
+    if volume_name != "compass_valhalla_datasets":
+        problems.append("volumes.valhalla_data.name must be compass_valhalla_datasets")
+    manager = "/usr/local/bin/valhalla-datasets.py"
+    for name, command in (("valhalla-config", "prepare"), ("valhalla-tiles", "build"),
+                          ("valhalla", "serve")):
+        service = config.get("services", {}).get(name, {})
+        if service.get("entrypoint") != ["python3", manager]:
+            problems.append(f"{name}.entrypoint must use {manager}")
+        if service.get("command") != [command]:
+            problems.append(f"{name}.command must be {command}")
+        mounts = {mount.get("target"): mount for mount in service.get("volumes", [])}
+        for target in (manager, "/usr/local/bin/configure-valhalla-runtime.py"):
+            if mounts.get(target, {}).get("type") != "bind":
+                problems.append(f"{name} must mount {target}")
+        data = mounts.get("/custom_files", {})
+        if data.get("type") != "volume" or data.get("source") != "valhalla_data":
+            problems.append(f"{name} must mount valhalla_data at /custom_files")
+        if name == "valhalla" and not data.get("read_only"):
+            problems.append("valhalla must mount /custom_files read-only")
+    for filename in ("valhalla-datasets.py", "configure-valhalla-runtime.py"):
+        if not (ROOT / "tools" / filename).is_file():
+            problems.append(f"tools/{filename} is missing from the mounted repository")
+    if problems:
+        raise RuntimeError(
+            "Scheduler/Compose dataset configuration mismatch: " + "; ".join(problems)
+            + ". Synchronize the dataset service settings and tools in the mounted repository, "
+            "preserving custom networks. No dataset operation has started."
+        )
+
+
 def initialize() -> None:
     check_docker_connection()
     os.environ["COMPASS_HOST_REPOSITORY"] = discover_host_repository()
+    validate_dataset_compose()
 
 
 def discover_host_repository() -> str:

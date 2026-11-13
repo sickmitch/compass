@@ -51,6 +51,6 @@ Docker volume or adopted root graph is deleted automatically.
 - The bootstrap command is the scheduler's `map` job. Plain `up` of `valhalla-tiles` fails for
   lack of an explicit generation rather than overwriting an active graph.
 - Networking, API contracts, MIMIT/OSM records, Android, and refresh times are unchanged. The
-  scheduler repository mount is read-only; state remains in its named volume.
+  scheduler never writes the repository; its runtime state remains in its named volume.
 - Local tests use temporary datasets and mocked Docker; full Italy builds, Docker health,
   volume permissions and native Valhalla reader-lock inheritance require operator validation.

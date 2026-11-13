@@ -17,6 +17,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - compass-backend
 
   migrate:
     container_name: compass-migrate
@@ -28,6 +30,8 @@ services:
       db:
         condition: service_healthy
     restart: "no"
+    networks:
+      - compass-backend
 
   api:
     container_name: compass-api
@@ -118,6 +122,9 @@ services:
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     restart: unless-stopped
+    networks:
+      - compass-backend
+      - proxy
 
   valhalla-tiles:
     container_name: compass-valhalla-tiles
@@ -128,7 +135,7 @@ services:
     environment:
       tile_urls: ${VALHALLA_TILE_URLS:-https://download.geofabrik.de/europe/italy-latest.osm.pbf}
       serve_tiles: "False"
-      # The dataset wrapper always builds in a new, isolated generation directory.
+      # Build a new isolated generation; never overwrite the serving graph.
       use_tiles_ignore_pbf: "False"
       force_rebuild: "False"
       build_elevation: "False"
@@ -138,10 +145,12 @@ services:
       use_default_speeds_config: "False"
       server_threads: ${VALHALLA_THREADS:-2}
     volumes:
-      - ./tools/valhalla-datasets.py:/usr/local/bin/valhalla-datasets.py:ro
       - ./tools/configure-valhalla-runtime.py:/usr/local/bin/configure-valhalla-runtime.py:ro
+      - ./tools/valhalla-datasets.py:/usr/local/bin/valhalla-datasets.py:ro
       - valhalla_data:/custom_files
     restart: "no"
+    networks:
+      - compass-backend
 
   valhalla-config:
     container_name: compass-valhalla-config
@@ -154,12 +163,13 @@ services:
       - valhalla_data:/custom_files
       - ./tools/configure-valhalla-runtime.py:/usr/local/bin/configure-valhalla-runtime.py:ro
     restart: "no"
+    networks:
+      - compass-backend
 
   valhalla:
     container_name: compass-valhalla
     profiles: ["routing"]
     image: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.8.3@sha256:24ef7955899dececb94e26c6dfb89d64fabfae875f980432694b0261eb6c251b}
-    # Serving never downloads/builds; the selected generation is mounted read-only.
     entrypoint: ["python3", "/usr/local/bin/valhalla-datasets.py"]
     command: ["serve"]
     environment:
@@ -171,13 +181,15 @@ services:
       retries: 20
       start_period: 30s
     volumes:
-      - ./tools/valhalla-datasets.py:/usr/local/bin/valhalla-datasets.py:ro
       - ./tools/configure-valhalla-runtime.py:/usr/local/bin/configure-valhalla-runtime.py:ro
+      - ./tools/valhalla-datasets.py:/usr/local/bin/valhalla-datasets.py:ro
       - valhalla_data:/custom_files:ro
     depends_on:
       valhalla-config:
         condition: service_completed_successfully
     restart: unless-stopped
+    networks:
+      - compass-backend
 
   scheduled-updates:
     container_name: compass-scheduled-updates
@@ -197,7 +209,7 @@ services:
         target: /var/run/docker.sock
         bind:
           create_host_path: false
-      - .:/workspace:ro
+      - .:/workspace
       - scheduled_update_state:/state
     depends_on:
       db:
@@ -211,7 +223,8 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-
+    networks:
+      - compass-backend
   etl:
     container_name: compass-etl
     profiles: ["jobs"]
@@ -239,10 +252,17 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: "no"
+    networks:
+      - compass-backend
 
 volumes:
   scheduled_update_state:
   postgres_data:
   valhalla_data:
-    # Stable storage identity, never changed by scheduled updates.
     name: compass_valhalla_datasets
+
+networks:
+  compass-backend:
+    external: true
+  proxy:
+    external: true
