@@ -7,11 +7,13 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
 import sys
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,7 +35,7 @@ def run(*args: str, env: dict[str, str] | None = None, capture: bool = True) -> 
     return (result.stdout or "").strip()
 
 
-def compose(*args: str, env: dict[str, str] | None = None) -> str:
+def compose(*args: str, capture: bool | None = None) -> str:
     return run(
         "docker",
         "compose",
@@ -50,8 +52,7 @@ def compose(*args: str, env: dict[str, str] | None = None) -> str:
         "--profile",
         "routing-build",
         *args,
-        env=env,
-        capture=args[0] == "ps",
+        capture=(args[0] == "ps") if capture is None else capture,
     )
 
 
@@ -79,23 +80,11 @@ def update_enforcement() -> None:
         raise import_error
 
 
-def select_volume(path: Path, volume: str) -> None:
-    """Change only the graph-volume setting; preserve credentials and other settings."""
-    original = path.read_text()
-    metadata = path.stat()
-    lines = [
-        line
-        for line in original.splitlines()
-        if not line.strip().startswith("VALHALLA_VOLUME_NAME=")
-    ]
-    lines.append(f"VALHALLA_VOLUME_NAME={volume}")
-    temporary = path.with_name(path.name + ".update-tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as stream:
-        stream.write("\n".join(lines) + "\n")
-    os.chmod(temporary, metadata.st_mode & 0o777)
-    os.chown(temporary, metadata.st_uid, metadata.st_gid)
-    temporary.replace(path)
+def dataset(action: str, generation: str | None = None) -> dict:
+    args = ("--generation", generation) if generation is not None else ()
+    output = compose("run", "--rm", "--no-deps", "-T", "valhalla-config", action, *args,
+                     capture=True)
+    return json.loads(output) if output.strip() else {}
 
 
 def wait_healthy(container: str, timeout: int = 600) -> None:
@@ -110,90 +99,131 @@ def wait_healthy(container: str, timeout: int = 600) -> None:
     raise TimeoutError("Routing health check timed out")
 
 
-def update_map() -> None:
-    env_path = ROOT / ".env"
-    if not env_path.is_file():
-        raise RuntimeError("Existing deployment .env required")
-    current = compose("ps", "-q", "valhalla")
-    if not current:
-        raise RuntimeError("Start the existing Valhalla service before enabling map updates")
-    mounts = json.loads(run("docker", "inspect", "--format", "{{json .Mounts}}", current))
-    old_volume = next(
-        m["Name"] for m in mounts if m["Destination"] == "/custom_files" and m["Type"] == "volume"
+def probe_route(container: str) -> None:
+    probe = os.environ.get(
+        "COMPASS_MAP_PROBE_LOCATIONS",
+        '[{"lat":45.4642,"lon":9.1900},{"lat":45.4857,"lon":9.2045}]',
     )
-    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    # A fresh volume forces a fresh PBF download and never changes the serving graph.
-    new_volume = f"{old_volume.split('-scheduled-')[0]}-scheduled-{stamp}"
-    candidate = f"compass-map-check-{stamp}"
-    env = dict(os.environ, VALHALLA_VOLUME_NAME=new_volume, VALHALLA_FORCE_REBUILD="False")
-    switched = False
+    payload = json.dumps({"locations": json.loads(probe), "costing": "auto"})
+    response = json.loads(run("docker", "exec", container, "curl", "--fail", "--silent",
+                              "--show-error", "--max-time", "60",
+                              "-H", "Content-Type: application/json", "--data", payload,
+                              "http://127.0.0.1:8002/route"))
+    if response.get("trip", {}).get("status") != 0:
+        raise RuntimeError("Graph failed routing validation")
+
+
+def restart_router() -> str:
+    compose("up", "-d", "--no-deps", "--force-recreate", "valhalla")
+    current = compose("ps", "-q", "valhalla")
+    wait_healthy(current)
+    probe_route(current)
+    return current
+
+
+def activate_graph(generation: str, old_state: dict, *, restart: bool = True) -> None:
+    candidate = f"compass-map-check-{uuid.uuid4().hex[:12]}"
+    activation_attempted = False
+    confirmed = False
     try:
-        compose("run", "--rm", "--no-deps", "valhalla-tiles", env=env)
-        compose("run", "--rm", "--no-deps", "valhalla-config", env=env)
-        compose("run", "-d", "--name", candidate, "--no-deps", "valhalla", env=env)
+        compose("run", "-d", "--name", candidate, "--no-deps", "valhalla",
+                "serve", "--generation", generation)
         wait_healthy(candidate)
-        # Check the actual routing endpoint as well as process readiness. Coordinates
-        # are configurable to support regional extracts that do not contain Milan.
-        probe = os.environ.get(
-            "COMPASS_MAP_PROBE_LOCATIONS",
-            '[{"lat":45.4642,"lon":9.1900},{"lat":45.4857,"lon":9.2045}]',
-        )
-        payload = json.dumps({"locations": json.loads(probe), "costing": "auto"})
-        response = json.loads(
-            run(
-                "docker",
-                "exec",
-                candidate,
-                "curl",
-                "--fail",
-                "--silent",
-                "--show-error",
-                "-H",
-                "Content-Type: application/json",
-                "--data",
-                payload,
-                "http://127.0.0.1:8002/route",
-            )
-        )
-        if response.get("trip", {}).get("status") != 0:
-            raise RuntimeError("Candidate graph failed routing validation")
-        select_volume(env_path, new_volume)
-        switched = True
-        compose("up", "-d", "--no-deps", "--force-recreate", "valhalla", env=env)
-        wait_healthy(compose("ps", "-q", "valhalla", env=env))
-        retention = STATE / "previous-volume"
-        previous = retention.read_text().strip() if retention.exists() else ""
-        retention.write_text(old_volume + "\n")
-        managed_prefix = new_volume.split("-scheduled-")[0] + "-scheduled-"
-        if previous.startswith(managed_prefix) and previous not in (old_volume, new_volume):
-            subprocess.run(["docker", "volume", "rm", previous], check=False)
-        print(f"Map updated; previous volume retained for rollback: {old_volume}", flush=True)
+        probe_route(candidate)
+        # Set this before the command: the manifest may be committed even if CLI output fails.
+        activation_attempted = True
+        dataset("activate", generation)
+        if restart:
+            restart_router()
+        dataset("confirm", generation)
+        confirmed = True
+        print(f"Map activated: {generation}; previous={old_state['active']}", flush=True)
     except BaseException:
-        if switched:
-            select_volume(env_path, old_volume)
-            rollback = dict(
-                os.environ, VALHALLA_VOLUME_NAME=old_volume, VALHALLA_FORCE_REBUILD="False"
-            )
-            compose("up", "-d", "--no-deps", "--force-recreate", "valhalla", env=rollback)
-            wait_healthy(compose("ps", "-q", "valhalla", env=rollback))
-            switched = False
+        if activation_attempted:
+            state = dataset("status")
+            # If confirm succeeded but its response was lost, never undo a confirmed activation.
+            confirmed = state["active"] == generation and "pending" not in state
+            if state["active"] == generation and "pending" in state:
+                dataset("abort", generation)
+                if not restart:
+                    pass  # Import preparation must leave the existing deployment untouched.
+                elif old_state["active"] is not None:
+                    restart_router()
+                else:
+                    compose("stop", "valhalla")
         raise
     finally:
-        subprocess.run(
-            ["docker", "rm", "-f", candidate],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        # Remove only a failed candidate volume; retain the previous working graph.
-        if not switched:
-            subprocess.run(["docker", "volume", "rm", new_volume], check=False)
+        run("docker", "rm", "-f", candidate)
+    if confirmed:
+        dataset("prune")
 
 
-def execute(job: str) -> None:
+def update_map() -> None:
+    # recover also adopts an existing flat volume, without changing .env or copying its files.
+    old_state = dataset("recover")
+    generation = f"map-{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:12]}"
+    try:
+        compose("run", "--rm", "--no-deps", "valhalla-tiles", "build", "--generation", generation)
+        activate_graph(generation, old_state)
+    except BaseException:
+        state = dataset("status")
+        if "pending" not in state and generation not in (state["active"], state["previous"]):
+            dataset("discard", generation)
+        raise
+
+
+def import_map(source_volume: str | None = None) -> None:
+    state = dataset("recover")
+    if state["active"] is not None:
+        print("Dataset store already initialized; nothing copied or replaced", flush=True)
+        return
+    if source_volume is None:
+        current = compose("ps", "-a", "-q", "valhalla")
+        if not current:
+            raise RuntimeError("No existing router; specify map-import --source-volume NAME")
+        mounts = json.loads(run("docker", "inspect", "--format", "{{json .Mounts}}", current))
+        sources = [m["Name"] for m in mounts
+                   if m.get("Type") == "volume" and m.get("Destination") == "/custom_files"]
+        if len(sources) != 1:
+            raise RuntimeError("Cannot identify source volume; specify --source-volume NAME")
+        source_volume = sources[0]
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]+", source_volume):
+        raise ValueError("Invalid Docker volume name")
+    if source_volume == "compass_valhalla_datasets":
+        raise ValueError("Source is the new store; specify the old volume with --source-volume")
+    # Inspect first: Docker must not silently create an empty volume for a misspelled source.
+    run("docker", "volume", "inspect", source_volume)
+    generation = f"map-import-{uuid.uuid4().hex[:12]}"
+    print(f"Copying {source_volume} read-only into compass_valhalla_datasets", flush=True)
+    try:
+        compose("run", "--rm", "--no-deps", "-T", "--volume", f"{source_volume}:/legacy:ro",
+                "valhalla-config", "import", "--generation", generation)
+        # Probe the copy and publish it for the next deployment. Do not recreate the old router.
+        activate_graph(generation, state, restart=False)
+    except BaseException:
+        current_state = dataset("status")
+        if "pending" not in current_state and generation not in (
+            current_state["active"], current_state["previous"],
+        ):
+            dataset("discard", generation)
+        raise
+    print("Import verified; recreate valhalla to use the permanent store. Old volume retained.",
+          flush=True)
+
+
+def rollback_map() -> None:
+    state = dataset("recover")
+    if state["previous"] is None:
+        raise RuntimeError("No previous graph available")
+    activate_graph(state["previous"], state)
+    compose("run", "--rm", "--no-deps", "etl", "enforcement-associate", "--all", "--limit", "500")
+
+
+def execute(job: str, source_volume: str | None = None) -> None:
     STATE.mkdir(mode=0o700, exist_ok=True)
     # Map activation and association must not race, including manual scheduler runs.
-    lock_name = "routing-maintenance" if job in {"map", "enforcement"} else job
+    routing_jobs = {"map", "map-import", "map-rollback", "enforcement"}
+    lock_name = "routing-maintenance" if job in routing_jobs else job
     with (STATE / f"{lock_name}.lock").open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -201,7 +231,9 @@ def execute(job: str) -> None:
             print("Update already running; skipped", flush=True)
             return
         jobs = ("map", "enforcement") if job == "map" else (job,)
-        actions = {"map": update_map, "cng": update_cng, "enforcement": update_enforcement}
+        actions = {"map": update_map, "map-rollback": rollback_map, "cng": update_cng,
+                   "enforcement": update_enforcement,
+                   "map-import": lambda: import_map(source_volume)}
         errors = []
         for current in jobs:
             print(f"{current} update started at {datetime.now(UTC).isoformat()}", flush=True)
@@ -315,8 +347,13 @@ def serve() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["map", "cng", "enforcement", "serve", "health"])
+    parser.add_argument("job", choices=["map", "map-import", "map-status", "map-rollback",
+                                        "cng", "enforcement", "serve", "health"])
+    parser.add_argument("--source-volume",
+                        help="Existing Docker volume to copy once (map-import only)")
     args = parser.parse_args()
+    if args.source_volume and args.job != "map-import":
+        parser.error("--source-volume is only valid for map-import")
     if args.job == "health":
         try:
             age = time.time() - float((STATE / "heartbeat").read_text())
@@ -328,7 +365,10 @@ def main() -> None:
     else:
         if os.environ.get("COMPASS_REPOSITORY"):
             initialize()
-        execute(args.job)
+        if args.job == "map-status":
+            print(json.dumps(dataset("status"), sort_keys=True))
+        else:
+            execute(args.job, args.source_volume)
 
 
 if __name__ == "__main__":

@@ -12,15 +12,6 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
-def test_volume_selection_preserves_other_settings_and_mode(tmp_path):
-    path = tmp_path / ".env"
-    path.write_text("API_AUTH_PASSWORD=example\nVALHALLA_VOLUME_NAME=old\n# comment\n")
-    path.chmod(0o600)
-    module.select_volume(path, "new")
-    assert path.read_text() == "API_AUTH_PASSWORD=example\n# comment\nVALHALLA_VOLUME_NAME=new\n"
-    assert path.stat().st_mode & 0o777 == 0o600
-
-
 def test_osm_failure_still_publishes_official_prices(monkeypatch):
     calls = []
 
@@ -106,29 +97,43 @@ def test_map_and_enforcement_share_lock_but_cng_is_independent(tmp_path, monkeyp
     assert calls == ["cng", "enforcement"]
 
 
-@pytest.mark.parametrize("fail_at", ["build", "probe", "activation", None])
-def test_map_failure_preserves_or_restores_serving_volume(tmp_path, monkeypatch, fail_at):
+@pytest.mark.parametrize(
+    "fail_at", ["build", "probe", "activation", "confirm_response", "cleanup", None],
+)
+def test_map_update_keeps_volume_and_env_and_restores_graph(tmp_path, monkeypatch, fail_at):
     monkeypatch.setattr(module, "ROOT", tmp_path)
-    monkeypatch.setattr(module, "STATE", tmp_path / ".scheduled-updates")
-    (tmp_path / ".env").write_text("VALHALLA_VOLUME_NAME=existing\n")
-    (tmp_path / ".scheduled-updates").mkdir()
-    activations = []
+    env = tmp_path / ".env"
+    original = "VALHALLA_VOLUME_NAME=existing\nAPI_AUTH_PASSWORD=example\n"
+    env.write_text(original)
+    state = {"schema_version": 1, "active": "legacy", "previous": None}
+    actions, calls = [], []
 
-    def compose(*args, env=None):
+    def dataset(action, generation=None):
+        nonlocal state
+        actions.append(action)
+        if action == "activate":
+            state = {"schema_version": 1, "active": generation, "previous": state["active"],
+                     "pending": state}
+        elif action == "abort":
+            state = state["pending"]
+        elif action == "confirm":
+            state.pop("pending")
+            if fail_at == "confirm_response":
+                raise RuntimeError("lost response after commit")
+        return dict(state)
+
+    def compose(*args, **kwargs):
+        calls.append(args)
         if args[0] == "ps":
             return "running"
         if "valhalla-tiles" in args and fail_at == "build":
             raise RuntimeError("build failed")
-        if args[0] == "up":
-            activations.append(env["VALHALLA_VOLUME_NAME"])
         return ""
 
     def run(*args, **kwargs):
-        if args[1] == "inspect":
-            return '[{"Destination":"/custom_files","Type":"volume","Name":"existing"}]'
-        if fail_at == "probe":
-            raise RuntimeError("probe failed")
-        return '{"trip":{"status":0}}'
+        if args[1] == "rm" and fail_at == "cleanup":
+            raise RuntimeError("cleanup failed")
+        return '{"trip":{"status":1}}' if fail_at == "probe" else '{"trip":{"status":0}}'
 
     health_calls = []
 
@@ -138,21 +143,56 @@ def test_map_failure_preserves_or_restores_serving_volume(tmp_path, monkeypatch,
             raise TimeoutError("activation failed")
 
     monkeypatch.setattr(module, "compose", compose)
+    monkeypatch.setattr(module, "dataset", dataset)
     monkeypatch.setattr(module, "run", run)
     monkeypatch.setattr(module, "wait_healthy", healthy)
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **kw: None)
     if fail_at:
         with pytest.raises((RuntimeError, TimeoutError)):
             module.update_map()
-        assert (tmp_path / ".env").read_text() == "VALHALLA_VOLUME_NAME=existing\n"
-        if fail_at == "activation":
-            assert activations[-1] == "existing"
-        else:
-            assert not activations
     else:
         module.update_map()
-        assert activations[0].startswith("existing-scheduled-")
-        assert (tmp_path / ".scheduled-updates/previous-volume").read_text() == "existing\n"
+    assert env.read_text() == original
+    assert not any("volume" in call for call in calls)
+    assert not any("VALHALLA_VOLUME_NAME" in str(call) for call in calls)
+    if fail_at in {"build", "probe", "activation"}:
+        assert state["active"] == "legacy"
+        assert "discard" in actions
+        if fail_at == "activation":
+            assert "abort" in actions
+            assert health_calls[-1] == "running"
+    else:
+        assert state["active"].startswith("map-")
+        assert state["previous"] == "legacy"
+        assert "pending" not in state
+        assert "discard" not in actions
+        if fail_at is None:
+            assert actions[-1] == "prune"
+    if fail_at in {"build", "probe"}:
+        assert not any(call[0] == "up" for call in calls)
+
+
+def test_rollback_probes_previous_graph_and_reassociates_controls(monkeypatch):
+    state = {"active": "map-now", "previous": "map-before"}
+    monkeypatch.setattr(module, "dataset", lambda action: state)
+    activated, commands = [], []
+    monkeypatch.setattr(module, "activate_graph", lambda *args: activated.append(args))
+    monkeypatch.setattr(module, "compose", lambda *args: commands.append(args))
+    module.rollback_map()
+    assert activated == [("map-before", state)]
+    assert commands == [
+        ("run", "--rm", "--no-deps", "etl", "enforcement-associate", "--all", "--limit", "500"),
+    ]
+
+
+def test_dataset_commands_capture_only_the_manager_output(monkeypatch):
+    calls = []
+    def compose(*args, **kwargs):
+        calls.append((args, kwargs))
+        return '{"active":"map-ready"}'
+    monkeypatch.setattr(module, "compose", compose)
+    assert module.dataset("activate", "map-ready") == {"active": "map-ready"}
+    assert calls == [(("run", "--rm", "--no-deps", "-T", "valhalla-config", "activate",
+                      "--generation", "map-ready"), {"capture": True})]
 
 
 @pytest.mark.parametrize(
@@ -242,3 +282,81 @@ def test_startup_failure_stays_unhealthy_without_running_jobs(tmp_path, monkeypa
         module.serve()
     assert not (tmp_path / "heartbeat").exists()
     assert not list(tmp_path.glob("*.last-attempt-slot"))
+
+
+@pytest.mark.parametrize("failure", [None, "copy", "probe", "confirm"])
+def test_import_probes_copy_without_restarting_existing_router(monkeypatch, failure):
+    state = {"schema_version": 1, "active": None, "previous": None}
+    calls = []
+
+    def dataset(action, generation=None):
+        nonlocal state
+        calls.append((action, generation))
+        if action == "activate":
+            state = {"schema_version": 1, "active": generation, "previous": None, "pending": state}
+        elif action == "confirm":
+            if failure == "confirm":
+                raise RuntimeError("confirm failed")
+            state.pop("pending")
+        elif action == "abort":
+            state = state["pending"]
+        return dict(state)
+
+    def compose(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "ps":
+            return "old-router"
+        if "import" in args and failure == "copy":
+            raise RuntimeError("copy failed")
+        return ""
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        if args[1] == "inspect":
+            return '[{"Type":"volume","Name":"old-dated-volume","Destination":"/custom_files"}]'
+        return ""
+
+    def probe(candidate):
+        assert candidate.startswith("compass-map-check-")
+        if failure == "probe":
+            raise RuntimeError("probe failed")
+
+    monkeypatch.setattr(module, "dataset", dataset)
+    monkeypatch.setattr(module, "compose", compose)
+    monkeypatch.setattr(module, "run", run)
+    monkeypatch.setattr(module, "wait_healthy", lambda _: None)
+    monkeypatch.setattr(module, "probe_route", probe)
+    if failure:
+        with pytest.raises(RuntimeError):
+            module.import_map()
+        assert state["active"] is None
+        assert any(call[0] == "discard" for call in calls)
+    else:
+        module.import_map()
+        assert state["active"].startswith("map-import-")
+        assert "pending" not in state
+    assert not any(call[0] in {"up", "stop"} for call in calls)
+    inspection = calls.index(("docker", "volume", "inspect", "old-dated-volume"))
+    copy = next(i for i, call in enumerate(calls) if "import" in call)
+    assert inspection < copy
+    assert "old-dated-volume:/legacy:ro" in calls[copy]
+
+
+def test_import_existing_store_is_idempotent(monkeypatch):
+    monkeypatch.setattr(module, "dataset", lambda _: {"active": "map-existing"})
+    monkeypatch.setattr(module, "compose", lambda *a, **kw: pytest.fail("must not recreate"))
+    module.import_map()
+
+
+@pytest.mark.parametrize("source", ["compass_valhalla_datasets", "bad:/host", "does-not-exist"])
+def test_import_invalid_or_missing_source_never_starts_copy(monkeypatch, source):
+    monkeypatch.setattr(module, "dataset", lambda _: {"active": None})
+    monkeypatch.setattr(module, "compose", lambda *a, **kw: pytest.fail("must not copy"))
+
+    def missing(*args, **kwargs):
+        assert args == ("docker", "volume", "inspect", source)
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(module, "run", missing)
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        module.import_map(source)

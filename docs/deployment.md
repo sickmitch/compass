@@ -143,113 +143,65 @@ release-specific recreation and migration requirements. Publish Android updates 
 
 ## Valhalla graph bootstrap and recovery
 
-For the authenticated route check below, set `COMPASS_CHECK_USER` to your API username;
-curl will prompt for the password. Do not include credentials in shared output.
+Valhalla always uses the named persistent volume **`compass_valhalla_datasets`**.
+Dataset generations and active/previous selections live inside it. `VALHALLA_VOLUME_NAME`
+is obsolete and ignored; no volume selection belongs in `.env` anymore.
+Before recreating an existing installation, follow the
+[one-time stable-store migration](scheduled-updates.md#upgrade-an-existing-graph-to-the-stable-store):
+`map-import` copies and probes the old graph, preserving its source volume as a backup.
+It does not download or rebuild the map and leaves the existing router running until redeploy.
 
-Run from the repository root after synchronizing Phase 3. Confirm `.env` contains the pinned
-`VALHALLA_IMAGE` from `.env.example`. The default PBF is the full Italy extract. Set
-`VALHALLA_TILE_URLS` to a Geofabrik regional extract before the first build only if a regional graph
-is intended. `VALHALLA_THREADS` controls build/server concurrency; the default is deliberately two.
-
-The initial download and tile build can be long-running and needs substantially more disk than the
-compressed PBF. Do not interrupt it merely because output pauses, and do not use
-`docker compose down -v`: that would delete both database and routing named volumes.
-
-The tile job checks the scripted image's PBF registration and rebuilds when its graph is missing or
-unregistered. The persistent service only reuses the graph after that one-shot job exits
-successfully. Keep
-`VALHALLA_FORCE_REBUILD=False` for normal operation.
+For a first installation only, from the repository root with `.env` configured and the
+pinned Valhalla image available:
 
 ```bash
-docker compose --profile routing --profile routing-build config --quiet
-docker compose build api
-docker compose --profile routing-build pull valhalla-tiles
-docker compose --profile routing pull valhalla
-docker compose --profile routing-build run --rm valhalla-tiles
-docker compose --profile routing up -d --build db migrate valhalla api scheduled-updates
+docker compose --profile routing build api scheduled-updates
+docker compose up -d db migrate
+docker compose --profile routing run --rm --no-deps scheduled-updates map
+docker compose --profile routing up -d
+```
+
+The explicit map job builds an isolated generation, probes a candidate, selects the graph,
+and verifies the live router. It then imports/associates enforcement. If that last import
+fails, the map can already be active: inspect `map-status` and logs before requesting another
+lengthy build. Initial Italy downloads/builds may take substantial time and disk space.
+For a regional graph, set `VALHALLA_TILE_URLS` and a matching `COMPASS_MAP_PROBE_LOCATIONS`
+before bootstrap. `VALHALLA_THREADS` defaults to two.
+
+### Refresh and rollback
+
+The container scheduler starts the map cycle at 03:00 Europe/Rome. To explicitly refresh,
+inspect the selection, or restore the previous graph:
+
+```bash
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map-status
+# Downloads/builds a new generation, then refreshes enforcement:
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map
+# Only when intentionally rolling back; validates and switches the previous generation:
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map-rollback
+```
+
+Serving mounts data read-only and never builds or downloads. An empty or invalid store
+fails explicitly. The old `VALHALLA_FORCE_REBUILD` override is obsolete: every explicit map
+job starts in a fresh generation, and a builder without `--generation` refuses to start.
+Do not run all profiles with `up` or delete volumes to repair a graph. Pruning retains
+active/previous/in-use generations and does not remove adopted root files or old Docker volumes.
+
+After activation, expect healthy Valhalla and a successful route. From the server repository:
+
+```bash
 docker compose --profile routing ps -a
-docker compose --profile routing exec -T valhalla \
-  curl --fail --silent --show-error http://127.0.0.1:8002/status
-docker compose --profile routing exec -T valhalla sh -c \
-  'ls -lh /custom_files/*.pbf /custom_files/valhalla_tiles.tar && sha256sum /custom_files/*.pbf'
-curl --fail --silent --show-error http://127.0.0.1:8000/health/live
-curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-curl --fail --silent --show-error --user "$COMPASS_CHECK_USER" \
-  -H 'Content-Type: application/json' \
-  -d '{"origin":{"latitude":45.4642,"longitude":9.1900},"destination":{"latitude":45.4857,"longitude":9.2045}}' \
-  http://127.0.0.1:8000/api/v1/routes
+docker compose exec -T valhalla curl --fail --silent --show-error http://127.0.0.1:8002/status
+docker compose exec -T valhalla curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' http://127.0.0.1:8002/route \
+  --data '{"locations":[{"lat":45.4642,"lon":9.1900},{"lat":45.4857,"lon":9.2045}],"costing":"auto"}' \
+| jq '{status:.trip.status,distance:.trip.summary.length,seconds:.trip.summary.time}'
 ```
 
-The `valhalla-config` one-shot dependency updates the generated `valhalla.json` idempotently before
-the routing service starts. It sets `service_limits.allow_hard_exclusions=true`, which is required
-for Compass requests with `allow_highways=false`. A missing configuration fails early and means the
-`valhalla-tiles` build step must be completed first.
-
-The representative route stays within Milan so it is valid for the default Italy graph and for
-regional graphs that include Milan. Expected invariants:
-
-- `valhalla-tiles` exits zero and leaves data in the `valhalla_data` named volume;
-- the identity command reports the retained PBF filename, size and content SHA-256;
-- `valhalla`, `db` and `api` are healthy; `migrate` exits zero;
-- Valhalla `/status` returns a JSON object;
-- liveness returns `database=not_checked` and `routing=not_checked`;
-- readiness returns HTTP 200 with `database=ready` and `routing=ready`;
-- the route returns HTTP 200, `provider=valhalla`, positive `distance_meters` and
-  `duration_seconds`, `geometry.format=polyline6`, a non-empty `encoded_polyline`, and at least one
-  maneuver with an instruction and shape indexes.
-
-Valhalla is intentionally not published on a host port. Its status is tested from inside the
-container; only the loopback-bound Compass API is host-accessible.
-
-### Recovery after an interrupted or partial tile build
-
-If the builder reports `Couldn't find usable tiles`, synchronize the current Compose policy and
-force exactly one reconstruction in the same volume:
-
-```bash
-VALHALLA_FORCE_REBUILD=True \
-  docker compose --profile routing-build run --rm valhalla-tiles
-```
-
-The command-scoped override also forces replacement of a stale tile archive; it does not modify
-`.env`. Do not set `VALHALLA_FORCE_REBUILD=True` permanently, because doing so would rebuild on every
-container start. After the job exits zero, continue with `docker compose --profile routing up ...`
-and the status/readiness/route checks above.
-
-### Routing graph update and rollback
-
-Do not overwrite the active graph when refreshing a `latest` extract. Choose a new physical volume
-name, build into it, and smoke-test it with an isolated candidate container. The example date is a
-label; use the actual build date or another unique release identifier:
-
-```bash
-VALHALLA_VOLUME_NAME=compass_valhalla_data_20260827 \
-  docker compose --profile routing-build run --rm valhalla-tiles
-
-VALHALLA_VOLUME_NAME=compass_valhalla_data_20260827 \
-  docker compose --profile routing run -d --name compass-valhalla-candidate \
-  --no-deps valhalla
-
-docker inspect --format '{{.State.Health.Status}}' compass-valhalla-candidate
-docker exec compass-valhalla-candidate \
-  curl --fail --silent --show-error http://127.0.0.1:8002/status
-docker exec compass-valhalla-candidate sh -c \
-  'ls -lh /custom_files/*.pbf /custom_files/valhalla_tiles.tar && sha256sum /custom_files/*.pbf'
-docker rm -f compass-valhalla-candidate
-```
-
-Wait and repeat the `docker inspect` command until it reports `healthy` before the two `docker exec`
-checks. Then set `VALHALLA_VOLUME_NAME=compass_valhalla_data_20260827` in `.env` and activate it:
-
-```bash
-docker compose --profile routing up -d --force-recreate valhalla api
-curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-```
-
-Repeat the representative route request above. If it fails, restore the previous
-`VALHALLA_VOLUME_NAME` in `.env` and run the same `--force-recreate valhalla api` command. The old
-volume remains intact. Removing retired graph volumes is intentionally not automated; list and
-confirm an exact volume target before any later operator-controlled deletion.
+The example route is inside Milan; use the configured regional probe if Milan is outside
+coverage. Expect `status: 0` and positive distance/time. A healthcheck alone does not certify
+the route. Follow the [upgrade checks](scheduled-updates.md#upgrade-an-existing-graph-to-the-stable-store)
+for native build/activation/recreation and rollback acceptance.
 
 ### Routing diagnostics
 
@@ -258,9 +210,9 @@ If tile construction or startup fails, return:
 ```bash
 docker compose --profile routing --profile routing-build ps -a
 docker compose --profile routing logs --no-color --tail=300 valhalla api db migrate
-docker volume inspect compass_valhalla_data
+docker compose --profile routing run --rm --no-deps valhalla-config status
 docker compose --profile routing exec -T valhalla sh -c \
-  'find /custom_files -maxdepth 2 -type f -printf "%p %s bytes\n" | sort | head -100'
+  'find /custom_files -maxdepth 3 -type f -printf "%p %s bytes\n" | sort | head -100'
 ```
 
 If Valhalla is healthy but the API is not ready or routing fails, also return:

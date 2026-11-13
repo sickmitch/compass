@@ -6,7 +6,7 @@ no cron, systemd units or host Python installation are required.
 
 | Job | Europe/Rome schedule | Work |
 | --- | --- | --- |
-| Map | Daily at 03:00 | Fresh PBF and isolated Valhalla graph build, configuration, health/routing probe, activation |
+| Map | Daily at 03:00 | Fresh PBF and isolated graph generation in the stable volume, health/routing probes, activation |
 | Velox/Tutor | Daily, after the 03:00 map job finishes (including failure) | OSM inventory import and all pending Valhalla associations, in batches of 500 |
 | CNG | Hourly, 07:00 through 20:00 inclusive | MIMIT station/prices, OSM enrichment, normalization |
 
@@ -48,26 +48,49 @@ changes, source changes during a batch and routing/DB errors stop the job with a
 Committed batches survive and the next run can resume pending work. No road/direction
 eligibility rules, Android code, DB schema or external commercial service is changed.
 
-## Map activation and retention
+## Map storage, activation and retention
 
-The schedule applies to the **routing graph**. OpenFreeMap controls the remotely hosted
-visual basemap; the Android client uses its normal resource cache. No APK update is needed.
+The physical volume is always **`compass_valhalla_datasets`**, explicitly named in Compose.
+`VALHALLA_VOLUME_NAME` is no longer read; an old value in `.env` has no effect and can be
+removed. No job rewrites `.env` or creates a new Docker volume for each update.
+Existing installations must run the one-time `map-import` procedure below before recreating
+Valhalla. It copies and probes the current graph without downloading or rebuilding it.
+The old volume is retained as a backup, not used as permanent storage.
 
-The old router serves while a fresh named volume is prepared. A candidate container must
-pass health and a real route probe before activation. Switching briefly recreates Valhalla;
-requests during that interval can fail. Failed activation attempts restore the previous
-volume and restart it; check logs if rollback also fails. 03:00 is the build start, not a
-guaranteed completion time. Provision disk/RAM for a candidate alongside the serving graph.
+Inside this volume, `datasets/map-<UTC>-<random>/` contains isolated graph generations.
+`compass-datasets.json` holds the active/previous selection and any unconfirmed activation.
+Each generation includes config, tiles, supporting files and a preparation marker. The
+serving container resolves one concrete generation at startup and mounts the data read-only.
+It directly starts Valhalla: missing data produce an error, never an implicit graph build.
 
-Only `VALHALLA_VOLUME_NAME` is changed atomically in `.env`; credentials, permissions and
-ownership are preserved. Do not edit `.env` during activation or override the graph-volume
-setting externally. Automatic volumes use `-scheduled-<UTC timestamp>`. The previous
-working graph is retained; the older recorded automatic backup is removed after a successful
-update. The original operator-created volume is never automatically deleted.
+The old graph serves while a fresh generation is built. A candidate must pass health and
+an actual route probe before the manifest is changed. Valhalla is then recreated and checked
+again. Failure restores the previous selection and router. An interrupted activation is
+reverted by the next normal `valhalla-config` preparation or managed map operation. A plain
+restart of only Valhalla reads the current manifest; use normal Compose deployment/recovery
+for transaction recovery. Initial bootstrap failure leaves no active graph.
 
-The default route probe is inside Milan. For a regional extract excluding Milan set
-`COMPASS_MAP_PROBE_LOCATIONS` in `.env` to a JSON array of two points inside its coverage,
-then recreate the scheduler. Its built-in default also works when this setting is omitted.
+After confirmation and candidate shutdown, older prepared managed generations are pruned.
+Active and previous generations, plus files still leased by a running router, are retained.
+Adopted root files, historical Docker volumes, and incomplete generations left by an abrupt
+process/container kill are never deleted automatically. Ordinary failed builds are discarded
+when possible. Disk must accommodate these retained data plus the next build; a successful
+update is not a guarantee that every historical backup has been removed.
+
+03:00 is the cycle start, not a guaranteed completion time. The route probe defaults to Milan;
+for a regional extract excluding Milan configure `COMPASS_MAP_PROBE_LOCATIONS` in `.env` and
+recreate the scheduler. No backend-controlled schedule applies to the remote OpenFreeMap
+visual basemap. See [ADR 0024](adr/0024-stable-routing-dataset-store.md).
+
+Inspect active/previous selections or request a validated rollback without editing `.env`:
+
+```bash
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map-status
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map-rollback
+```
+
+The rollback command changes the active map and recomputes enforcement associations, so use
+it only when rollback is intended. It fails clearly when no previous generation is available.
 
 ## Compose integration and privileges
 
@@ -75,7 +98,7 @@ The scheduler mounts the repository at `/workspace` and the Docker socket. It di
 the host repository path through its own container mounts so sibling Compose jobs resolve
 bind mounts correctly even when the project moves to a different host directory. Keep the
 standard container hostname (Docker container ID); do not override it. The Compose file
-and `.env` must remain available in the mounted deployment directory.
+and `.env` must remain available in the read-only mounted deployment directory.
 
 Access to the Docker socket gives this maintenance service control of the Docker daemon.
 No `privileged` container is used; the API and client receive no Docker socket. Treat the
@@ -246,3 +269,85 @@ Local validation for this increment: 469 tests passed with six DB integration te
 ordering, map/import failures, independent success timestamps, shared locking, complete
 batch draining and graph/source changes. Live download, database and nightly execution
 remain operator checks.
+
+## Upgrade an existing graph to the stable store
+
+Run from `~/docker/compass`, with the existing `.env`, rootless Docker socket configuration
+and working Valhalla container still present. Wait for active map/import maintenance to
+finish before stopping the scheduler. The source volume must not be modified during copying.
+Allow enough disk space for another copy of the current graph and supporting files (the
+source PBF is not copied). Subsequent builds additionally need active, previous and candidate
+storage. No API image rebuild, DB migration or APK is required.
+
+```bash
+git pull --ff-only
+docker compose --profile routing stop scheduled-updates
+docker compose --profile routing-build stop valhalla-tiles
+docker compose --profile routing build scheduled-updates
+docker compose --profile routing run --rm --no-deps scheduled-updates map-import
+```
+
+Run each command only after the previous one succeeds. `map-import` discovers the volume
+mounted at `/custom_files` by the existing Valhalla container, checks it exists, mounts it
+read-only, and copies the selected graph into `compass_valhalla_datasets`. A temporary
+candidate must pass health and a route query before the selection is persisted. The existing
+router is **not** restarted by import. A failed copy/probe leaves it untouched; retry after
+resolving the reported failure. A repeated import into an initialized store does not replace
+data. If the old container is already gone or has been recreated with the empty new store,
+use the known source explicitly instead:
+
+```bash
+docker compose --profile routing run --rm --no-deps scheduled-updates \
+  map-import --source-volume compass_valhalla_data-scheduled-20261113020009
+```
+
+After `Import verified`, switch the serving container to the permanent volume:
+
+```bash
+docker compose --profile routing up -d --wait --wait-timeout 180 valhalla
+docker compose exec -T valhalla curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' http://127.0.0.1:8002/route \
+  --data '{"locations":[{"lat":45.4642,"lon":9.1900},{"lat":45.4857,"lon":9.2045}],"costing":"auto","units":"kilometers"}' \
+| jq '{status:.trip.status,km:.trip.summary.length,seconds:.trip.summary.time}'
+docker compose --profile routing up -d scheduled-updates
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py map-status
+docker inspect compass-valhalla --format '{{range .Mounts}}{{if eq .Destination "/custom_files"}}{{.Name}}{{end}}{{end}}'
+```
+
+Expected: healthy Valhalla, route `status: 0` with positive distance/time, active
+`map-import-...`, previous null, no pending transaction, and mount name
+`compass_valhalla_datasets`. No PBF download/build should occur during import or serving.
+Return the import result, map-status, mount name and route summary. The old volume is not
+removed automatically; keep it until live acceptance. The obsolete `.env` volume variable
+can be removed at any time because Compose ignores it.
+
+If import or startup fails, stop here and return the failed command output plus:
+
+```bash
+docker compose logs --tail 80 valhalla-config valhalla scheduled-updates
+docker compose --profile routing config --format json | jq -r '.volumes.valhalla_data.name'
+docker compose --profile routing run --rm --no-deps scheduled-updates map-status
+```
+
+Do not delete volumes or start an in-place rebuild. If import fails, the old serving container
+still owns its original volume. If the subsequent serving redeploy fails, that backup is
+still intact; report the logs before attempting recovery.
+
+For the next nightly cycle (or a deliberately requested scheduler `map` run), expect a new
+active `map-...` generation, previous `map-import-...`, healthy routing, the **same** physical
+volume and refreshed enforcement associations. After another successful cycle, previous is
+the earlier managed generation. Check ordinary container recreation retains the active
+selection; exercise `map-rollback` only as a planned operator test. These checks, including
+actual native read-only serving and build duration/disk use, are not established by mocks.
+
+## Validation of the stable-store increment
+
+Repository-local validation: `pytest -q -m 'not integration'` passed 504 tests; six PostGIS
+integration tests were deselected because no isolated test database was provisioned.
+The 64 dataset/scheduler tests include real temporary tar archives and files, manifest
+recovery, read leases across process execution, source-copy preservation, path relocation,
+failed candidate/activation rollback and migration without restarting the old router.
+Docker calls and health/routing responses are mocked. `ruff check src tests scripts tools`
+and Compose configuration validation passed; network assignments and container names were
+preserved. Server migration, native Valhalla serving and a full nightly build remain the
+operator acceptance checks described above.
