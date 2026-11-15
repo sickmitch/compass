@@ -8,7 +8,7 @@ no cron, systemd units or host Python installation are required.
 | --- | --- | --- |
 | Map | Daily at 03:00 | Fresh PBF and isolated graph generation in the stable volume, health/routing probes, activation |
 | Velox/Tutor | Daily, after the 03:00 map job finishes (including failure) | OSM inventory import and all pending Valhalla associations, in batches of 500 |
-| CNG | Hourly, 07:00 through 20:00 inclusive | MIMIT station/prices, OSM enrichment, normalization |
+| CNG | Hourly, 07:00 through 20:00 inclusive | One `etl cng` container: MIMIT station/prices, OSM enrichment, normalization |
 
 The scheduler polls every 15 seconds and follows Italian daylight saving time. Map/CNG jobs
 start within the scheduled minute; enforcement follows the map job. Missed slots while
@@ -26,6 +26,15 @@ scheduler loop; last-success timestamps and logs report job outcomes separately.
 MIMIT may publish only daily: hourly imports reuse unchanged snapshots and do not invent
 new price observations. A failed MIMIT import stops the job. A failed OSM enrichment is
 logged but normalization still uses the retained OSM snapshot.
+
+The three CNG stages run sequentially inside **one temporary container per hourly cycle**,
+using `compass-etl cng`. Each existing importer retains its own DB session and transaction
+boundary. The final JSON contains stage results and `osm_refresh_failed`; MIMIT or
+normalization failure makes the job fail, while OSM failure is logged and normalization
+still runs. Standalone `mimit`, `osm` and `normalize` commands remain available.
+Docker event views still show creation, start, exit and removal for that single container;
+these are lifecycle events, not four separate updates. Downloads have the same frequency;
+this change reduces container/process startup overhead, not source refresh frequency.
 
 ## Nightly autovelox and Tutor
 
@@ -379,3 +388,31 @@ Expected volume: `compass_valhalla_datasets`, entrypoint:
 Keep the existing router running, rebuild `scheduled-updates`, then repeat `map-import`
 using the upgrade procedure above. Do not recreate Valhalla until import is verified.
 Overpass 502 errors in previous CNG updates are independent of this configuration mismatch.
+
+
+## Deploy the single-container hourly CNG job
+
+From `~/docker/compass`, synchronize the repository with the existing `.env` and external
+networks preserved. Wait for any running CNG cycle to complete. Rebuild both the shared
+API/ETL image and scheduler; updating only the scheduler would call an unavailable `cng`
+command in the old image.
+
+```bash
+docker compose --profile routing build api scheduled-updates
+docker compose --profile routing up -d --no-deps --force-recreate scheduled-updates
+```
+
+No API container restart, DB migration, Valhalla rebuild or APK is required. At the next
+hourly slot (07:00–20:00 Europe/Rome), expect one `compass-etl-run-...` container, logs for
+MIMIT/OSM/normalization in sequence and one final JSON summary. A retained last-attempt
+marker prevents a scheduler restart from repeating the same hourly slot.
+
+```bash
+docker compose logs --since 70m --tail 150 scheduled-updates
+```
+
+Return that output if the job fails or more than one CNG container is created per slot.
+Check for another scheduler/manual ETL run before attributing unrelated jobs to this cycle.
+Local tests cover stage ordering, MIMIT/normalization failure, OSM fallback, retained
+standalone commands, one Compose run per cycle and the existing Rome/DST schedule.
+Live imports and Docker event counts require operator validation.

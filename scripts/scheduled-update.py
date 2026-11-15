@@ -57,13 +57,7 @@ def compose(*args: str, capture: bool | None = None) -> str:
 
 
 def update_cng() -> None:
-    compose("run", "--rm", "--no-deps", "etl", "mimit")
-    # An enrichment outage must not prevent publishing the official prices.
-    try:
-        compose("run", "--rm", "--no-deps", "etl", "osm")
-    except subprocess.CalledProcessError:
-        print("OSM import failed; normalizing with the previously retained OSM data", flush=True)
-    compose("run", "--rm", "--no-deps", "etl", "normalize")
+    compose("run", "--rm", "--no-deps", "etl", "cng")
 
 
 def update_enforcement() -> None:

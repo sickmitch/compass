@@ -12,30 +12,22 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
-def test_osm_failure_still_publishes_official_prices(monkeypatch):
+@pytest.mark.parametrize("fails", [False, True])
+def test_hourly_cng_uses_one_container_and_propagates_failure(monkeypatch, fails):
     calls = []
 
     def compose(*args, **kwargs):
-        calls.append(args[-1])
-        if args[-1] == "osm":
+        calls.append(args)
+        if fails:
             raise subprocess.CalledProcessError(1, args)
 
     monkeypatch.setattr(module, "compose", compose)
-    module.update_cng()
-    assert calls == ["mimit", "osm", "normalize"]
-
-
-def test_mimit_failure_does_not_normalize(monkeypatch):
-    calls = []
-
-    def compose(*args, **kwargs):
-        calls.append(args[-1])
-        raise subprocess.CalledProcessError(1, args)
-
-    monkeypatch.setattr(module, "compose", compose)
-    with pytest.raises(subprocess.CalledProcessError):
+    if fails:
+        with pytest.raises(subprocess.CalledProcessError):
+            module.update_cng()
+    else:
         module.update_cng()
-    assert calls == ["mimit"]
+    assert calls == [("run", "--rm", "--no-deps", "etl", "cng")]
 
 
 @pytest.mark.parametrize("import_fails", [False, True])

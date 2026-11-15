@@ -108,6 +108,23 @@ def _normalize(_args: argparse.Namespace) -> dict[str, object]:
         return normalize_and_reconcile(session)
 
 
+def _cng(args: argparse.Namespace) -> dict[str, object]:
+    """Run the hourly refresh in one process, retaining each stage's transaction boundary."""
+    LOGGER.info("CNG refresh: MIMIT import started")
+    mimit = _mimit(args)
+    LOGGER.info("CNG refresh: OSM enrichment started")
+    osm = None
+    try:
+        osm = _osm(args)
+    except Exception:
+        # An optional enrichment outage must not block publishing official prices.
+        LOGGER.exception("OSM import failed; normalizing with the previously retained OSM data")
+    LOGGER.info("CNG refresh: normalization started")
+    normalized = _normalize(args)
+    return {"status": "completed", "osm_refresh_failed": osm is None,
+            "mimit": mimit, "osm": osm, "normalization": normalized}
+
+
 def _override(args: argparse.Namespace) -> dict[str, object]:
     with SessionLocal() as session:
         return set_match_override(
@@ -126,6 +143,10 @@ def parser() -> argparse.ArgumentParser:
         description="Compass CNG source ingestion, normalization and reconciliation"
     )
     subcommands = root.add_subparsers(dest="command", required=True)
+    cng = subcommands.add_parser(
+        "cng", help="refresh MIMIT, OSM and normalized CNG data in one job",
+    )
+    cng.set_defaults(handler=_cng, stations_file=None, prices_file=None, input_file=None)
     mimit = subcommands.add_parser("mimit", help="ingest MIMIT active stations and CNG prices")
     mimit.add_argument("--stations-file", type=Path)
     mimit.add_argument("--prices-file", type=Path)
