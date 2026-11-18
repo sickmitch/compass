@@ -891,6 +891,7 @@ private fun OptionsContent(
                 }
             }
         }
+        item { org.compass.cng.offline.OfflineRoutingSettings() }
         item {
             SettingsSection(title = "Info") {
                 SettingsInfoRow("App", BuildConfig.VERSION_NAME)

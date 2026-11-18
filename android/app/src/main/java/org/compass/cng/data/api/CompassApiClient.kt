@@ -6,6 +6,9 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -23,6 +26,26 @@ import org.compass.cng.domain.model.Coordinate
 import org.compass.cng.domain.model.DEFAULT_CNG_REFUEL_DWELL_SECONDS
 import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.server.ServerConnection
+
+/** Cancellation closes the socket even while waiting for headers or reading a response body. */
+private suspend fun <T> okhttp3.Call.decodeCancellable(decode: (okhttp3.Response) -> T): T =
+    suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { cancel() }
+        enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, error: IOException) {
+                continuation.resumeWithException(error)
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                try {
+                    val value = response.use { decode(it) }
+                    continuation.resume(value)
+                } catch (error: Exception) {
+                    continuation.resumeWithException(error)
+                }
+            }
+        })
+    }
 
 class CompassApiClient(
     private val connectionProvider: () -> ServerConnection,
@@ -438,7 +461,7 @@ class CompassApiClient(
                 "read_timeout_ms=${client.readTimeoutMillis}",
         )
         try {
-            client.newCall(request).execute().use { response ->
+            client.newCall(request).decodeCancellable { response ->
                 if (maxBytes != null && response.body.source().request(maxBytes + 1)) {
                     throw ApiClientException.InvalidResponse(IllegalArgumentException("Response too large"))
                 }

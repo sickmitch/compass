@@ -180,7 +180,10 @@ internal fun NavigationState.toDrivingUiModel(
                     ),
                 )
             }
-            if (connectivity != NavigationConnectivity.ONLINE) {
+            if (activeRoute.provider == org.compass.cng.offline.OFFLINE_PROVIDER) {
+                add(NavigationStatusUiModel("Percorso ricalcolato sul dispositivo · dati offline",
+                    NavigationStatusLevel.WARNING))
+            } else if (connectivity != NavigationConnectivity.ONLINE) {
                 add(
                     NavigationStatusUiModel(
                         when (connectivity) {

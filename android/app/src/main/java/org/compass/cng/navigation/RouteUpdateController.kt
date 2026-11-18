@@ -27,7 +27,7 @@ class RouteUpdateController(
         connectivityRecoveryFailureCount = 0
     }
 
-    fun nextUpdate(state: NavigationState, nowEpochMillis: Long): RouteUpdateReason? {
+    fun nextUpdate(state: NavigationState, nowEpochMillis: Long, offlineRoutingAvailable: Boolean = false): RouteUpdateReason? {
         if (state.route == null || state.reroutingStatus == ReroutingStatus.IN_PROGRESS ||
             state.phase == NavigationPhase.IDLE || state.phase == NavigationPhase.ROUTE_PREVIEW ||
             state.phase == NavigationPhase.AT_FUEL_STOP ||
@@ -36,7 +36,9 @@ class RouteUpdateController(
         ) {
             return null
         }
-        if (state.connectivity == NavigationConnectivity.OFFLINE) return null
+        if (state.connectivity == NavigationConnectivity.OFFLINE &&
+            (!offlineRoutingAvailable || state.route.travelMode != org.compass.cng.domain.model.RouteTravelMode.DRIVING)
+        ) return null
         if (state.rawLocation == null && state.snappedLocation == null) return null
         if (state.offRouteStatus == OffRouteStatus.ON_ROUTE) offRouteEpisodeRequested = false
         val lastAttempt = lastAttemptAtMillis

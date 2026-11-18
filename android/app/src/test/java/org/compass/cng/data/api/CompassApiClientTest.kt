@@ -42,6 +42,32 @@ class CompassApiClientTest {
     }
 
     @Test
+    fun cancelledRouteClosesRequestWhileWaitingForHeadersOrBody() = kotlinx.coroutines.runBlocking {
+        for (response in listOf(
+            MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE),
+            successResponse(SUCCESS_RESPONSE).setBodyDelay(30, java.util.concurrent.TimeUnit.SECONDS),
+        )) {
+            server.enqueue(response)
+            val http = OkHttpClient.Builder().callTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build()
+            val api = CompassApiClient(server.url("/").toString(), http, json)
+            val started = System.nanoTime()
+            val completed = kotlinx.coroutines.withTimeoutOrNull(500) {
+                api.getRoute(Coordinate(45.0, 11.0), Coordinate(45.1, 11.1))
+            }
+            assertNull(completed)
+            assertTrue("cancellation must not wait for the HTTP timeout",
+                System.nanoTime() - started < java.util.concurrent.TimeUnit.SECONDS.toNanos(5))
+            assertTrue("request must have reached the server",
+                server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS) != null)
+            kotlinx.coroutines.withTimeout(3000) {
+                while (http.dispatcher.runningCallsCount() != 0) kotlinx.coroutines.delay(10)
+            }
+            http.connectionPool.evictAll()
+            http.dispatcher.executorService.shutdown()
+        }
+    }
+
+    @Test
     fun postsPedestrianCostingForWalkingRoute() = runTest {
         server.enqueue(successResponse(SUCCESS_RESPONSE))
         val client = client()

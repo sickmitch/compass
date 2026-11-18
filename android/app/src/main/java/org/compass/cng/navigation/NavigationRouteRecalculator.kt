@@ -2,6 +2,10 @@ package org.compass.cng.navigation
 
 import java.time.Clock
 import java.time.OffsetDateTime
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
+import org.compass.cng.offline.OfflineRouter
+import org.compass.cng.domain.model.RouteWithIntermediateStops
 import org.compass.cng.domain.RoutePreviewException
 import org.compass.cng.domain.RoutePreviewFailure
 import org.compass.cng.domain.RouteOriginDirection
@@ -50,6 +54,7 @@ class CompassNavigationRouteRecalculator(
     private val routingRepository: RoutingRepository,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val directionPolicy: NavigationRerouteDirectionPolicy = NavigationRerouteDirectionPolicy(),
+    private val offlineRouter: OfflineRouter? = null,
 ) : NavigationRouteRecalculator {
     override suspend fun recalculate(
         state: NavigationState,
@@ -66,15 +71,78 @@ class CompassNavigationRouteRecalculator(
         } ?: route.origin
         val originDirection = state.originDirectionFor(reason)
         val remainingStops = remainingFuelStops(state)
+        val canRouteOffline = offlineRouter?.available == true && route.travelMode == RouteTravelMode.DRIVING
+        if (canRouteOffline && state.connectivity == NavigationConnectivity.OFFLINE) {
+            return recalculateOffline(state, origin, originDirection)
+        }
         val recalculated = try {
-            preserveRemainingPlan(route, state, origin, remainingStops, originDirection)
+            if (canRouteOffline) {
+                withTimeoutOrNull(8_000) {
+                    preserveRemainingPlan(route, state, origin, remainingStops, originDirection)
+                } ?: return recalculateOffline(state, origin, originDirection)
+            } else {
+                preserveRemainingPlan(route, state, origin, remainingStops, originDirection)
+            }
         } catch (error: RoutePreviewException) {
+            if (canRouteOffline && error.failure in setOf(RoutePreviewFailure.NETWORK, RoutePreviewFailure.SERVER)) {
+                return recalculateOffline(state, origin, originDirection)
+            }
             if (error.failure !in FUEL_PLAN_INVALIDATING_FAILURES || route.fuelPlan == null) {
                 throw error
             }
             replanInvalidFuelStops(route, state, origin, remainingStops, originDirection)
         }
         return recalculated.withFuelStopDetailsFrom(route.fuelStops)
+    }
+
+    private suspend fun recalculateOffline(
+        state: NavigationState, origin: Coordinate, direction: RouteOriginDirection?,
+    ): NavigationRoute {
+        val previous = requireNotNull(state.route)
+        val stops = (remainingIntermediateStops(state).map {
+            RerouteStop(it.stop.sequence, it.stop.location, NavigationOrderedStop(label = it.stop.mapLabel))
+        } + remainingFuelStops(state).map {
+            RerouteStop(it.sequence, it.location, NavigationOrderedStop(
+                label = it.name ?: "Sosta CNG", cngStop = it.toSelectedCngStop(),
+            ))
+        }).sortedBy { it.sequence }
+        val points = listOf(origin) + stops.map { it.location } + previous.destination
+        val legs = try {
+            requireNotNull(offlineRouter).route(points, previous.allowsHighways, direction)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            throw RoutePreviewException(RoutePreviewFailure.NO_ROUTE, error)
+        } catch (error: LinkageError) {
+            throw RoutePreviewException(RoutePreviewFailure.SERVER, error)
+        }
+        require(legs.size == points.size - 1)
+        var result = if (stops.isEmpty()) {
+            legs.single().toNavigationRoute(gasolineFallback = previous.gasolineFallback)
+        } else {
+            val duration = legs.sumOf { it.durationSeconds }
+            RouteWithIntermediateStops(stops.map { it.location }, legs.sumOf { it.distanceMeters },
+                duration, legs, org.compass.cng.offline.OFFLINE_PROVIDER,
+                org.compass.cng.domain.model.NavigationTiming.legacy(duration).copy(routeId = legs.first().navigation.routeId),
+            ).toNavigationRoute(stops.map { it.metadata })
+        }
+        previous.fuelPlan?.let { plan ->
+            val initial = remainingRangeAtProgress(previous, state, plan)
+            var available = initial
+            val rangeLegs = result.legs.mapIndexed { index, leg ->
+                val remaining = available - leg.distanceMeters / 1000
+                if (remaining < plan.reserveCngRangeKm) {
+                    throw RoutePreviewException(RoutePreviewFailure.CNG_ITINERARY_OUT_OF_RANGE)
+                }
+                leg.copy(availableRangeAtDepartureKm = available,
+                    estimatedRemainingRangeAtArrivalKm = remaining,
+                    reserveMarginAtArrivalKm = remaining - plan.reserveCngRangeKm).also {
+                    available = if (stops.getOrNull(index)?.metadata?.cngStop != null) plan.effectiveCngRangeKm else remaining
+                }
+            }
+            result = result.copy(legs = rangeLegs, fuelPlan = plan.copy(initialRemainingCngRangeKm = initial))
+        }
+        return result.withFuelStopDetailsFrom(previous.fuelStops)
     }
 
     override suspend fun removeNextStop(state: NavigationState): NavigationRoute {

@@ -160,3 +160,15 @@ operational policy and can be changed with `MIMIT_DATA_FRESHNESS_HOURS`,
 reported data state but does not conceal or delete the last successfully normalized records. Missing
 required MIMIT or reconciliation data prevents readiness. Missing/stale OSM affects optional
 enrichment and does not invalidate authoritative MIMIT station identity or prices.
+
+## Offline routing engine and graphs
+
+Android 0.28.58 pins Rallista `valhalla-mobile` 0.6.6 and embedded Valhalla 3.9.0
+(MIT licenses). Copyright/license texts are distributed in APK assets under `licenses/`.
+The local runtime template derives from the upstream 3.9.0 config generator. Maven resolves
+the wrapper's model/Moshi dependencies; no commercial routing service is introduced.
+Offline graphs are operator-built from OpenStreetMap/Geofabrik. Packages carry
+`© OpenStreetMap contributors — ODbL 1.0` and the client displays that attribution after
+installation. Graph redistribution must retain OSM attribution and comply with ODbL;
+checksums verify integrity, not source authenticity or licensing compliance.
+See [offline routing](offline-routing.md) for the separate graph build and limitations.

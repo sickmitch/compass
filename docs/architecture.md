@@ -67,9 +67,14 @@ explicit lifecycle state. Manual recalculation, deviations and connectivity reco
 request a new route while preserving relevant remaining stops and destination.
 
 The foreground session supports voice and Picture in Picture. Cached route geometry and
-maneuvers can support an existing journey during an outage; new routing requires the
-backend. MapLibre ambient caching only covers previously visited resources. Saved-route
-format validation is independent of optional retired metadata.
+maneuvers can support an existing journey during an outage. With an imported regional graph,
+Android's native Valhalla adapter can reroute an active car journey on network/server failure,
+preserving remaining stops and range constraints. Initial planning and new CNG candidate
+selection still require the backend. See [offline routing](offline-routing.md) and
+[ADR 0025](adr/0025-device-routing-fallback.md) for the device-validation boundary.
+MapLibre ambient caching only covers previously visited resources; the routing graph is
+separate from visual map data. Saved-route format validation is independent of optional
+retired metadata.
 
 Destination search is server-side and provider-configured. Search credentials never
 belong in the mobile app. Provider attribution and storage constraints remain distinct

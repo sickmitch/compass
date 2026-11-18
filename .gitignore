@@ -19,3 +19,6 @@ android/**/build/
 
 # Operator-local scheduled job locks and last-success timestamps
 .scheduled-updates/
+
+# Locally built, potentially large offline routing packages
+offline-routing-build/

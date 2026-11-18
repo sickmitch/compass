@@ -30,11 +30,12 @@ are distinct constraints.
 | [Scheduled updates](docs/scheduled-updates.md) | Stable map storage; maps then velox/Tutor nightly from 03:00; CNG hourly 07:00–20:00, Europe/Rome |
 | [API](docs/api.md) / [OpenAPI](docs/openapi.json) | Requests, responses, units and errors |
 | [Android](docs/android.md) | Toolchain, configuration and device diagnostics |
+| [Offline routing](docs/offline-routing.md) | Android rerouting fallback, regional graph import and pending device acceptance |
 | [Client updates](docs/client-updates.md) | APK publishing, signing and installation |
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/phases/android-0.28.57-enforcement-visibility.md) | Pastel-yellow camera visibility; device checks pending |
+| [Current release gate](docs/offline-routing.md#acceptance-on-fp4--android-15) | 0.28.58 native offline rerouting; device checks pending |
 
 ## Local validation
 

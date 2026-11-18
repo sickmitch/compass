@@ -1,0 +1,256 @@
+{
+  "logging": {
+    "type": "std_out",
+    "color": false,
+    "long_request": 999999
+  },
+  "mjolnir": {
+    "tile_extract": "@TILES@",
+    "tile_dir": "@DIRECTORY@",
+    "max_cache_size": 67108864,
+    "use_lru_mem_cache": true,
+    "lru_mem_cache_hard_control": true,
+    "hierarchy": true,
+    "shortcuts": true,
+    "global_synchronized_cache": false
+  },
+  "loki": {
+    "actions": [
+      "route"
+    ],
+    "use_connectivity": true,
+    "service_defaults": {
+      "radius": 0,
+      "minimum_reachability": 50,
+      "search_cutoff": 5000,
+      "node_snap_tolerance": 5,
+      "street_side_tolerance": 5,
+      "street_side_max_distance": 1000,
+      "heading_tolerance": 60,
+      "mvt_min_zoom_road_class": [
+        7,
+        7,
+        8,
+        11,
+        11,
+        12,
+        13,
+        14
+      ],
+      "mvt_cache_min_zoom": 11,
+      "mvt_max_age": "1800"
+    }
+  },
+  "thor": {
+    "source_to_target_algorithm": "select_optimal",
+    "max_reserved_labels_count_astar": 100000,
+    "max_reserved_labels_count_bidir_astar": 100000,
+    "max_reserved_labels_count_dijkstras": 100000,
+    "max_reserved_labels_count_bidir_dijkstras": 100000,
+    "clear_reserved_memory": true,
+    "extended_search": false,
+    "costmatrix": {
+      "check_reverse_connection": true,
+      "allow_second_pass": false,
+      "max_reserved_locations": 25,
+      "max_iterations": 2800,
+      "min_iterations": 100,
+      "dijkstra_distance": 0,
+      "hierarchy_limits": {
+        "max_up_transitions": {
+          "1": 400,
+          "2": 100
+        },
+        "expand_within_distance": {
+          "0": 100000000.0,
+          "1": 20000,
+          "2": 5000
+        }
+      }
+    },
+    "bidirectional_astar": {
+      "threshold_delta": 420.0,
+      "alternative_cost_extend": 1.2,
+      "alternative_iterations_delta": 100000,
+      "hierarchy_limits": {
+        "max_up_transitions": {
+          "1": 400,
+          "2": 100
+        },
+        "expand_within_distance": {
+          "0": 100000000.0,
+          "1": 20000,
+          "2": 5000
+        }
+      }
+    },
+    "unidirectional_astar": {
+      "hierarchy_limits": {
+        "max_up_transitions": {
+          "1": 400,
+          "2": 100
+        },
+        "expand_within_distance": {
+          "0": 100000000.0,
+          "1": 100000,
+          "2": 5000
+        }
+      }
+    }
+  },
+  "odin": {
+    "markup_formatter": {
+      "markup_enabled": false,
+      "phoneme_format": "<TEXTUAL_STRING> (<span class=<QUOTES>phoneme<QUOTES>>/<VERBAL_STRING>/</span>)"
+    }
+  },
+  "service_limits": {
+    "auto": {
+      "max_distance": 500000,
+      "max_locations": 10,
+      "max_matrix_distance": 400000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "bus": {
+      "max_distance": 5000000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 400000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "taxi": {
+      "max_distance": 5000000.0,
+      "max_locations": 20,
+      "max_matrix_distance": 400000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "pedestrian": {
+      "max_distance": 250000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 200000.0,
+      "max_matrix_location_pairs": 2500,
+      "min_multimodal_walking_distance": 1,
+      "max_multimodal_walking_distance": 10000
+    },
+    "motor_scooter": {
+      "max_distance": 500000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 200000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "motorcycle": {
+      "max_distance": 500000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 200000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "bicycle": {
+      "max_distance": 500000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 200000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "multimodal": {
+      "max_distance": 500000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 0.0,
+      "max_matrix_location_pairs": 0
+    },
+    "status": {
+      "allow_verbose": false
+    },
+    "transit": {
+      "max_distance": 500000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 200000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "truck": {
+      "max_distance": 5000000.0,
+      "max_locations": 20,
+      "max_matrix_distance": 400000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "skadi": {
+      "max_shape": 750000,
+      "min_resample": 10.0
+    },
+    "isochrone": {
+      "max_contours": 4,
+      "max_time_contour": 120,
+      "max_distance": 25000.0,
+      "max_locations": 1,
+      "max_distance_contour": 200
+    },
+    "trace": {
+      "max_distance": 200000.0,
+      "max_gps_accuracy": 100.0,
+      "max_search_radius": 100.0,
+      "max_shape": 16000,
+      "max_alternates": 3,
+      "max_alternates_shape": 100
+    },
+    "bikeshare": {
+      "max_distance": 500000.0,
+      "max_locations": 50,
+      "max_matrix_distance": 200000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "auto_pedestrian": {
+      "max_distance": 5000000.0,
+      "max_matrix_distance": 400000.0,
+      "max_matrix_location_pairs": 2500
+    },
+    "centroid": {
+      "max_distance": 200000.0,
+      "max_locations": 5
+    },
+    "max_exclude_locations": 50,
+    "max_reachability": 100,
+    "max_radius": 200,
+    "max_timedep_distance": 500000,
+    "max_timedep_distance_matrix": 0,
+    "max_alternates": 2,
+    "max_exclude_polygons_length": 10000,
+    "max_exclude_polygons_vertices": 100,
+    "min_linear_cost_factor": 1,
+    "max_linear_cost_edges": 50000,
+    "max_distance_disable_hierarchy_culling": 0,
+    "hierarchy_limits": {
+      "allow_modification": false,
+      "costmatrix": {
+        "max_allowed_up_transitions": {
+          "1": 400,
+          "2": 100
+        },
+        "max_expand_within_distance": {
+          "0": 100000000.0,
+          "1": 100000,
+          "2": 5000
+        }
+      },
+      "unidirectional_astar": {
+        "max_allowed_up_transitions": {
+          "1": 400,
+          "2": 100
+        },
+        "max_expand_within_distance": {
+          "0": 100000000.0,
+          "1": 100000,
+          "2": 5000
+        }
+      },
+      "bidirectional_astar": {
+        "max_allowed_up_transitions": {
+          "1": 400,
+          "2": 100
+        },
+        "max_expand_within_distance": {
+          "0": 100000000.0,
+          "1": 20000,
+          "2": 5000
+        }
+      }
+    },
+    "allow_hard_exclusions": true
+  }
+}

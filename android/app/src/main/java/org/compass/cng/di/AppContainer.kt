@@ -21,6 +21,7 @@ import org.compass.cng.navigation.CompassNavigationRouteRecalculator
 import org.compass.cng.navigation.NavigationRouteRecalculator
 
 class AppContainer(context: Context) {
+    val offlineRouting = org.compass.cng.offline.OfflineRoutingController(context.applicationContext)
     val voiceSearch by lazy {
         org.compass.cng.voice.VoiceSearchController(context.applicationContext,
             org.compass.cng.voice.VoiceModels(java.io.File(context.noBackupFilesDir, "voice-models")))
@@ -94,7 +95,7 @@ class AppContainer(context: Context) {
             kotlinx.coroutines.Dispatchers.Main.immediate),
     )
     val navigationRouteRecalculator: NavigationRouteRecalculator =
-        CompassNavigationRouteRecalculator(routingRepository)
+        CompassNavigationRouteRecalculator(routingRepository, offlineRouter = offlineRouting)
 
     private companion object {
         const val COMPASS_API_LOG_TAG = "CompassApi"

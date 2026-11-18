@@ -7,8 +7,10 @@ eligibility. Auto, pedestrian and bicycle modes use dedicated backend costing.
 The navigation session supports foreground guidance, Picture in Picture, saved-route
 recovery, ordinary and CNG stops, voice guidance and manual/off-route recalculation.
 ETA uses nominal route duration plus remaining dwell. The ETA badge and whole-journey
-progress ring are green. Cached geometry permits guidance on an already loaded route;
-it does not provide an offline routing engine or guarantee downloaded map coverage.
+progress ring are green. Cached geometry permits guidance on an already loaded route.
+An imported regional graph enables native Valhalla rerouting for active car navigation
+when the backend is unavailable; see [offline routing](offline-routing.md) for the initial
+device-validation increment. Routing graphs do not guarantee downloaded visual map coverage.
 
 Automatic place search waits 800 ms after the last edit; explicit search remains immediate.
 The search microphone transcribes Italian locally with sherpa-onnx/Whisper base after an explicit
@@ -45,7 +47,8 @@ cards share that palette. See [visibility checks](phases/android-0.28.57-enforce
 
 ## Build and local validation
 
-Use JDK 17, Android SDK Platform 37, compatible AGP-selected Build-Tools and the pinned
+Use JDK 17, Android SDK Platform 37, NDK 29.0.14206865 (native symbol stripping),
+compatible AGP-selected Build-Tools and the pinned
 Gradle wrapper. Set JAVA_HOME and ANDROID_SDK_ROOT to your local toolchains. From the
 repository root:
 
@@ -143,3 +146,9 @@ For device diagnostics, with Android Platform-Tools installed:
 Return the failing scenario, screenshot and relevant bounded logs, excluding credentials.
 Basemap availability is independent of the Compass API. Server diagnostics are in
 [deployment](deployment.md); previous milestones are summarized in [history](history.md).
+
+## On-device routing fallback
+
+Android 0.28.58 starts the offline car-rerouting increment using Valhalla Mobile.
+See [package provisioning, scope and phone acceptance](offline-routing.md).
+A compatible graph must be imported before offline recalculation is available.

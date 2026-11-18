@@ -732,7 +732,10 @@ class NavigationEngine(
             lastSuccessfulRouteRefreshEpochMillis = refreshedAtEpochMillis,
             routeUpdateNotice = updateNotice,
             routeSource = NavigationRouteSource.LIVE,
-            connectivity = NavigationConnectivity.ONLINE,
+            connectivity = if (route.provider == org.compass.cng.offline.OFFLINE_PROVIDER) {
+                if (previousState.connectivity == NavigationConnectivity.OFFLINE) NavigationConnectivity.OFFLINE
+                else NavigationConnectivity.REROUTING_UNAVAILABLE
+            } else NavigationConnectivity.ONLINE,
             locationMode = previousState.locationMode,
             voiceGuidanceEnabled = previousState.voiceGuidanceEnabled,
         )

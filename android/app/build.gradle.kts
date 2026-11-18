@@ -130,13 +130,14 @@ require(destinationSearchMinChars in 1..20) {
 android {
     namespace = "org.compass.cng"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "org.compass.cng"
         minSdk = 26
         targetSdk = 37
-        versionCode = 103
-        versionName = "0.28.57"
+        versionCode = 104
+        versionName = "0.28.58"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "COMPASS_API_BASE_URL", compassApiBaseUrl.asBuildConfigString())
@@ -204,6 +205,7 @@ val sherpaAar = tasks.register<FetchSherpaAar>("fetchSherpaAar") {
 }
 
 dependencies {
+    implementation("io.github.rallista:valhalla-mobile:0.6.6")
     implementation(files(sherpaAar.flatMap { it.archive }))
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 

@@ -396,7 +396,9 @@ class NavigationForegroundService : Service(), LocationListener {
         if (!replayLifecycle.isReplayActive ||
             state.connectivity == NavigationConnectivity.RECOVERING
         ) {
-            routeUpdateController.nextUpdate(state, nowEpochMillis)?.let { reason ->
+            routeUpdateController.nextUpdate(state, nowEpochMillis,
+                (application as org.compass.cng.CompassApplication).container.offlineRouting.available,
+            )?.let { reason ->
                 requestRouteUpdate(reason, nowEpochMillis)
             }
         }
