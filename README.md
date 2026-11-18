@@ -35,7 +35,7 @@ are distinct constraints.
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/offline-routing.md#acceptance-on-fp4--android-15) | 0.28.58 native offline rerouting; device checks pending |
+| [Current release gate](docs/offline-routing.md#import-fix-in-02859) | 0.28.59 offline import initialization fix; device checks pending |
 
 ## Local validation
 

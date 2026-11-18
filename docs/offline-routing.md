@@ -2,6 +2,51 @@
 
 Status: implementation for device validation; native on-device acceptance pending.
 
+## Import fix in 0.28.59
+
+The operator's 0.28.58 phone import failed with
+`No such node (meili.default.breakage_distance)`. The archive had reached the native probe;
+the embedded runtime configuration omitted the Meili section required by Loki and Thor
+constructors, including for ordinary routing. 0.28.59 restores the complete Meili defaults
+from the mobile engine's pinned
+[Valhalla source](https://github.com/valhalla/valhalla/blob/a919bb6b64d61d12f79ea5466d5cf599a39714ad/scripts/valhalla_build_config),
+without enabling service endpoints or additional actions.
+
+Install `dist/compass-0.28.59.apk`, then import the **same** `nord-est-offline.zip` again.
+No graph rebuild, backend redeploy or app-data clearing is required for this configuration
+fix. Expected result: `Pacchetto verificato`, area label/date and an installed area.
+This still requires phone confirmation, followed by the offline reroute acceptance below.
+If import fails, return the full displayed error and app version. With USB debugging,
+collect `adb logcat -d -s CompassOfflineRouting:I AndroidRuntime:E` from a development machine.
+
+Local validation for 0.28.59: 360 Android JVM tests passed; `lintDebug`, `assembleDebug`
+and `compileDebugAndroidTestKotlin` succeeded. APK versionCode 105, signature and the
+Meili section inside the final APK were verified. Both Python regression checks below
+passed with the native Linux runtime. The Android instrumentation test was compiled,
+not executed on a device; no successful mobile import is claimed yet.
+
+The regression check exercises native constructor initialization on Linux with
+`pyvalhalla==3.9.0`: the old asset fails with the reported missing key, the corrected asset
+initializes. It uses no graph and makes no routing/network requests; this is **not** an
+Android JNI/device routing validation. It can be repeated in a separate Python 3.12+
+test environment:
+
+```bash
+python3 -m venv /tmp/compass-native-validation
+/tmp/compass-native-validation/bin/pip install --only-binary=:all: pyvalhalla==3.9.0 pytest==9.2.0
+/tmp/compass-native-validation/bin/python -m pytest --noconftest -q tests/test_offline_routing_config.py
+```
+
+An additional Android instrumentation test exercises the shipped JNI library and packaged
+asset without downloading a graph. From `android/`, with JDK/SDK and a connected test device:
+
+```bash
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=org.compass.cng.offline.OfflineNativeInitializationTest
+```
+
+## Initial increment validation
+
 Local verification (2026-11-18): 360 Android JVM tests passed via
 `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` from `android/`;
 lint has zero errors (96 warnings, three hints). Python validation passed with
