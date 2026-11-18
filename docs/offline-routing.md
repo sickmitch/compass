@@ -69,37 +69,46 @@ later increments after the current phone tests pass.
 
 ## Build a separate package (operator)
 
+Correction (2026-11-18): the previously documented `veneto-latest.osm.pbf` URL does not
+exist (HTTP 404). [Geofabrik lists Nord-Est](https://download.geofabrik.de/europe/italy/nord-est.html)
+as the available extract, with no regional subdivisions. Its PBF download was verified
+with an HTTP HEAD request returning 200 after redirect. Bounds below enclose its `.poly`
+extent. The earlier failed `offline-routing-build/veneto` directory is not reused; no
+production volume is changed. This verifies the source URL, not completion of a graph build.
+
 These commands are for the operator's server, from `~/docker/compass`, with Docker access,
 Python 3.12+ and several GiB of free space. They download open Geofabrik data and run a
-separate build; they do not mount or alter `compass_valhalla_datasets`. Use Veneto for the
-initial Verona tests. The digest is pinned to the 3.9.0 scripted image.
+separate build; they do not mount or alter `compass_valhalla_datasets`. Use the Nord-Est
+extract (including Veneto) for the initial Verona tests. The digest is pinned to the 3.9.0
+scripted image.
 
 ```bash
-mkdir -p offline-routing-build/veneto
-docker run --rm --name compass-offline-veneto-build \
-  --mount "type=bind,source=$PWD/offline-routing-build/veneto,target=/custom_files" \
-  -e tile_urls=https://download.geofabrik.de/europe/italy/veneto-latest.osm.pbf \
+mkdir -p offline-routing-build/nord-est
+docker run --rm --name compass-offline-nord-est-build \
+  --mount "type=bind,source=$PWD/offline-routing-build/nord-est,target=/custom_files" \
+  -e tile_urls=https://download.geofabrik.de/europe/italy/nord-est-latest.osm.pbf \
   -e serve_tiles=False -e build_tar=True -e build_elevation=False \
   -e build_admins=True -e build_time_zones=True -e server_threads=2 \
   ghcr.io/valhalla/valhalla-scripted:3.9.0@sha256:89daaf61547167893cf58c03defd43c6eba0071dc965988c16a629260f8ac683 \
-  build_tiles
+  build_tiles &&
 python3 tools/export-offline-routing.py \
-  --tiles offline-routing-build/veneto/valhalla_tiles.tar \
-  --output offline-routing-build/veneto-offline.zip \
-  --engine-version 3.9.0 --label Veneto --source-date "$(date +%F)" \
-  --bounds 44.7 10.5 46.8 13.2 \
+  --tiles offline-routing-build/nord-est/valhalla_tiles.tar \
+  --output offline-routing-build/nord-est-offline.zip \
+  --engine-version 3.9.0 --label "Nord-Est" --source-date "$(date +%F)" \
+  --bounds 43.72 9.19 47.11 13.94 \
   --probe 45.438 10.992 45.414 11.044
 ```
 
-The envelope is an initial Veneto coverage hint, not the administrative polygon. Both
-probe endpoints must be routable within the extract. Build completion and file sizes
+The envelope bounds the published Nord-Est polygon; it does not guarantee road coverage
+throughout the rectangle. Both probe endpoints must be routable within the extract.
+Build completion and file sizes
 should be checked before export. The exporter refuses an existing output file: choose a
 new filename for updates. `source-date` records the operator-supplied snapshot/build date;
-it is not a live freshness guarantee. Building Veneto is intentionally separate from the
+it is not a live freshness guarantee. Building Nord-Est is intentionally separate from the
 server graph and can take time; do not start it concurrently with a resource-heavy nightly
 build on a constrained host. Additional local space is needed for source data and archives.
 
-Transfer `veneto-offline.zip` to the phone's Downloads using your normal file-transfer
+Transfer `nord-est-offline.zip` to the phone's Downloads using your normal file-transfer
 method. Install the versioned APK, open **Opzioni → Routing offline → Importa pacchetto
 offline**, select the ZIP and remain on this screen until verification finishes. Expect
 `Pacchetto verificato` and the package label/date. There is no public dataset URL to configure
@@ -114,7 +123,7 @@ storage checked before import. The old and new copies coexist until verification
 
 1. Before importing, verify ordinary online routing and cached navigation still behave as
    before. Offline rerouting is unavailable without a package.
-2. Import the Veneto package. Native initialization and the local probe must succeed. A
+2. Import the Nord-Est package. Native initialization and the local probe must succeed. A
    corrupt ZIP/wrong version must fail while retaining the previous valid package.
 3. Start a short online car route within Veneto. Enable airplane mode while leaving GPS
    enabled. Safely deviate from the route (a passenger handles testing). Expect a new route,
