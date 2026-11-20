@@ -43,26 +43,72 @@ data class InstalledOfflineDataset(val directory: File, val manifest: OfflineMan
 /** Called only on an IO dispatcher, serialized with routing by the owning controller. */
 class OfflineDatasetStore(private val root: File) {
     private val json = Json { ignoreUnknownKeys = false }
-    /** Startup only, under the controller mutex: reclaim interrupted imports, preserve active data. */
-    fun recover(): InstalledOfflineDataset? {
-        val activeName = File(root, "active.txt").takeIf { it.exists() }?.readText()?.trim()
+    private val datasetName = Regex("dataset-[a-f0-9-]{36}")
+
+    /** The catalog is authoritative. Migrate the old pointer before reclaiming abandoned imports. */
+    fun recover(): List<InstalledOfflineDataset> {
+        val names = readNames()
+        if (!File(root, "catalog.json").exists() && File(root, "active.txt").exists()) {
+            publish(names)
+        }
         root.listFiles()?.filter {
-            it.isDirectory && it.name.matches(Regex("dataset-[a-f0-9-]{36}")) && it.name != activeName
+            it.isDirectory && datasetName.matches(it.name) && it.name !in names
         }?.forEach { it.deleteRecursively() }
+        File(root, "catalog.tmp").delete()
         File(root, "active.tmp").delete()
-        return current()
+        return all()
     }
 
-    fun current(): InstalledOfflineDataset? {
-        val pointer = File(root, "active.txt")
-        if (!pointer.exists()) return null
-        val id = pointer.readText().trim()
-        require(id.matches(Regex("dataset-[a-f0-9-]{36}")))
-        val folder = File(root, id)
-        val manifest = json.decodeFromString<OfflineManifest>(File(folder, "manifest.json").readText())
-        manifest.validate()
-        require(File(folder, "tiles.tar").length() == manifest.bytes)
-        return InstalledOfflineDataset(folder, manifest)
+    fun all(): List<InstalledOfflineDataset> = readNames().mapNotNull { name ->
+        // One missing/corrupt package must not disable the other verified areas.
+        runCatching {
+            val folder = File(root, name)
+            val manifest = json.decodeFromString<OfflineManifest>(File(folder, "manifest.json").readText())
+            manifest.validate()
+            require(File(folder, "tiles.tar").length() == manifest.bytes)
+            InstalledOfflineDataset(folder, manifest)
+        }.getOrNull()
+    }
+
+    fun unavailableIds(): List<String> {
+        val readable = all().map { it.directory.name }.toSet()
+        return readNames().filterNot { it in readable }
+    }
+
+    fun remove(id: String): List<InstalledOfflineDataset> {
+        require(datasetName.matches(id))
+        val names = readNames()
+        require(id in names) { "Pacchetto non installato" }
+        publish(names.filterNot { it == id })
+        File(root, id).deleteRecursively()
+        return all()
+    }
+
+    private fun readNames(): List<String> {
+        val catalog = File(root, "catalog.json")
+        val names = if (catalog.exists()) {
+            json.decodeFromString<OfflineCatalog>(catalog.readText()).also {
+                require(it.schemaVersion == 1) { "Catalogo offline non compatibile" }
+            }.datasets
+        } else {
+            File(root, "active.txt").takeIf { it.exists() }?.readText()?.trim()?.let(::listOf).orEmpty()
+        }
+        require(names.all(datasetName::matches) && names.distinct().size == names.size) {
+            "Catalogo offline non valido"
+        }
+        return names
+    }
+
+    private fun publish(names: List<String>) {
+        root.mkdirs()
+        val temporary = File(root, "catalog.tmp")
+        temporary.outputStream().use {
+            it.write(json.encodeToString(OfflineCatalog.serializer(), OfflineCatalog(datasets = names)).toByteArray())
+            it.fd.sync()
+        }
+        Files.move(temporary.toPath(), File(root, "catalog.json").toPath(),
+            StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        File(root, "active.txt").delete()
     }
 
     fun install(
@@ -70,11 +116,11 @@ class OfflineDatasetStore(private val root: File) {
         checkCancelled: () -> Unit = {},
         probe: (InstalledOfflineDataset) -> Unit,
     ): InstalledOfflineDataset {
+        val previous = readNames()
         root.mkdirs()
         val folder = File(root, "dataset-${UUID.randomUUID()}")
         check(folder.mkdir())
         var published = false
-        val previous = runCatching { current() }.getOrNull()
         try {
             ZipInputStream(input).use { zip ->
                 // Manifest first provides explicit bounds before streaming a potentially large graph.
@@ -114,14 +160,11 @@ class OfflineDatasetStore(private val root: File) {
                 File(folder, "manifest.json").outputStream().use { it.write(header); it.fd.sync() }
                 val dataset = InstalledOfflineDataset(folder, manifest)
                 checkCancelled()
-                probe(dataset) // Native route verification before changing the active package.
+                all().firstOrNull { it.manifest.sha256 == manifest.sha256 }?.let { return it }
+                probe(dataset) // Native route verification before registering the package.
                 checkCancelled()
-                val temporary = File(root, "active.tmp")
-                temporary.outputStream().use { it.write(folder.name.toByteArray()); it.fd.sync() }
-                Files.move(temporary.toPath(), File(root, "active.txt").toPath(),
-                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                publish(previous + folder.name)
                 published = true
-                previous?.directory?.deleteRecursively()
                 return dataset
             }
         } finally {
@@ -129,3 +172,6 @@ class OfflineDatasetStore(private val root: File) {
         }
     }
 }
+
+@Serializable
+private data class OfflineCatalog(val schemaVersion: Int = 1, val datasets: List<String>)

@@ -51,3 +51,12 @@ repository for search/CNG and the existing navigation recalculator; no duplicate
 new dataset format. Visible-activity readiness monitoring controls disabled CNG actions and
 cancels pending CNG planning on failure. Favorites/coordinates/map points remain local;
 geocoding and the visual basemap are not bundled. The new phone gate is documented above.
+
+## Multiple-package catalog (0.28.61)
+
+Replace the single active pointer with an atomic catalog without a fixed package-count limit.
+Migrate the old pointer, preserve existing ZIP compatibility, deduplicate exact graph hashes,
+and allow explicit removal. Select a covering independent graph per route and try overlapping
+alternatives without stitching graph fragments. Global tile caching remains disabled so graph
+IDs from independent builds cannot share cached tiles. This extends installation/selection;
+a merged cross-package road graph would require a separate compatible provisioning design.
