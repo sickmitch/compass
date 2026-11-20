@@ -1,6 +1,89 @@
 # Android offline routing
 
-## Current increment: initial planning in 0.28.60
+## Multiple packages in 0.28.61
+
+Compass can retain any number of independently imported ZIP packages, limited by available
+storage rather than a hard-coded package count. The existing schema-1 ZIP format and Valhalla
+3.9.0 compatibility checks stay unchanged; the 8 GiB per-archive safety limit still applies.
+In Options → Routing offline, select one or several ZIPs, inspect installed labels/dates/sizes,
+and remove individual packages with confirmation. Exact graph duplicates (SHA-256) do not
+create another installed copy. Different graphs, including different versions of one area,
+coexist until explicitly removed. Import validation still needs temporary space for one ZIP's
+graph; imports are streamed sequentially, never all loaded in memory.
+
+A private, atomically published `catalog.json` replaces the single `active.txt` pointer.
+The existing package is migrated automatically without reimport. A failed/cancelled import
+leaves previously published packages intact, including earlier successes in the same batch.
+Restart removes only unpublished staging directories. An unreadable package does not disable
+other areas and remains individually removable. The UI virtualizes the package list.
+
+Routing automatically filters packages by **all** waypoint coordinates, tries the most recently
+imported eligible graph first, and tries other overlapping packages on routing failure.
+Import, removal and native calculation share the existing mutex/IO dispatcher, so removal
+cannot delete an in-use graph. Native actors close between attempts; the runtime explicitly
+disables the global tile cache. This follows the pinned engine's
+[GraphReader/cache implementation](https://github.com/valhalla/valhalla/blob/a919bb6b64d61d12f79ea5466d5cf599a39714ad/src/baldr/graphreader.cc).
+
+**Multiple installed packages do not imply a merged graph.** Each route must be calculable
+within one package. Independently built ZIPs are kept separate: this implementation does not
+merge conflicting tile IDs or stitch route fragments at their boundaries. If no package covers
+the entire journey, online routing or a larger unified package is required. Bounding rectangles
+are only a prefilter; the native graph determines whether a valid route actually exists.
+
+### Local validation for 0.28.61
+
+On 2026-11-20, using JDK 17 and the configured Android SDK from the repository root:
+
+```bash
+android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:compileDebugAndroidTestKotlin
+.venv/bin/pytest --noconftest -q tests/test_offline_routing_config.py
+```
+
+385 JVM tests passed with zero failures/skips, including migration, 40 coexisting packages,
+duplicate imports, cancellation, failed publication/removal, corrupt packages and automatic
+area selection. Clean build succeeded; lint reported zero errors, 100 warnings and three
+hints. Python: one config regression passed; the optional `pyvalhalla` check was
+skipped because that native dependency is absent. Instrumentation was compiled, not run.
+The restored GPS-provider tests also compile again through a helper extracted from the
+existing provider filtering, with unchanged subscription behavior.
+
+APK versionCode 107, versionName 0.28.61, 92,722,287 bytes. Signature verification passed;
+the signing certificate is unchanged. `dist/last.txt` contains `compass-0.28.61.apk`.
+
+### Phone acceptance for 0.28.61
+
+No backend redeploy, new ZIP format or rebuild of existing graphs is needed. Update the app
+without clearing its data. From the repository root on a machine with Android platform-tools,
+USB debugging enabled and the phone authorized (no secrets/environment variables required):
+
+```bash
+adb install -r dist/compass-0.28.61.apk
+```
+
+1. Open Options → Routing offline: the previously installed Nord-Est package must remain listed.
+2. Select two different ZIP graphs together. Both must be listed after validation and app restart,
+   alongside the old package. Importing the same ZIP again must not increase the count.
+3. In airplane mode with GPS enabled, calculate within area A, then area B, then A again without
+   restarting the process; verify the correct area is used each time. Test an ordinary waypoint too.
+4. Import a bad ZIP alongside a valid one, then interrupt a later import by leaving the screen.
+   Already verified packages must remain routable. Only completed imports survive restart.
+5. Remove B with confirmation: A remains usable. Remove the last valid package: offline routing
+   is no longer advertised as available, while existing cached guidance remains unaffected.
+6. Try a route spanning disjoint packages: no artificial connection or fabricated route is returned.
+   Try overlapping packages where only one has the full road path: a later candidate may succeed.
+
+Return the app version, labels/count before and after restart, import summary and the A→B→A
+area-switch results. If it fails, collect on the same computer (review private coordinates):
+
+```bash
+adb logcat -d -s CompassOfflineRouting:I CompassNavigation:I AndroidRuntime:E
+adb shell dumpsys meminfo org.compass.cng.debug
+```
+
+Device-level switching between real native graphs and UI acceptance remain operator checks;
+unit tests use fixture graphs/fake native callbacks and do not establish those results.
+
+## Initial planning in 0.28.60
 
 On 2026-11-19 the operator confirmed that import and offline rerouting work on the phone,
 accepting the preceding increment. This release extends the same engine to initial **car
@@ -67,7 +150,7 @@ adb shell dumpsys meminfo org.compass.cng.debug
 Local unit/build tests do not establish FP4 latency, map rendering or multi-stop JNI behavior.
 Those require the phone checks above before further expansion.
 
-## Local validation (2026-11-20)
+### Local validation for 0.28.60 (2026-11-20)
 
 From `android/`, JDK 17 / Android SDK configured:
 
@@ -120,8 +203,8 @@ and `OfflineNativeInitializationTest` (Android instrumentation, device required)
   Initialization cost is currently paid per calculation; caching actors can be evaluated
   after measuring memory and latency. No native computation runs on the UI thread.
 - Files are private, excluded from Android backup, hash-checked before activation and
-  selected through an atomic pointer. A failed/cancelled import leaves the prior graph.
-  Startup reclaims incomplete imports left by process termination while preserving active data.
+  registered through an atomic catalog. A failed/cancelled import leaves the prior graphs.
+  Startup reclaims incomplete imports left by process termination while preserving every registered package.
   SHA-256 detects corruption, not the publisher's authenticity: import only operator-built
   packages. Imported coverage bounds are a declared envelope, not a guarantee that every
   road/path exists; native failure keeps the current navigation route.

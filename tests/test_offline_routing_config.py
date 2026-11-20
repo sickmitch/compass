@@ -21,6 +21,8 @@ def test_route_actor_has_meili_initialization_config_without_remote_services():
     assert "service" not in meili
     assert config["loki"]["actions"] == ["route"]
     assert "tile_url" not in config["mjolnir"]
+    # Independent offline graphs must never share tiles cached by graph ID.
+    assert config["mjolnir"]["global_synchronized_cache"] is False
 
 
 def test_native_actor_reproduces_old_failure_and_accepts_current_asset(tmp_path):

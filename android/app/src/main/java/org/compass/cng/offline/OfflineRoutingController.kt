@@ -21,7 +21,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
     private val mutex = Mutex()
     private val io = Dispatchers.IO.limitedParallelism(1)
     private val scope = CoroutineScope(SupervisorJob() + io)
-    private var installed: InstalledOfflineDataset? = null
+    private var installed: List<InstalledOfflineDataset> = emptyList()
     private val mutableStatus = MutableStateFlow(OfflineRoutingStatus())
     val status = mutableStatus.asStateFlow()
     override val available: Boolean get() = status.value.ready
@@ -37,35 +37,71 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
         } }
     }
 
-    suspend fun importPackage(uri: Uri) = withContext(io) {
+    suspend fun importPackages(uris: List<Uri>) = withContext(io) {
         mutex.withLock {
-            mutableStatus.value = mutableStatus.value.copy(busy = true, message = "Importazione e verifica…")
+            var added = 0
+            var duplicates = 0
+            var failed = 0
+            var lastError: String? = null
+            var cancelled = false
             try {
-                val job = currentCoroutineContext()
-                val input = requireNotNull(context.contentResolver.openInputStream(uri))
-                installed = input.use {
-                    store.install(it, checkCancelled = { job.ensureActive() }) { dataset ->
-                        calculate(dataset, dataset.manifest.probePoints(), true, null)
+                for ((index, uri) in uris.withIndex()) {
+                    ensureActive()
+                    publish("Importazione ${index + 1}/${uris.size}…", busy = true)
+                    try {
+                        val job = currentCoroutineContext()
+                        val input = requireNotNull(context.contentResolver.openInputStream(uri))
+                        val dataset = input.use {
+                            store.install(it, checkCancelled = { job.ensureActive() }) { candidate ->
+                                calculate(candidate, candidate.manifest.probePoints(), true, null)
+                            }
+                        }
+                        if (installed.any { it.directory == dataset.directory }) duplicates++ else added++
+                        installed = store.all()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        failed++
+                        lastError = error.message?.take(180) ?: "Pacchetto non valido"
+                    } catch (_: LinkageError) {
+                        failed++
+                        lastError = "Motore offline non disponibile su questo dispositivo"
                     }
                 }
-                publish("Pacchetto verificato. Ricalcolo offline disponibile nell’area scaricata.")
+            } catch (error: CancellationException) {
+                cancelled = true
+                throw error
+            } finally {
+                installed = runCatching { store.all() }.getOrDefault(installed)
+                publish(listOfNotNull(
+                    if (cancelled) "Importazione interrotta" else null,
+                    "Importati: $added · già presenti: $duplicates · non riusciti: $failed",
+                    lastError,
+                ).joinToString("\n"))
+            }
+        }
+    }
+
+    suspend fun removePackage(id: String) = withContext(io) {
+        mutex.withLock {
+            ensureActive()
+            publish("Rimozione pacchetto…", busy = true)
+            try {
+                installed = store.remove(id)
+                publish("Pacchetto rimosso")
             } catch (error: CancellationException) {
                 publish(); throw error
-            } catch (error: Exception) {
-                publish(error.message?.take(180) ?: "Importazione non riuscita")
-            } catch (_: LinkageError) {
-                publish("Motore offline non disponibile su questo dispositivo")
+            } catch (_: Exception) {
+                publish("Impossibile rimuovere il pacchetto")
             }
         }
     }
 
     override suspend fun route(points: List<Coordinate>, allowHighways: Boolean, direction: RouteOriginDirection?): List<RoutePreview> =
         withContext(io) { mutex.withLock {
-            ensureActive()
-            val dataset = checkNotNull(installed) { "Scarica e importa un pacchetto di routing" }
-            val result = calculate(dataset, points, allowHighways, direction)
-            ensureActive()
-            result
+            routeWithOfflinePackages(installed, points) { dataset ->
+                calculate(dataset, points, allowHighways, direction)
+            }
         } }
 
     private fun calculate(dataset: InstalledOfflineDataset, points: List<Coordinate>, allowHighways: Boolean, direction: RouteOriginDirection?): List<RoutePreview> {
@@ -88,14 +124,26 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
         return result
     }
 
-    private fun publish(message: String? = null) {
-        mutableStatus.value = OfflineRoutingStatus(ready = installed != null,
-            label = installed?.manifest?.label, sourceDate = installed?.manifest?.sourceDate,
-            message = message)
+    private fun publish(message: String? = null, busy: Boolean = false) {
+        val unavailable = runCatching { store.unavailableIds() }.getOrDefault(emptyList())
+        mutableStatus.value = OfflineRoutingStatus(
+            packages = installed.map { OfflineRoutingPackage(
+                it.directory.name, it.manifest.label, it.manifest.sourceDate, it.manifest.bytes,
+            ) } + unavailable.map { OfflineRoutingPackage(it, "Pacchetto non leggibile", "", 0, usable = false) },
+            busy = busy,
+            message = message,
+        )
     }
 }
 
-data class OfflineRoutingStatus(
-    val ready: Boolean = false, val busy: Boolean = false,
-    val label: String? = null, val sourceDate: String? = null, val message: String? = null,
+data class OfflineRoutingPackage(
+    val id: String, val label: String, val sourceDate: String, val bytes: Long, val usable: Boolean = true,
 )
+
+data class OfflineRoutingStatus(
+    val packages: List<OfflineRoutingPackage> = emptyList(),
+    val busy: Boolean = false,
+    val message: String? = null,
+) {
+    val ready: Boolean get() = packages.any { it.usable }
+}

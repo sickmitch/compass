@@ -444,10 +444,10 @@ class MainActivity : ComponentActivity() {
     private fun refreshFollowProviderSubscriptions() {
         if (!followPollingActive || !hasLocationPermission()) return
         val manager = getSystemService(LocationManager::class.java)
-        val enabledProviders = listOf(
-            LocationManager.GPS_PROVIDER,
-            LocationManager.NETWORK_PROVIDER,
-        ).filter(manager::isProviderEnabled).toSet()
+        val enabledProviders = enabledFollowLocationProviders(
+            gpsEnabled = manager.isProviderEnabled(LocationManager.GPS_PROVIDER),
+            networkEnabled = manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER),
+        ).toSet()
         if (enabledProviders.isEmpty()) {
             manager.removeUpdates(followLocationListener)
             registeredFollowProviders = emptySet()
@@ -545,4 +545,9 @@ class MainActivity : ComponentActivity() {
         const val FOLLOW_LOCATION_INTERVAL_MILLIS = 1_000L
         const val FOLLOW_LOCATION_MINIMUM_DISTANCE_METERS = 0f
     }
+}
+
+internal fun enabledFollowLocationProviders(gpsEnabled: Boolean, networkEnabled: Boolean): List<String> = buildList {
+    if (gpsEnabled) add(LocationManager.GPS_PROVIDER)
+    if (networkEnabled) add(LocationManager.NETWORK_PROVIDER)
 }
