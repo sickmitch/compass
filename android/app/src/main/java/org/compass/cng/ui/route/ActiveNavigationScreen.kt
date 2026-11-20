@@ -209,6 +209,7 @@ internal fun RouteFreeFollowScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ActiveNavigationScreen(
+    cngAvailable: Boolean,
     state: NavigationState,
     onRequestRouteUpdate: () -> Unit,
     onRemoveNextStop: () -> Unit,
@@ -339,7 +340,10 @@ internal fun ActiveNavigationScreen(
         }
     }
 
-    if (confirmFuelStopReplacement) {
+    LaunchedEffect(cngAvailable) {
+        if (!cngAvailable) confirmFuelStopReplacement = false
+    }
+    if (confirmFuelStopReplacement && cngAvailable) {
         FuelStopReplacementDialog(
             state = state,
             onDismiss = { confirmFuelStopReplacement = false },
@@ -376,6 +380,7 @@ internal fun ActiveNavigationScreen(
     }
     if (showCngDetails) {
         CngDetailsSheet(
+            cngAvailable = cngAvailable,
             state = state,
             ui = ui,
             onDismiss = { showCngDetails = false },
@@ -1440,6 +1445,7 @@ private fun DrivingSummaryValue(label: String, value: String, color: Color = Col
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CngDetailsSheet(
+    cngAvailable: Boolean,
     state: NavigationState,
     ui: NavigationDrivingUiModel,
     onDismiss: () -> Unit,
@@ -1555,7 +1561,7 @@ private fun CngDetailsSheet(
                     item {
                         CompassOutlinedButton(
                             onClick = onReplaceFuelStop,
-                            enabled = state.reroutingStatus != ReroutingStatus.IN_PROGRESS &&
+                            enabled = cngAvailable && state.reroutingStatus != ReroutingStatus.IN_PROGRESS &&
                                 state.activeFuelStopVisit == null,
                             modifier = Modifier.fillMaxWidth(),
                         ) {

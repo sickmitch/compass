@@ -1,89 +1,106 @@
-# Android offline routing: first device-validation increment
+# Android offline routing
 
-Status: implementation for device validation; native on-device acceptance pending.
+## Current increment: initial planning in 0.28.60
 
-## Import fix in 0.28.59
+On 2026-11-19 the operator confirmed that import and offline rerouting work on the phone,
+accepting the preceding increment. This release extends the same engine to initial **car
+A→B routes and ordinary intermediate stops**. The new phone acceptance is pending.
 
-The operator's 0.28.58 phone import failed with
-`No such node (meili.default.breakage_distance)`. The archive had reached the native probe;
-the embedded runtime configuration omitted the Meili section required by Loki and Thor
-constructors, including for ordinary routing. 0.28.59 restores the complete Meili defaults
-from the mobile engine's pinned
-[Valhalla source](https://github.com/valhalla/valhalla/blob/a919bb6b64d61d12f79ea5466d5cf599a39714ad/scripts/valhalla_build_config),
-without enabling service endpoints or additional actions.
+`OfflinePlanningRepository` decorates the existing HTTP repository for direct/waypoint
+planning only. An unreachable backend or an eight-second deadline falls back to the installed
+regional package; known offline state bypasses HTTP. Highway exclusions, origin heading,
+ordered legs, distances, nominal durations and explicit destination selection are preserved.
+Native calls remain serialized off the UI thread. Authentication, invalid/no-route responses
+and caller cancellation do not silently trigger fallback.
 
-Install `dist/compass-0.28.59.apk`, then import the **same** `nord-est-offline.zip` again.
-No graph rebuild, backend redeploy or app-data clearing is required for this configuration
-fix. Expected result: `Pacchetto verificato`, area label/date and an installed area.
-This still requires phone confirmation, followed by the offline reroute acceptance below.
-If import fails, return the full displayed error and app version. With USB debugging,
-collect `adb logcat -d -s CompassOfflineRouting:I AndroidRuntime:E` from a development machine.
+While the activity is visible, a network callback plus a `/health/ready` probe every 30 seconds
+(with a five-second cancellable deadline) monitors backend availability. Routing request
+failures also update that state. A network connection alone does not establish readiness;
+a LAN-only connection can still reach a self-hosted backend. No extra GPS requests or background
+polling are introduced. Recovery re-enables CNG commands after a successful probe/request.
 
-Local validation for 0.28.59: 360 Android JVM tests passed; `lintDebug`, `assembleDebug`
-and `compileDebugAndroidTestKotlin` succeeded. APK versionCode 105, signature and the
-Meili section inside the final APK were verified. Both Python regression checks below
-passed with the native Linux runtime. The Android instrumentation test was compiled,
-not executed on a device; no successful mobile import is claimed yet.
+When unavailable, CNG stop search, station selection, whole CNG planning and replacement are
+disabled/dimmed. Pending CNG calculations are cancelled without discarding the base route.
+Ordinary stops can still be added, reordered, removed and calculated with the local graph.
+Existing navigation retains its prior CNG stops/range/dwell through the accepted rerouting
+flow; this is not a new offline CNG ranking engine.
 
-The regression check exercises native constructor initialization on Linux with
-`pyvalhalla==3.9.0`: the old asset fails with the reported missing key, the corrected asset
-initializes. It uses no graph and makes no routing/network requests; this is **not** an
-Android JNI/device routing validation. It can be repeated in a separate Python 3.12+
-test environment:
+Select endpoints/stops using **favorites, coordinates, current GPS position or map points**.
+New address/Google Places/POI search still requires the backend. The package does not include
+the visual basemap: only cached map imagery may be available. Walking/cycling offline,
+automatic package downloads and new offline CNG selection remain outside this increment.
+A car route outside the installed graph fails explicitly; coverage is not extended by fallback.
 
-```bash
-python3 -m venv /tmp/compass-native-validation
-/tmp/compass-native-validation/bin/pip install --only-binary=:all: pyvalhalla==3.9.0 pytest==9.2.0
-/tmp/compass-native-validation/bin/python -m pytest --noconftest -q tests/test_offline_routing_config.py
-```
+### Phone acceptance for 0.28.60
 
-An additional Android instrumentation test exercises the shipped JNI library and packaged
-asset without downloading a graph. From `android/`, with JDK/SDK and a connected test device:
+Install `dist/compass-0.28.60.apk` on FP4/Android 15; keep the already imported Nord-Est package.
+No backend sync/redeploy, graph rebuild, reimport or app-data clearing is needed. From a
+computer with Android platform-tools, USB debugging and authorized phone (no secrets needed),
+repository root:
 
 ```bash
-./gradlew :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=org.compass.cng.offline.OfflineNativeInitializationTest
+adb install -r dist/compass-0.28.60.apk
 ```
 
-## Initial increment validation
+1. Online, calculate an ordinary car trip: existing routing behavior stays intact.
+2. Reopen the app in airplane mode, GPS enabled. Choose endpoints from favorites or coordinates
+   inside Nord-Est and calculate a **new** route. Expect preview, Italian maneuvers, nominal
+   ETA and local-route status; start navigation without first calculating online.
+3. Add two ordinary stops from favorites/map, reorder/delete one, calculate and start. Verify
+   stop order, distance/time and unchanged destination; repeat with highways excluded.
+4. CNG buttons must be dimmed and untappable in preview, Add stop and any CNG page left open
+   before disconnection. Losing connectivity during CNG calculation must stop the busy state
+   and preserve the ordinary route. Repeat with the backend unreachable but Wi-Fi active.
+5. Restore access and keep the app visible: within a probe cycle (up to ~35 seconds), CNG
+   actions become available again. New routes prefer the backend.
+6. Test outside coverage and walking/cycling without a server: no invented route or silent
+   mode change. Confirm existing offline off-route recalculation still behaves as before.
 
-Local verification (2026-11-18): 360 Android JVM tests passed via
-`./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` from `android/`;
-lint has zero errors (96 warnings, three hints). Python validation passed with
-`.venv/bin/ruff check src tests scripts tools` and
-`.venv/bin/pytest -q -m 'not integration'`: 516 passed, six integration tests deselected.
-Package/route tests use synthetic fixtures and a fake native probe; they do not establish
-native engine performance or graph compatibility on a phone. The real probe runs at import.
-`dist/compass-0.28.58.apk` is 93,027,835 bytes, versionCode 104, with all four existing ABIs;
-APK signature verification passed and its signing certificate matches 0.28.57.
+If a check fails, return the step, version, package label, visible message and logs (review
+private coordinates before sharing):
 
-Compass 0.28.58 can reroute an **existing car navigation** on the device, using a previously
-imported graph. Online routing remains primary. In airplane mode an off-route event goes
-directly to local routing; with an installed package, a network/server failure or an eight
-second online timeout triggers fallback. Authentication errors, invalid requests/no-route
-responses and cancellation are not silently bypassed. Without a package the previous
-online/cached-route behavior is preserved. GPS and off-route detection must still be reliable.
+```bash
+adb logcat -d -s CompassOfflineRouting:I CompassPlanner:I CompassApi:I CompassNavigation:I AndroidRuntime:E
+adb shell dumpsys meminfo org.compass.cng.debug
+```
 
-The fallback preserves remaining ordered ordinary/CNG stops, highway exclusion, departure
-heading, voice maneuvers and dwell times. Completed stops are omitted. An existing CNG range
-plan is carried forward with recomputed leg consumption; a route crossing its reserve is
-rejected, not silently substituted with unreachable refuelling. Prices/opening snapshots
-remain cached; the phone does not claim a new station availability check. A local route is
-identified in navigation status as `Percorso ricalcolato sul dispositivo · dati offline`.
-Going online triggers the existing connectivity-recovery routing flow.
+Local unit/build tests do not establish FP4 latency, map rendering or multi-stop JNI behavior.
+Those require the phone checks above before further expansion.
 
-This increment does **not** provide offline address/Google Places search, initial trip
-planning, new CNG candidate ranking, offline stop editing, pedestrian/bicycle fallback or a
-map download catalogue. Downloaded routing data do not contain the visual MapLibre basemap;
-its ambient cache alone cannot guarantee map rendering offline. A manual package import is
-the initial provisioning path. Automatic downloads and wider offline planning belong to
-later increments after the current phone tests pass.
+## Local validation (2026-11-20)
+
+From `android/`, JDK 17 / Android SDK configured:
+
+```bash
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:compileDebugAndroidTestKotlin
+```
+
+372 JVM tests passed (zero failures/skips); build and instrumentation compilation succeeded.
+Lint: zero errors, 98 warnings and 3 hints. Instrumentation was compiled, not run
+on a device. The Python runtime-config regression passed; its optional `pyvalhalla` native
+check was skipped because that separate dependency is not installed in this environment.
+APK versionCode 106, versionName 0.28.60, 92,700,709 bytes. Signature verification passed;
+the certificate matches 0.28.59. `dist/last.txt` contains `compass-0.28.60.apk`.
+
+## Accepted import/rerouting foundation (0.28.58–0.28.59)
+
+The initial import failed with `No such node (meili.default.breakage_distance)`. 0.28.59 restored
+the Meili defaults needed even by ordinary route initialization, from the
+[pinned Valhalla configuration](https://github.com/valhalla/valhalla/blob/a919bb6b64d61d12f79ea5466d5cf599a39714ad/scripts/valhalla_build_config).
+The same package subsequently imported and offline rerouting was confirmed by the operator.
+
+That increment preserves remaining ordered ordinary/CNG stops, highway exclusion, departure
+heading, voice maneuvers and dwell. Completed stops are omitted; a route crossing an existing
+CNG plan's reserve is rejected. Prices/opening snapshots remain cached. Recovery uses the
+existing navigation connectivity flow. Runtime initialization regressions are covered by
+`tests/test_offline_routing_config.py` (optional native Linux check with `pyvalhalla==3.9.0`)
+and `OfflineNativeInitializationTest` (Android instrumentation, device required).
 
 ## Architecture and compatibility
 
 - `OfflineRouter` returns existing `RoutePreview` legs. `CompassNavigationRouteRecalculator`
-  reuses the existing waypoint/leg-to-navigation converters; the HTTP repository is unchanged.
-  The API client's POST transport now cancels its OkHttp call when the coroutine is cancelled,
+  reuses the existing waypoint/leg-to-navigation converters; planning wraps the HTTP repository.
+  The API client's GET/POST transport cancels its OkHttp call when the coroutine is cancelled,
   including during response-body reads, so the fallback deadline also bounds network waiting.
 - Pinned `io.github.rallista:valhalla-mobile:0.6.6` embeds Valhalla 3.9.0. Its upstream source
   pins Valhalla commit `a919bb6b64d61d12f79ea5466d5cf599a39714ad`. Kotlin calls the public
@@ -164,7 +181,7 @@ Package structure: `manifest.json` first, then `tiles.tar`; no other entries. Sc
 attribution. No zip paths are extracted directly. Limits: 16 KiB manifest, 8 GiB tar, available
 storage checked before import. The old and new copies coexist until verification completes.
 
-## Acceptance on FP4 / Android 15
+## Rerouting regression checks on FP4 / Android 15
 
 1. Before importing, verify ordinary online routing and cached navigation still behave as
    before. Offline rerouting is unavailable without a package.

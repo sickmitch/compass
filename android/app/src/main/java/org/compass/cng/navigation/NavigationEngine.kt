@@ -151,6 +151,8 @@ class NavigationEngine(
             fuelStopProgress = plannedFuelStops,
             nextIntermediateStop = plannedIntermediateStops.firstOrNull(),
             intermediateStopProgress = plannedIntermediateStops,
+            connectivity = if (route.provider == org.compass.cng.offline.OFFLINE_PROVIDER)
+                NavigationConnectivity.REROUTING_UNAVAILABLE else NavigationConnectivity.ONLINE,
             routeSource = source,
             routeCachedAtEpochMillis = cachedAtEpochMillis,
             voiceGuidanceEnabled = voiceGuidanceEnabled,

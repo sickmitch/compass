@@ -275,7 +275,10 @@ class RoutePlannerViewModel(
         InMemoryBackendSystemInfoRepository(),
     private val startInFollowMode: Boolean = false,
     private val eventLogger: (String) -> Unit = {},
+    private val backendAvailability: org.compass.cng.offline.BackendAvailability =
+        org.compass.cng.offline.BackendAvailability(),
 ) : ViewModel() {
+    val cngAvailable = backendAvailability.available
     val navigationState = navigationSession.state
     val arrivalNotice = navigationSession.arrivalNotice
     private val restoredNavigation = navigationSession.state.value.let { restored ->
@@ -374,7 +377,30 @@ class RoutePlannerViewModel(
     private var serverReturnStage: PlannerStage = PlannerStage.FOLLOW
     private var optionsReturnStage: PlannerStage = PlannerStage.FOLLOW
 
+    private fun requireCngServer(): Boolean {
+        if (cngAvailable.value) return true
+        mutableUiState.value = mutableUiState.value.copy(
+            message = "Server non raggiungibile: il calcolo delle soste e del piano metano non è disponibile.",
+        )
+        return false
+    }
+
     init {
+        viewModelScope.launch {
+            cngAvailable.collect { available ->
+                val state = mutableUiState.value
+                val calculatingCng = state.operation in setOf(
+                    PlannerOperation.CNG_CANDIDATES, PlannerOperation.PREDICTIVE_CANDIDATES,
+                    PlannerOperation.SELECTED_ROUTE,
+                ) || (state.operation == PlannerOperation.HIGHWAY_RECALCULATION &&
+                    (state.selectedRoute != null || state.selectedItineraryRoute != null))
+                if (!available && calculatingCng) {
+                    requestJob?.cancel()
+                    mutableUiState.value = mutableUiState.value.copy(operation = null, pendingStation = null)
+                    requireCngServer()
+                }
+            }
+        }
         if (navigationState.value.voiceGuidanceEnabled != initialAppPreferences.voiceGuidanceDefault) {
             navigationSession.setVoiceGuidanceEnabled(initialAppPreferences.voiceGuidanceDefault)
         }
@@ -524,6 +550,7 @@ class RoutePlannerViewModel(
     fun recalculateWithoutHighways() {
         val state = mutableUiState.value
         if (!state.highwayConfirmationPromptVisible || state.isBusy) return
+        if ((state.selectedItineraryRoute != null || state.selectedRoute != null) && !requireCngServer()) return
         requestJob?.cancel()
         requestJob = viewModelScope.launch {
             mutableUiState.value = state.copy(
@@ -2001,6 +2028,7 @@ class RoutePlannerViewModel(
     fun cancelIntermediateStopEdit() = beginAddingIntermediateStop()
 
     fun addCngIntermediateStop() {
+        if (!requireCngServer()) return
         val state = mutableUiState.value
         if (
             state.stage != PlannerStage.INTERMEDIATE_STOPS ||
@@ -2177,6 +2205,7 @@ class RoutePlannerViewModel(
 
     fun calculateIntermediateStopsRoute() {
         val state = mutableUiState.value
+        if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN && !requireCngServer()) return
         val directRoute = state.baseRoute ?: return
         if (state.isBusy) return
         val routeStops = if (state.intermediateStopsMode == IntermediateStopsMode.CNG_PLAN) {
@@ -2330,6 +2359,7 @@ class RoutePlannerViewModel(
     }
 
     fun openAddStop() {
+        if (!requireCngServer()) return
         if (
             mutableUiState.value.baseRoute != null &&
             !mutableUiState.value.routeInputsDirty &&
@@ -2353,6 +2383,7 @@ class RoutePlannerViewModel(
     }
 
     fun openPredictiveRange() {
+        if (!requireCngServer()) return
         if (mutableUiState.value.routeTravelMode != RouteTravelMode.DRIVING) return
         if (
             mutableUiState.value.baseRoute != null &&
@@ -2638,6 +2669,7 @@ class RoutePlannerViewModel(
     }
 
     fun searchCngStations() {
+        if (!requireCngServer()) return
         val state = mutableUiState.value
         if (state.routeTravelMode != RouteTravelMode.DRIVING) return
         val rangeKm = state.effectiveRangeKmInput.parseDecimal()
@@ -2726,6 +2758,7 @@ class RoutePlannerViewModel(
     }
 
     private fun evaluatePredictiveRange(includeGasolineFallback: Boolean) {
+        if (!requireCngServer()) return
         val state = mutableUiState.value
         val effectiveRangeKm = state.effectiveRangeKmInput.parseDecimal()
         val remainingRangeKm = state.estimatedRemainingRangeKmInput.parseDecimal()
@@ -2865,6 +2898,7 @@ class RoutePlannerViewModel(
     }
 
     fun selectStation(station: RankedCngStation) {
+        if (!requireCngServer()) return
         val state = mutableUiState.value
         if (state.stage != PlannerStage.CNG_CANDIDATES || state.isBusy) return
         check(state.rankedStations?.candidates?.any { it.mimitStationId == station.mimitStationId } == true) {
@@ -2966,6 +3000,7 @@ class RoutePlannerViewModel(
     }
 
     fun acceptPredictiveItinerary() {
+        if (!requireCngServer()) return
         val state = mutableUiState.value
         val suggestion = state.predictiveSuggestion
         val itinerary = suggestion?.itinerary
@@ -3536,6 +3571,7 @@ class RoutePlannerViewModel(
     }
 
     fun editCngPlan() {
+        if (!requireCngServer()) return
         val state = mutableUiState.value
         if (state.isBusy) return
         navigationSession.clear()
@@ -3576,6 +3612,7 @@ class RoutePlannerViewModel(
             showHighwayConfirmationIfNeeded(directRoute)
             return
         }
+        if (!requireCngServer()) return
         val suggestion = state.predictiveSuggestion
         if (suggestion == null) {
             mutableUiState.value = state.copy(
@@ -3778,6 +3815,8 @@ class RoutePlannerViewModel(
         private val backendSystemInfoRepository: BackendSystemInfoRepository =
             InMemoryBackendSystemInfoRepository(),
         private val eventLogger: (String) -> Unit = {},
+        private val backendAvailability: org.compass.cng.offline.BackendAvailability =
+            org.compass.cng.offline.BackendAvailability(),
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -3793,6 +3832,7 @@ class RoutePlannerViewModel(
                 appPreferencesRepository = appPreferencesRepository,
                 backendSystemInfoRepository = backendSystemInfoRepository,
                 startInFollowMode = true,
+                backendAvailability = backendAvailability,
                 eventLogger = eventLogger,
             ) as T
         }

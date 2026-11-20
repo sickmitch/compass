@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
             appPreferencesRepository = application.container.appPreferencesRepository,
             backendSystemInfoRepository = application.container.backendSystemInfoRepository,
             eventLogger = application.container.plannerEventLogger,
+            backendAvailability = application.container.backendAvailability,
         )
     }
 
@@ -285,6 +286,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        (application as CompassApplication).container.backendAvailabilityMonitor.start()
         clientUpdateViewModel.check()
         if (
             hasLocationPermission() &&
@@ -345,6 +347,7 @@ class MainActivity : ComponentActivity() {
     )
 
     override fun onStop() {
+        (application as CompassApplication).container.backendAvailabilityMonitor.stop()
         stopFollowLocationUpdates()
         super.onStop()
     }

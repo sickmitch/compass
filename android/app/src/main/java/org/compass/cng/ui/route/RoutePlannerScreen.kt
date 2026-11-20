@@ -151,6 +151,7 @@ fun RoutePlannerScreen(
     onStopNavigation: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val cngAvailable by viewModel.cngAvailable.collectAsStateWithLifecycle()
     val navigationState by viewModel.navigationState.collectAsStateWithLifecycle()
     LaunchedEffect(state.directNavigationRequested, state.isBusy, state.highwayConfirmationPromptVisible) {
         if (state.directNavigationRequested && !state.isBusy && !state.highwayConfirmationPromptVisible &&
@@ -231,7 +232,7 @@ fun RoutePlannerScreen(
             confirmButton = {
                 CompassButton(
                     onClick = viewModel::evaluatePredictiveRangeWithGasolineFallback,
-                    enabled = state.vehicleProfiles.selectedProfile != null &&
+                    enabled = cngAvailable && state.vehicleProfiles.selectedProfile != null &&
                         state.estimatedRemainingGasolineRangeKmInput.isNotBlank(),
                 ) { Text("Usa fallback benzina") }
             },
@@ -258,7 +259,10 @@ fun RoutePlannerScreen(
                 }
             },
             dismissButton = {
-                CompassTextButton(onClick = viewModel::recalculateWithoutHighways) {
+                CompassTextButton(
+                    onClick = viewModel::recalculateWithoutHighways,
+                    enabled = cngAvailable || (state.selectedRoute == null && state.selectedItineraryRoute == null),
+                ) {
                     Text("Ricalcola senza")
                 }
             },
@@ -286,6 +290,7 @@ fun RoutePlannerScreen(
     if (showDrivingSurface) {
         Surface(modifier = modifier.fillMaxSize()) {
             ActiveNavigationScreen(
+                cngAvailable = cngAvailable,
                 state = navigationState,
                 onRequestRouteUpdate = onRequestRouteUpdate,
                 onRemoveNextStop = onRemoveNextStop,
@@ -486,6 +491,7 @@ fun RoutePlannerScreen(
                     PlannerStage.MAP_POINT_PICKER,
                     PlannerStage.INTERMEDIATE_STOP_PREVIEW -> Unit
                     PlannerStage.INTERMEDIATE_STOPS -> IntermediateStopsContent(
+                        cngAvailable = cngAvailable,
                         route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         stops = state.plannedIntermediateStops,
                         mode = state.intermediateStopsMode,
@@ -510,6 +516,7 @@ fun RoutePlannerScreen(
                         onCalculate = viewModel::calculateIntermediateStopsRoute,
                     )
                     PlannerStage.PREVIEW -> PreviewContent(
+                        cngAvailable = cngAvailable,
                         route = baseRoute,
                         onStartNavigation = viewModel::requestDirectNavigation,
                         onEditRoute = viewModel::openRouteConfiguration,
@@ -517,6 +524,7 @@ fun RoutePlannerScreen(
                         onAddIntermediateStops = viewModel::addIntermediateStop,
                     )
                     PlannerStage.CONFIGURE_CNG -> ConfigureCngContent(
+                        cngAvailable = cngAvailable,
                         route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         rangeInput = state.effectiveRangeKmInput,
                         detourInput = state.maximumDetourMinutesInput,
@@ -526,6 +534,7 @@ fun RoutePlannerScreen(
                         onSearch = viewModel::searchCngStations,
                     )
                     PlannerStage.CONFIGURE_PREDICTIVE -> ConfigurePredictiveContent(
+                        cngAvailable = cngAvailable,
                         route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         effectiveRangeInput = state.effectiveRangeKmInput,
                         remainingRangeInput = state.estimatedRemainingRangeKmInput,
@@ -590,6 +599,7 @@ fun RoutePlannerScreen(
                     PlannerStage.SERVER_CONNECTION -> Unit
                     PlannerStage.OPTIONS -> Unit
                     PlannerStage.CNG_CANDIDATES -> CandidateContent(
+                        cngAvailable = cngAvailable,
                         rankedStations = requireNotNull(state.rankedStations),
                         predictiveSuggestion = state.predictiveSuggestion,
                         pendingStation = state.pendingStation,
@@ -597,6 +607,7 @@ fun RoutePlannerScreen(
                         onSelect = viewModel::selectStation,
                     )
                     PlannerStage.PREDICTIVE_ITINERARY -> PredictiveItineraryContent(
+                        cngAvailable = cngAvailable,
                         suggestion = requireNotNull(state.predictiveSuggestion),
                         calculating = state.operation == PlannerOperation.SELECTED_ROUTE,
                         message = state.message,
@@ -609,6 +620,7 @@ fun RoutePlannerScreen(
                     )
                     PlannerStage.NAVIGATION_PREVIEW -> navigationState.route?.let { route ->
                         NavigationPreviewContent(
+                        cngAvailable = cngAvailable,
                             route = route,
                             state = navigationState,
                             destinationLabel = state.destinationDisplayName,
@@ -1183,6 +1195,7 @@ private fun ErrorState(
 
 @Composable
 private fun PreviewContent(
+    cngAvailable: Boolean,
     route: RoutePreview,
     onStartNavigation: () -> Unit,
     onEditRoute: () -> Unit,
@@ -1207,7 +1220,8 @@ private fun PreviewContent(
                 )
                 RouteSummary(route = route, modifier = Modifier.fillMaxWidth())
                 Text(
-                    "Scegli una modalità. La mappa e il riepilogo si aggiorneranno senza perdere partenza e destinazione.",
+                    if (cngAvailable) "Scegli una modalità. La mappa e il riepilogo si aggiorneranno senza perdere partenza e destinazione."
+                    else "Server non raggiungibile. Percorso e tappe normali disponibili con l’area offline; piano metano non disponibile.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1239,6 +1253,7 @@ private fun PreviewContent(
                     ) {
                         CompassOutlinedButton(
                             onClick = onExtendedPlanning,
+                            enabled = cngAvailable,
                             modifier = Modifier.weight(1f).height(62.dp),
                         ) {
                             Icon(Icons.Rounded.Tune, contentDescription = null)
@@ -1395,6 +1410,7 @@ private fun MapPointPickerContent(
 
 @Composable
 private fun IntermediateStopsContent(
+    cngAvailable: Boolean,
     route: RoutePreview,
     stops: List<PlannedIntermediateStop>,
     mode: IntermediateStopsMode,
@@ -1624,6 +1640,7 @@ private fun IntermediateStopsContent(
                                     }
                                     CompassOutlinedButton(
                                         onClick = onClick,
+                                        enabled = action != IntermediateStopAddAction.CNG || cngAvailable,
                                         modifier = Modifier
                                             .weight(1f)
                                             .height(INTERMEDIATE_STOP_ACTION_HEIGHT),
@@ -1647,7 +1664,7 @@ private fun IntermediateStopsContent(
                 CompassButton(
                     onClick = onCalculate,
                     enabled = (stops.isNotEmpty() || mode == IntermediateStopsMode.CNG_PLAN) &&
-                        !isCalculating,
+                        !isCalculating && (mode != IntermediateStopsMode.CNG_PLAN || cngAvailable),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (isCalculating) {
@@ -1682,6 +1699,7 @@ private fun IntermediateStopsContent(
 
 @Composable
 private fun NavigationPreviewContent(
+    cngAvailable: Boolean,
     route: NavigationRoute,
     state: NavigationState,
     destinationLabel: String,
@@ -1708,6 +1726,7 @@ private fun NavigationPreviewContent(
 ) {
     if (state.phase != NavigationPhase.ROUTE_PREVIEW) {
         ActiveNavigationScreen(
+            cngAvailable = cngAvailable,
             state = state,
             onRequestRouteUpdate = onRequestRouteUpdate,
             onRemoveNextStop = onRemoveNextStop,
@@ -1940,10 +1959,12 @@ private fun NavigationPreviewContent(
                             ) {
                                 CompassButton(
                                     onClick = onEditCngPlan,
+                                    enabled = cngAvailable,
                                     modifier = Modifier.weight(1f),
                                 ) { Text("Modifica") }
                                 CompassOutlinedButton(
                                     onClick = { onDeleteCngStop(stop.mimitStationId) },
+                                    enabled = cngAvailable || route.fuelStops.size == 1,
                                     modifier = Modifier.weight(1f),
                                 ) { Text("Elimina") }
                             }
@@ -2881,6 +2902,7 @@ private enum class VehiclePanel { PARAMETERS, PROFILES, FORM }
 
 @Composable
 private fun ConfigurePredictiveContent(
+    cngAvailable: Boolean,
     route: RoutePreview,
     effectiveRangeInput: String,
     remainingRangeInput: String,
@@ -3142,7 +3164,11 @@ private fun ConfigurePredictiveContent(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Inserisci tappa intermedia")
                 }
-                CompassButton(onClick = onEvaluate, modifier = Modifier.fillMaxWidth()) {
+                CompassButton(
+                    onClick = onEvaluate,
+                    enabled = cngAvailable,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Conferma e calcola piano")
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -3170,6 +3196,7 @@ private fun CompactPlanField(
 
 @Composable
 private fun ConfigureCngContent(
+    cngAvailable: Boolean,
     route: RoutePreview,
     rangeInput: String,
     detourInput: String,
@@ -3232,7 +3259,7 @@ private fun ConfigureCngContent(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 message?.let { InlineError(it) }
-                CompassButton(onClick = onSearch, modifier = Modifier.fillMaxWidth()) {
+                CompassButton(onClick = onSearch, enabled = cngAvailable, modifier = Modifier.fillMaxWidth()) {
                     Text("Cerca stazioni Metano")
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -3243,6 +3270,7 @@ private fun ConfigureCngContent(
 
 @Composable
 private fun CandidateContent(
+    cngAvailable: Boolean,
     rankedStations: RankedCngStations,
     predictiveSuggestion: PredictiveCngSuggestion?,
     pendingStation: RankedCngStation?,
@@ -3346,7 +3374,7 @@ private fun CandidateContent(
                                 it.station.mimitStationId == station.mimitStationId
                             },
                         selecting = pendingStation?.mimitStationId == station.mimitStationId,
-                        enabled = pendingStation == null,
+                        enabled = cngAvailable && pendingStation == null,
                         onHighlight = { selectedStationId = station.mimitStationId },
                         onChoose = { onSelect(station) },
                     )
@@ -3486,6 +3514,7 @@ private fun CandidateCard(
 
 @Composable
 private fun PredictiveItineraryContent(
+    cngAvailable: Boolean,
     suggestion: PredictiveCngSuggestion,
     calculating: Boolean,
     message: String?,
@@ -3563,7 +3592,7 @@ private fun PredictiveItineraryContent(
             item(key = "calculate-route") {
                 CompassButton(
                     onClick = onCalculateRoute,
-                    enabled = !calculating,
+                    enabled = cngAvailable && !calculating,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),

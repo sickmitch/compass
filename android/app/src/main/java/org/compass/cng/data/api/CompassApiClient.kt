@@ -53,6 +53,7 @@ class CompassApiClient(
     private val json: Json,
     private val eventLogger: (String) -> Unit = {},
     private val monotonicNanos: () -> Long = System::nanoTime,
+    private val routingAvailability: (Boolean) -> Unit = {},
 ) {
     constructor(
         baseUrl: String,
@@ -116,6 +117,9 @@ class CompassApiClient(
             resolve("api/v1/enforcement/approach"), json.encodeToString(trace),
             client = enforcementHttpClient, maxBytes = 64_000L,
         )
+
+    suspend fun isBackendReady(): Boolean =
+        get<HealthResponseDto>(resolve("health/ready"), maxBytes = 16_384).status == "ok"
 
     suspend fun getBackendSystemInfo(): ApiBackendSystemInfo {
         val health = get<HealthResponseDto>(resolve("health/live"))
@@ -449,6 +453,7 @@ class CompassApiClient(
         maxBytes: Long? = null,
     ): ResponseDto = withContext(Dispatchers.IO) {
         val endpoint = url.encodedPath
+        val observesRouting = endpoint.contains("/api/v1/routes") || endpoint.contains("/api/v1/cng")
         val startedAtNanos = monotonicNanos()
         val request = authenticatedRequestBuilder()
             .url(url)
@@ -462,6 +467,7 @@ class CompassApiClient(
         )
         try {
             client.newCall(request).decodeCancellable { response ->
+                if (observesRouting) routingAvailability(response.code < 500)
                 if (maxBytes != null && response.body.source().request(maxBytes + 1)) {
                     throw ApiClientException.InvalidResponse(IllegalArgumentException("Response too large"))
                 }
@@ -505,6 +511,7 @@ class CompassApiClient(
             )
             throw error
         } catch (error: IOException) {
+            if (observesRouting) routingAvailability(false)
             eventLogger(
                 "request failed: method=POST endpoint=$endpoint kind=network " +
                     "duration_ms=${elapsedMillis(startedAtNanos)} cause=${error.causesForLog()}",
@@ -549,7 +556,7 @@ class CompassApiClient(
             val request = authenticatedRequestBuilder().url(url).get().build()
             eventLogger("request started: method=GET endpoint=$endpoint")
             try {
-                client.newCall(request).execute().use { response ->
+                client.newCall(request).decodeCancellable { response ->
                     val body = if (maxBytes == null) response.body.string() else {
                         val source = response.body.source()
                         require(!source.request(maxBytes + 1)) { "Response exceeds byte limit" }

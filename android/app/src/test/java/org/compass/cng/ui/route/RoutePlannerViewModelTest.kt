@@ -84,6 +84,79 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
     @Test
+    fun unavailableBackendBlocksCngActionsButKeepsFavoriteStopsAndRoutePlanning() = runTest {
+        val availability = org.compass.cng.offline.BackendAvailability().apply { networkChanged(false) }
+        val direct = sampleRoute(distanceMeters = 100_000.0).copy(provider = org.compass.cng.offline.OFFLINE_PROVIDER)
+        val stop = Coordinate(45.45, 10.99)
+        val via = RouteWithIntermediateStop(stop, 110_000.0, 4_000.0,
+            listOf(sampleRoute(origin = direct.origin, destination = stop),
+                sampleRoute(origin = stop, destination = direct.destination)),
+            org.compass.cng.offline.OFFLINE_PROVIDER, direct.navigation)
+        val repository = FakeRoutingRepository(baseResult = Result.success(direct),
+            intermediateRouteResult = Result.success(via))
+        val viewModel = RoutePlannerViewModel(repository,
+            backendAvailability = availability,
+            favoritePlaceRepository = InMemoryFavoritePlaceRepository(listOf(FavoritePlace("stop", "Amici", stop))))
+        runCurrent()
+        assertFalse(viewModel.cngAvailable.value)
+        viewModel.openAddStop()
+        viewModel.openPredictiveRange()
+        viewModel.searchCngStations()
+        viewModel.evaluatePredictiveRange()
+        viewModel.acceptPredictiveItinerary()
+        assertEquals(PlannerStage.PREVIEW, viewModel.uiState.value.stage)
+        assertTrue(viewModel.uiState.value.message!!.contains("Server non raggiungibile"))
+        viewModel.addIntermediateStop()
+        viewModel.addCngIntermediateStop()
+        assertEquals(PlannerStage.INTERMEDIATE_STOPS, viewModel.uiState.value.stage)
+        viewModel.openFavoritePlaces(RouteEndpoint.INTERMEDIATE_STOP)
+        viewModel.selectFavoritePlace("stop")
+        runCurrent()
+        assertEquals(PlannerStage.INTERMEDIATE_STOP_PREVIEW, viewModel.uiState.value.stage)
+        viewModel.chooseIntermediateStop()
+        assertEquals(listOf(stop), viewModel.uiState.value.plannedIntermediateStops.map { it.location })
+        viewModel.calculateIntermediateStopsRoute()
+        runCurrent()
+        assertEquals(PlannerStage.NAVIGATION_PREVIEW, viewModel.uiState.value.stage)
+        assertEquals(org.compass.cng.offline.OFFLINE_PROVIDER, viewModel.navigationState.value.route!!.provider)
+        availability.networkChanged(true)
+        availability.serverResponded(true)
+        assertTrue(viewModel.cngAvailable.value)
+        viewModel.openPredictiveRange()
+        assertEquals(PlannerStage.CONFIGURE_PREDICTIVE, viewModel.uiState.value.stage)
+    }
+
+    @Test
+    fun backendLossCancelsPendingCngCalculationWithoutClearingTheRoute() = runTest {
+        val availability = org.compass.cng.offline.BackendAvailability()
+        val base = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        var cancelled = false
+        val repository = object : RoutingRepository by base {
+            override suspend fun rankedCngStationsAlongItinerary(
+                origin: Coordinate, destination: Coordinate, intermediateStops: List<Coordinate>,
+                effectiveCngRangeKm: Double, maximumDetourMinutes: Double, departureAt: OffsetDateTime,
+                allowHighways: Boolean,
+            ): RankedCngStations {
+                try { kotlinx.coroutines.awaitCancellation() } finally { cancelled = true }
+            }
+        }
+        val vm = RoutePlannerViewModel(repository, backendAvailability = availability)
+        vm.openAddStop()
+        vm.updateEffectiveRange("200")
+        vm.updateMaximumDetour("10")
+        vm.searchCngStations()
+        runCurrent()
+        assertEquals(PlannerOperation.CNG_CANDIDATES, vm.uiState.value.operation)
+        availability.serverResponded(false)
+        runCurrent()
+        assertTrue(cancelled)
+        assertNull(vm.uiState.value.operation)
+        assertFalse(vm.cngAvailable.value)
+        assertEquals(sampleRoute(), vm.uiState.value.baseRoute)
+        assertTrue(vm.uiState.value.message!!.contains("Server non raggiungibile"))
+    }
+
+    @Test
     fun spokenMetanoOpensExistingCngWorkflowWithoutPlacesSearch() = runTest {
         val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
         val viewModel = RoutePlannerViewModel(repository)

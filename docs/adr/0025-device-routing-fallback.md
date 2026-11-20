@@ -42,3 +42,12 @@ finish. Reclaim abandoned imports on startup without deleting the active package
 
 The exact build/import procedure and phone acceptance gate are in
 [offline routing](../offline-routing.md). Do not expand this phase before its device results.
+
+## Extension accepted for implementation (2026-11-19)
+
+After the operator confirmed native import/rerouting, extend the same engine to initial car
+routes and ordinary waypoint editing through `OfflinePlanningRepository`. Keep the HTTP
+repository for search/CNG and the existing navigation recalculator; no duplicate engine or
+new dataset format. Visible-activity readiness monitoring controls disabled CNG actions and
+cancels pending CNG planning on failure. Favorites/coordinates/map points remain local;
+geocoding and the visual basemap are not bundled. The new phone gate is documented above.

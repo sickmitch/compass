@@ -21,6 +21,7 @@ import org.compass.cng.navigation.CompassNavigationRouteRecalculator
 import org.compass.cng.navigation.NavigationRouteRecalculator
 
 class AppContainer(context: Context) {
+    val backendAvailability = org.compass.cng.offline.BackendAvailability()
     val offlineRouting = org.compass.cng.offline.OfflineRoutingController(context.applicationContext)
     val voiceSearch by lazy {
         org.compass.cng.voice.VoiceSearchController(context.applicationContext,
@@ -56,6 +57,7 @@ class AppContainer(context: Context) {
             connectionProvider = serverConnectionRepository::load,
             httpClient = httpClient,
             json = json,
+            routingAvailability = backendAvailability::serverResponded,
             eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
         )
     val enforcementRepository = org.compass.cng.enforcement.EnforcementRepository(
@@ -70,9 +72,15 @@ class AppContainer(context: Context) {
             java.io.File(context.noBackupFilesDir, "enforcement-map.json"), json,
         ),
     )
-    val routingRepository: RoutingRepository = HttpRoutingRepository(
+    private val remoteRoutingRepository: RoutingRepository = HttpRoutingRepository(
         apiClient,
         eventLogger = { event -> Log.i(COMPASS_API_LOG_TAG, event) },
+    )
+    val routingRepository: RoutingRepository = org.compass.cng.offline.OfflinePlanningRepository(
+        remoteRoutingRepository, offlineRouting, backendAvailability,
+    )
+    val backendAvailabilityMonitor = org.compass.cng.offline.BackendAvailabilityMonitor(
+        context.applicationContext, backendAvailability, apiClient::isBackendReady,
     )
     val vehicleProfileRepository = SharedPreferencesVehicleProfileRepository(context)
     val favoritePlaceRepository = SharedPreferencesFavoritePlaceRepository(context)
@@ -95,7 +103,7 @@ class AppContainer(context: Context) {
             kotlinx.coroutines.Dispatchers.Main.immediate),
     )
     val navigationRouteRecalculator: NavigationRouteRecalculator =
-        CompassNavigationRouteRecalculator(routingRepository, offlineRouter = offlineRouting)
+        CompassNavigationRouteRecalculator(remoteRoutingRepository, offlineRouter = offlineRouting)
 
     private companion object {
         const val COMPASS_API_LOG_TAG = "CompassApi"

@@ -68,6 +68,24 @@ class CompassApiClientTest {
     }
 
     @Test
+    fun readinessProbeUsesHealthReadyAndCanBeCancelled() = kotlinx.coroutines.runBlocking {
+        val http = OkHttpClient.Builder().callTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build()
+        val api = CompassApiClient(server.url("/").toString(), http, json)
+        server.enqueue(MockResponse().setBody("""{"status":"ok","service":"compass-api","version":"0.1.0","database":"ok","routing":"ok","data":"ok"}"""))
+        assertTrue(api.isBackendReady())
+        assertEquals("/health/ready", server.takeRequest().path)
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+        val started = System.nanoTime()
+        assertNull(kotlinx.coroutines.withTimeoutOrNull(500) { api.isBackendReady() })
+        assertTrue(System.nanoTime() - started < java.util.concurrent.TimeUnit.SECONDS.toNanos(5))
+        kotlinx.coroutines.withTimeout(3000) {
+            while (http.dispatcher.runningCallsCount() != 0) kotlinx.coroutines.delay(10)
+        }
+        http.connectionPool.evictAll()
+        http.dispatcher.executorService.shutdown()
+    }
+
+    @Test
     fun postsPedestrianCostingForWalkingRoute() = runTest {
         server.enqueue(successResponse(SUCCESS_RESPONSE))
         val client = client()

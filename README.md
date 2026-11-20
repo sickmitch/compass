@@ -30,12 +30,12 @@ are distinct constraints.
 | [Scheduled updates](docs/scheduled-updates.md) | Stable map storage; maps then velox/Tutor nightly from 03:00; CNG hourly 07:00–20:00, Europe/Rome |
 | [API](docs/api.md) / [OpenAPI](docs/openapi.json) | Requests, responses, units and errors |
 | [Android](docs/android.md) | Toolchain, configuration and device diagnostics |
-| [Offline routing](docs/offline-routing.md) | Android rerouting fallback, regional graph import and pending device acceptance |
+| [Offline routing](docs/offline-routing.md) | Android initial/offline waypoint planning, rerouting and regional graph import |
 | [Client updates](docs/client-updates.md) | APK publishing, signing and installation |
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/offline-routing.md#import-fix-in-02859) | 0.28.59 offline import initialization fix; device checks pending |
+| [Current release gate](docs/offline-routing.md#current-increment-initial-planning-in-02860) | 0.28.60 initial offline planning; rerouting confirmed, new phone checks pending |
 
 ## Local validation
 

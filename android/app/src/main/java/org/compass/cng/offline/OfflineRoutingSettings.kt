@@ -24,7 +24,7 @@ fun OfflineRoutingSettings() {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Routing offline", style = MaterialTheme.typography.titleMedium)
             Text(if (state.ready) "${state.label} · ${state.sourceDate}" else "Nessuna area installata")
-            Text("Usato automaticamente per il ricalcolo auto se Compass non è raggiungibile. Il pacchetto stradale non include la cartografia visuale.", style = MaterialTheme.typography.bodySmall)
+            Text("Calcola percorsi auto e tappe normali se il server non è raggiungibile. Usa preferiti, coordinate o punti sulla mappa. Ricerca indirizzi, piano metano e cartografia visuale non sono inclusi.", style = MaterialTheme.typography.bodySmall)
             if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             OutlinedButton(enabled = !state.busy, onClick = { picker.launch(arrayOf("application/zip", "application/octet-stream")) }) {
