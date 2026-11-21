@@ -90,6 +90,9 @@ enum class PlannerStage {
     NAVIGATION_PREVIEW,
 }
 
+internal const val PLACE_SEARCH_OFFLINE_MESSAGE =
+    "Ricerca non disponibile offline. Usa i preferiti, la posizione attuale o la selezione sulla mappa."
+
 enum class RouteEndpoint {
     ORIGIN,
     INTERMEDIATE_STOP,
@@ -279,6 +282,7 @@ class RoutePlannerViewModel(
         org.compass.cng.offline.BackendAvailability(),
 ) : ViewModel() {
     val cngAvailable = backendAvailability.available
+    val placeSearchAvailable = backendAvailability.available
     val navigationState = navigationSession.state
     val arrivalNotice = navigationSession.arrivalNotice
     private val restoredNavigation = navigationSession.state.value.let { restored ->
@@ -377,6 +381,12 @@ class RoutePlannerViewModel(
     private var serverReturnStage: PlannerStage = PlannerStage.FOLLOW
     private var optionsReturnStage: PlannerStage = PlannerStage.FOLLOW
 
+    private fun requirePlaceSearchServer(): Boolean {
+        if (placeSearchAvailable.value) return true
+        mutableUiState.value = mutableUiState.value.copy(message = PLACE_SEARCH_OFFLINE_MESSAGE)
+        return false
+    }
+
     private fun requireCngServer(): Boolean {
         if (cngAvailable.value) return true
         mutableUiState.value = mutableUiState.value.copy(
@@ -389,6 +399,24 @@ class RoutePlannerViewModel(
         viewModelScope.launch {
             cngAvailable.collect { available ->
                 val state = mutableUiState.value
+                val searchingPlaces = state.operation in setOf(
+                    PlannerOperation.PLACE_SEARCH, PlannerOperation.PLACE_RESOLUTION,
+                ) || (state.stage == PlannerStage.DESTINATION_SEARCH && state.operation == null)
+                if (!available && searchingPlaces) {
+                    destinationSearchJob?.cancel()
+                    destinationSearchJob = null
+                    mutableUiState.value = state.copy(
+                        operation = null,
+                        destinationSearchRevision = state.destinationSearchRevision + 1,
+                        destinationSuggestions = emptyList(),
+                        alongRouteSearchResults = null,
+                        pendingDestinationSuggestion = null,
+                        pendingResolvedDestination = null,
+                        message = PLACE_SEARCH_OFFLINE_MESSAGE,
+                    )
+                } else if (available && state.message == PLACE_SEARCH_OFFLINE_MESSAGE) {
+                    mutableUiState.value = state.copy(message = null)
+                }
                 val calculatingCng = state.operation in setOf(
                     PlannerOperation.CNG_CANDIDATES, PlannerOperation.PREDICTIVE_CANDIDATES,
                     PlannerOperation.SELECTED_ROUTE,
@@ -1029,6 +1057,7 @@ class RoutePlannerViewModel(
     }
 
     fun openPlaceSearch(endpoint: RouteEndpoint) {
+        if (!requirePlaceSearchServer()) return
         if (!mutableUiState.value.isBusy) {
             val state = mutableUiState.value
             eventLogger(
@@ -1082,6 +1111,7 @@ class RoutePlannerViewModel(
     fun openDestinationSearch() = openPlaceSearch(RouteEndpoint.DESTINATION)
 
     fun acceptVoiceQuery(spoken: String) {
+        if (!requirePlaceSearchServer()) return
         val previous = mutableUiState.value
         if (previous.stage != PlannerStage.DESTINATION_SEARCH ||
             (previous.isBusy && previous.operation != PlannerOperation.PLACE_SEARCH)) return
@@ -1120,6 +1150,7 @@ class RoutePlannerViewModel(
     }
 
     fun updatePlaceSearchQuery(value: String) {
+        if (!requirePlaceSearchServer()) return
         if (value.length <= 200 && value != mutableUiState.value.placeSearchQuery) {
             val nextRevision = mutableUiState.value.destinationSearchRevision + 1
             mutableUiState.value = mutableUiState.value.copy(
@@ -1137,6 +1168,7 @@ class RoutePlannerViewModel(
     }
 
     fun searchDestinations() {
+        if (!requirePlaceSearchServer()) return
         val state = mutableUiState.value
         if (state.isBusy) return
         mutableUiState.value = state.copy(
@@ -1151,6 +1183,7 @@ class RoutePlannerViewModel(
     }
 
     fun loadMoreAlongRouteResults() {
+        if (!requirePlaceSearchServer()) return
         val state = mutableUiState.value
         val search = state.alongRouteSearchResults ?: return
         val cursor = search.nextPageCursor ?: return
@@ -1174,6 +1207,7 @@ class RoutePlannerViewModel(
                 )
                 val latest = mutableUiState.value
                 if (
+                    !placeSearchAvailable.value ||
                     latest.destinationSearchSessionId != page.sessionId ||
                     latest.destinationSearchRevision != page.revision ||
                     latest.alongRouteContext()?.routeId != page.routeId
@@ -1202,6 +1236,7 @@ class RoutePlannerViewModel(
         fullSearch: Boolean = false,
     ) {
         destinationSearchJob?.cancel()
+        if (!requirePlaceSearchServer()) return
         val snapshot = mutableUiState.value
         val query = snapshot.placeSearchQuery.trim()
         if (query.count { !it.isWhitespace() } < BuildConfig.DESTINATION_SEARCH_MIN_CHARS) {
@@ -1220,6 +1255,7 @@ class RoutePlannerViewModel(
         val revision = snapshot.destinationSearchRevision
         destinationSearchJob = viewModelScope.launch {
             if (!immediate) delay(BuildConfig.DESTINATION_SEARCH_DEBOUNCE_MS)
+            if (!requirePlaceSearchServer()) return@launch
             val current = mutableUiState.value
             if (
                 current.destinationSearchSessionId != sessionId ||
@@ -1296,6 +1332,7 @@ class RoutePlannerViewModel(
                 val resultItems = alongResults?.results ?: ordinaryResults!!.results
                 val latest = mutableUiState.value
                 if (
+                    !placeSearchAvailable.value ||
                     latest.destinationSearchSessionId != resultSessionId ||
                     latest.destinationSearchRevision != resultRevision ||
                     (alongResults != null && latest.alongRouteContext()?.let {
@@ -1340,6 +1377,7 @@ class RoutePlannerViewModel(
     }
 
     fun selectDestinationSuggestion(suggestion: DestinationSuggestion) {
+        if (!requirePlaceSearchServer()) return
         val snapshot = mutableUiState.value
         if (snapshot.operation != null || suggestion !in snapshot.destinationSuggestions) return
         val sessionId = snapshot.destinationSearchSessionId ?: return
@@ -1371,6 +1409,7 @@ class RoutePlannerViewModel(
                 }
                 val latest = mutableUiState.value
                 if (
+                    !placeSearchAvailable.value ||
                     latest.destinationSearchSessionId != resolved.sessionId ||
                     latest.destinationSearchRevision != resolved.revision ||
                     latest.pendingDestinationSuggestion?.id != suggestion.id ||
@@ -1405,6 +1444,7 @@ class RoutePlannerViewModel(
     }
 
     fun confirmCoordinateOnlyDestination() {
+        if (!requirePlaceSearchServer()) return
         mutableUiState.value.pendingResolvedDestination?.let(::acceptResolvedDestination)
     }
 

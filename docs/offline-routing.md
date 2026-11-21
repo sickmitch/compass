@@ -1,5 +1,55 @@
 # Android offline routing
 
+## Offline search availability in 0.28.62
+
+Place search now uses the existing backend-availability signal, just like CNG features.
+Search buttons for origin, destination and ordinary stops are disabled when the network or
+server is unavailable. An already open search disables its field, submit, result selection
+and pagination; its voice dialog is disposed and recording cancelled. A short message points
+to favorites, current location and map selection, which remain available offline.
+
+The ViewModel also rejects search/resolution actions, cancels pending debounce and HTTP work,
+clears old suggestions and invalidates their revision on backend loss. The typed query and
+existing route are retained. Local waypoint routing is not cancelled by this search guard.
+Backend recovery re-enables search without automatically submitting the retained query.
+Detection reuses the network callback and existing readiness probe (every 30 seconds while
+visible, five-second deadline); no extra polling or backend changes are introduced.
+
+Local validation: `android/gradlew -p android :app:testDebugUnitTest :app:lintDebug
+:app:assembleDebug :app:compileDebugAndroidTestKotlin` succeeded with JDK 17 and the configured
+Android SDK. All 388 JVM tests passed (zero failures/skips), including offline entry guards,
+cancelled debounce, recovery and cancellation of in-flight search/resolution. Lint reported
+zero errors, 100 warnings and three hints. Instrumentation was compiled, not run on a device.
+APK 0.28.62/versionCode 108 is 92,725,979 bytes, its signature matches the previous release,
+and `dist/last.txt` points to it. Phone UI/network acceptance remains pending below.
+
+### Phone acceptance for 0.28.62
+
+No backend redeploy or ZIP reimport is required. From the repository root, with Android
+platform-tools and an authorized USB-debugging device, no secrets required:
+
+```bash
+adb install -r dist/compass-0.28.62.apk
+```
+
+1. Enable airplane mode: both endpoint **Ricerca** buttons and the ordinary-stop **Cerca**
+   action must be disabled. Favorites, current GPS position and map selection stay usable.
+2. Online, open search and type a query, then disable connectivity. The field/submit must
+   become disabled, old suggestions disappear and any spinner stops. Repeat while the voice
+   dialog is open: it must close and release the microphone.
+3. Reconnect and wait for server readiness (up to the existing probe interval). Search must
+   become usable again; submit the retained query to get fresh results. Also verify a normal
+   offline route and ordinary stop using the already installed package.
+4. Repeat with network available but Compass server unreachable: search must be disabled
+   after readiness failure, without disabling local selection or routing.
+
+Return the app version and behavior in those four checks. If a button stays enabled or the
+UI gets stuck, return a screenshot and the following output (review private data first):
+
+```bash
+adb logcat -d -s CompassPlanner:I CompassApi:I CompassOfflineRouting:I AndroidRuntime:E
+```
+
 ## Multiple packages in 0.28.61
 
 Compass can retain any number of independently imported ZIP packages, limited by available
