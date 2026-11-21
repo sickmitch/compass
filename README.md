@@ -35,7 +35,7 @@ are distinct constraints.
 | [Enforcement snapshots](docs/phases/enforcement-packages.md) | Backend association evidence and client-integration limits |
 | [Data sources](docs/data-sources.md) | Provenance, attribution and licensing |
 | [History](docs/history.md) / [ADRs](docs/adr/) | Condensed milestones and design decisions |
-| [Current release gate](docs/offline-routing.md#multiple-packages-in-02861) | 0.28.61 multiple offline packages; migration and native area-switch checks pending |
+| [Current release gate](docs/offline-routing.md#offline-search-availability-in-02862) | 0.28.62 disables unavailable remote search; phone checks pending, including multi-package switching |
 
 ## Local validation
 

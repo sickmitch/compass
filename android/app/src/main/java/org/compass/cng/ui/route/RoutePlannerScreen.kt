@@ -152,6 +152,7 @@ fun RoutePlannerScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val cngAvailable by viewModel.cngAvailable.collectAsStateWithLifecycle()
+    val searchAvailable by viewModel.placeSearchAvailable.collectAsStateWithLifecycle()
     val navigationState by viewModel.navigationState.collectAsStateWithLifecycle()
     LaunchedEffect(state.directNavigationRequested, state.isBusy, state.highwayConfirmationPromptVisible) {
         if (state.directNavigationRequested && !state.isBusy && !state.highwayConfirmationPromptVisible &&
@@ -393,6 +394,7 @@ fun RoutePlannerScreen(
                     onRefreshInfo = viewModel::refreshBackendSystemInfo,
                 )
                 visibleStage == PlannerStage.CONFIGURE_ROUTE -> ConfigureRouteContent(
+                    searchAvailable = searchAvailable,
                     route = baseRoute,
                     travelMode = state.routeTravelMode,
                     originLatitudeInput = state.originLatitudeInput,
@@ -433,6 +435,7 @@ fun RoutePlannerScreen(
                     selectionEnabled = !state.favoritePlaceManagementMode,
                 )
                 visibleStage == PlannerStage.DESTINATION_SEARCH -> DestinationSearchContent(
+                    searchAvailable = searchAvailable,
                     target = state.placeSearchTarget,
                     query = state.placeSearchQuery,
                     results = state.destinationSuggestions,
@@ -491,6 +494,7 @@ fun RoutePlannerScreen(
                     PlannerStage.MAP_POINT_PICKER,
                     PlannerStage.INTERMEDIATE_STOP_PREVIEW -> Unit
                     PlannerStage.INTERMEDIATE_STOPS -> IntermediateStopsContent(
+                        searchAvailable = searchAvailable,
                         cngAvailable = cngAvailable,
                         route = state.intermediateStopsRoute?.asRoutePreview() ?: baseRoute,
                         stops = state.plannedIntermediateStops,
@@ -1410,6 +1414,7 @@ private fun MapPointPickerContent(
 
 @Composable
 private fun IntermediateStopsContent(
+    searchAvailable: Boolean,
     cngAvailable: Boolean,
     route: RoutePreview,
     stops: List<PlannedIntermediateStop>,
@@ -1640,7 +1645,11 @@ private fun IntermediateStopsContent(
                                     }
                                     CompassOutlinedButton(
                                         onClick = onClick,
-                                        enabled = action != IntermediateStopAddAction.CNG || cngAvailable,
+                                        enabled = when (action) {
+                                            IntermediateStopAddAction.CNG -> cngAvailable
+                                            IntermediateStopAddAction.SEARCH -> searchAvailable
+                                            else -> true
+                                        },
                                         modifier = Modifier
                                             .weight(1f)
                                             .height(INTERMEDIATE_STOP_ACTION_HEIGHT),
@@ -2027,6 +2036,7 @@ private fun NavigationPreviewContent(
 
 @Composable
 private fun ConfigureRouteContent(
+    searchAvailable: Boolean,
     route: RoutePreview?,
     travelMode: RouteTravelMode,
     originLatitudeInput: String,
@@ -2112,6 +2122,7 @@ private fun ConfigureRouteContent(
             }
             item {
                 RouteEndpointSelector(
+                    searchAvailable = searchAvailable,
                     title = "Partenza",
                     titleIcon = Icons.Rounded.Navigation,
                     endpoint = RouteEndpoint.ORIGIN,
@@ -2130,6 +2141,7 @@ private fun ConfigureRouteContent(
             }
             item {
                 RouteEndpointSelector(
+                    searchAvailable = searchAvailable,
                     title = "Destinazione",
                     titleIcon = Icons.Rounded.LocationOn,
                     endpoint = RouteEndpoint.DESTINATION,
@@ -2184,6 +2196,7 @@ private fun ConfigureRouteContent(
 
 @Composable
 private fun RouteEndpointSelector(
+    searchAvailable: Boolean,
     title: String,
     titleIcon: ImageVector,
     endpoint: RouteEndpoint,
@@ -2269,6 +2282,7 @@ private fun RouteEndpointSelector(
                         )
                     } else if (method == selectedMethod) {
                         CompassButton(
+                            enabled = method != RouteLocationMethod.SEARCH || searchAvailable,
                             onClick = {
                                 when (method) {
                                     RouteLocationMethod.CURRENT_LOCATION ->
@@ -2293,6 +2307,7 @@ private fun RouteEndpointSelector(
                         }
                     } else {
                         CompassOutlinedButton(
+                            enabled = method != RouteLocationMethod.SEARCH || searchAvailable,
                             onClick = {
                                 when (method) {
                                     RouteLocationMethod.CURRENT_LOCATION ->
@@ -2397,6 +2412,7 @@ private fun CurrentLocationChoiceButton(
 
 @Composable
 private fun DestinationSearchContent(
+    searchAvailable: Boolean,
     target: RouteEndpoint,
     query: String,
     results: List<DestinationSuggestion>,
@@ -2415,6 +2431,12 @@ private fun DestinationSearchContent(
     var input by remember { mutableStateOf(TextFieldValue(query)) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(searchAvailable) {
+        if (!searchAvailable) {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+        }
+    }
     LaunchedEffect(query) {
         if (query != input.text && input.composition == null) {
             input = TextFieldValue(query)
@@ -2427,7 +2449,7 @@ private fun DestinationSearchContent(
         }
     }
     val isBusy = isSearching || isResolving
-    val canSearch = query.count { !it.isWhitespace() } >= BuildConfig.DESTINATION_SEARCH_MIN_CHARS &&
+    val canSearch = searchAvailable && query.count { !it.isWhitespace() } >= BuildConfig.DESTINATION_SEARCH_MIN_CHARS &&
         !isBusy
     val emptyMessage = if (target == RouteEndpoint.INTERMEDIATE_STOP) {
         "Nessun risultato trovato lungo questo percorso."
@@ -2445,6 +2467,10 @@ private fun DestinationSearchContent(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
+            if (!searchAvailable) {
+                Text(PLACE_SEARCH_OFFLINE_MESSAGE, style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             Text(
                 if (target == RouteEndpoint.INTERMEDIATE_STOP) {
                     "Cerca lungo il percorso"
@@ -2456,8 +2482,9 @@ private fun DestinationSearchContent(
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
+                enabled = searchAvailable,
                 trailingIcon = {
-                    org.compass.cng.voice.VoiceSearchButton(!isBusy) { spoken ->
+                    if (searchAvailable) org.compass.cng.voice.VoiceSearchButton(!isBusy) { spoken ->
                         // A confirmed voice query replaces any unfinished IME composition.
                         input = input.copy(composition = null)
                         onVoiceQuery(spoken)
@@ -2507,7 +2534,7 @@ private fun DestinationSearchContent(
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
-            message?.let {
+            message?.takeIf { searchAvailable || it != PLACE_SEARCH_OFFLINE_MESSAGE }?.let {
                 Spacer(modifier = Modifier.height(8.dp))
                 if (isRecoverableError) {
                     InlineError(it)
@@ -2539,7 +2566,7 @@ private fun DestinationSearchContent(
                                 "${resolved.navigationTarget.location.longitude}",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        CompassButton(onClick = onConfirmCoordinateOnly) {
+                        CompassButton(onClick = onConfirmCoordinateOnly, enabled = searchAvailable) {
                             Text("Usa queste coordinate")
                         }
                     }
@@ -2549,7 +2576,7 @@ private fun DestinationSearchContent(
         itemsIndexed(results, key = { _, result -> result.id }) { _, result ->
             Card(
                 onClick = { onSelect(result) },
-                enabled = !isBusy,
+                enabled = searchAvailable && !isBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
@@ -2627,7 +2654,7 @@ private fun DestinationSearchContent(
             item {
                 CompassOutlinedButton(
                     onClick = onLoadMore,
-                    enabled = !isBusy,
+                    enabled = searchAvailable && !isBusy,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Carica altri risultati")

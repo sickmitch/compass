@@ -84,6 +84,108 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoutePlannerViewModelTest {
     @Test
+    fun offlineSearchEntryPointsAreBlockedWhileLocalSelectionRemainsAvailable() = runTest {
+        val availability = org.compass.cng.offline.BackendAvailability().apply { networkChanged(false) }
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val vm = RoutePlannerViewModel(repository, backendAvailability = availability)
+        runCurrent()
+        vm.openRouteConfiguration()
+        for (endpoint in RouteEndpoint.entries) {
+            vm.openPlaceSearch(endpoint)
+            assertEquals(PlannerStage.CONFIGURE_ROUTE, vm.uiState.value.stage)
+        }
+        vm.updatePlaceSearchQuery("Verona")
+        vm.acceptVoiceQuery("Portami a Verona")
+        vm.searchDestinations()
+        vm.loadMoreAlongRouteResults()
+        vm.selectDestinationSuggestion(destinationSuggestion())
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertFalse(vm.placeSearchAvailable.value)
+        assertEquals(0, repository.destinationSuggestCalls)
+        assertEquals(0, repository.alongRouteSearchCalls)
+        assertEquals(0, repository.destinationResolveCalls)
+        assertEquals(PLACE_SEARCH_OFFLINE_MESSAGE, vm.uiState.value.message)
+        vm.openFavoritePlaces(RouteEndpoint.DESTINATION)
+        assertEquals(PlannerStage.FAVORITE_PLACES, vm.uiState.value.stage)
+        vm.openMapPointPicker(RouteEndpoint.DESTINATION)
+        assertEquals(PlannerStage.MAP_POINT_PICKER, vm.uiState.value.stage)
+    }
+
+    @Test
+    fun disconnectCancelsSearchDebounceAndRecoveryAllowsExplicitSearchAgain() = runTest {
+        val availability = org.compass.cng.offline.BackendAvailability()
+        val repository = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+        val vm = RoutePlannerViewModel(repository, backendAvailability = availability)
+        runCurrent()
+        vm.openDestinationSearch()
+        vm.updatePlaceSearchQuery("Verona")
+        advanceTimeBy(400)
+        availability.networkChanged(false)
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(0, repository.destinationSuggestCalls)
+        assertNull(vm.uiState.value.operation)
+        assertEquals("Verona", vm.uiState.value.placeSearchQuery)
+        availability.networkChanged(true)
+        assertFalse(vm.placeSearchAvailable.value) // Network alone does not prove server readiness.
+        availability.serverResponded(true)
+        runCurrent()
+        assertTrue(vm.placeSearchAvailable.value)
+        assertNull(vm.uiState.value.message)
+        assertEquals(0, repository.destinationSuggestCalls)
+        val state = vm.uiState.value
+        val suggestion = destinationSuggestion()
+        repository.destinationSuggestionsResult = Result.success(DestinationSuggestions(
+            requireNotNull(state.destinationSearchSessionId), state.destinationSearchRevision + 1, listOf(suggestion)))
+        vm.searchDestinations()
+        runCurrent()
+        assertEquals(1, repository.destinationSuggestCalls)
+        assertEquals(listOf(suggestion), vm.uiState.value.destinationSuggestions)
+    }
+
+    @Test
+    fun backendLossCancelsInFlightSearchAndResolutionAndClearsOldResults() = runTest {
+        for (resolving in listOf(false, true)) {
+            val availability = org.compass.cng.offline.BackendAvailability()
+            val base = FakeRoutingRepository(baseResult = Result.success(sampleRoute()))
+            var cancelled = false
+            val suggestion = destinationSuggestion()
+            val repository = object : RoutingRepository by base {
+                override suspend fun suggestDestinations(request: DestinationSuggestRequest): DestinationSuggestions {
+                    if (resolving) return DestinationSuggestions(request.sessionId, request.revision, listOf(suggestion))
+                    try { kotlinx.coroutines.awaitCancellation() } finally { cancelled = true }
+                }
+                override suspend fun resolveDestination(sessionId: String, revision: Int,
+                    suggestion: DestinationSuggestion): ResolvedDestination {
+                    try { kotlinx.coroutines.awaitCancellation() } finally { cancelled = true }
+                }
+            }
+            val vm = RoutePlannerViewModel(repository, backendAvailability = availability)
+            runCurrent()
+            vm.openDestinationSearch()
+            vm.updatePlaceSearchQuery("Milano")
+            vm.searchDestinations()
+            runCurrent()
+            if (resolving) {
+                vm.selectDestinationSuggestion(suggestion)
+                runCurrent()
+            }
+            assertEquals(if (resolving) PlannerOperation.PLACE_RESOLUTION else PlannerOperation.PLACE_SEARCH,
+                vm.uiState.value.operation)
+            availability.serverResponded(false)
+            runCurrent()
+            assertTrue(cancelled)
+            assertNull(vm.uiState.value.operation)
+            assertNull(vm.uiState.value.pendingDestinationSuggestion)
+            assertTrue(vm.uiState.value.destinationSuggestions.isEmpty())
+            assertEquals(PLACE_SEARCH_OFFLINE_MESSAGE, vm.uiState.value.message)
+            assertEquals(sampleRoute(), vm.uiState.value.baseRoute)
+        }
+    }
+
+    @Test
     fun unavailableBackendBlocksCngActionsButKeepsFavoriteStopsAndRoutePlanning() = runTest {
         val availability = org.compass.cng.offline.BackendAvailability().apply { networkChanged(false) }
         val direct = sampleRoute(distanceMeters = 100_000.0).copy(provider = org.compass.cng.offline.OFFLINE_PROVIDER)
