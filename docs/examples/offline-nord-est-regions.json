@@ -1,0 +1,14 @@
+[
+  {
+    "id": "nord-est-ovest",
+    "label": "Nord-Est · area ovest",
+    "bounds": [43.72, 9.19, 47.11, 11.5],
+    "probe": [[45.438, 10.992], [45.414, 11.044]]
+  },
+  {
+    "id": "nord-est-est",
+    "label": "Nord-Est · area est",
+    "bounds": [43.72, 11.5, 47.11, 13.94],
+    "probe": [[45.406, 11.877], [45.413, 11.89]]
+  }
+]

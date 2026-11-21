@@ -23,20 +23,47 @@ data class OfflineManifest(
     val south: Double, val west: Double, val north: Double, val east: Double,
     val probe: List<List<Double>>,
     val attribution: String,
+    val graphFamily: String? = null,
+    val tiles: List<OfflineTile> = emptyList(),
 ) {
     fun validate() {
-        require(schemaVersion == 1 && engineVersion == "3.9.0") { "Versione del pacchetto non compatibile" }
+        require(schemaVersion in 1..2 && engineVersion == "3.9.0") { "Versione del pacchetto non compatibile" }
         require(label.length in 1..120 && sourceDate.length in 1..40)
         require(sha256.matches(Regex("[0-9a-f]{64}")) && bytes in 1..MAX_GRAPH_BYTES)
         require(south.isFinite() && north.isFinite() && south >= -90 && north <= 90 && south < north)
         require(west.isFinite() && east.isFinite() && west >= -180 && east <= 180 && west < east)
         require(probe.size == 2 && probe.all { it.size == 2 && contains(Coordinate(it[0], it[1])) })
         require(attribution == "© OpenStreetMap contributors — ODbL 1.0")
+        if (schemaVersion == 1) {
+            require(graphFamily == null && tiles.isEmpty())
+        } else {
+            require(graphFamily?.matches(Regex("[0-9a-f]{64}")) == true)
+            require(tiles.isNotEmpty() && tiles.map { it.path }.distinct().size == tiles.size)
+            tiles.forEach { it.validate() }
+            require(tiles.sumOf { it.bytes } == bytes && offlineInventoryDigest(tiles) == sha256)
+        }
     }
     fun contains(point: Coordinate) = point.latitude in south..north && point.longitude in west..east
     fun probePoints() = probe.map { Coordinate(it[0], it[1]) }
     companion object { const val MAX_GRAPH_BYTES = 8L * 1024 * 1024 * 1024 }
 }
+
+@Serializable
+data class OfflineTile(val path: String, val bytes: Long, val sha256: String) {
+    fun validate() {
+        require(path.matches(Regex("[0-2]/(?:[0-9]{3}/){1,2}[0-9]{3}\\.gph"))) { "Percorso tile non valido" }
+        val level = path.first().digitToInt()
+        val id = path.substring(2).removeSuffix(".gph").replace("/", "").toInt()
+        val width = if (level == 2) 9 else 6
+        val canonical = "$level/" + id.toString().padStart(width, '0').chunked(3).joinToString("/") + ".gph"
+        require(path == canonical && id < listOf(4050, 64800, 1036800)[level]) { "Identificativo tile non valido" }
+        require(bytes in 1..OfflineManifest.MAX_GRAPH_BYTES && sha256.matches(Regex("[0-9a-f]{64}")))
+    }
+}
+
+internal fun offlineInventoryDigest(tiles: List<OfflineTile>): String = MessageDigest.getInstance("SHA-256")
+    .digest(tiles.sortedBy { it.path }.joinToString("") { "${it.path}\t${it.bytes}\t${it.sha256}\n" }.toByteArray())
+    .joinToString("") { "%02x".format(it) }
 
 data class InstalledOfflineDataset(val directory: File, val manifest: OfflineManifest)
 
@@ -65,7 +92,8 @@ class OfflineDatasetStore(private val root: File) {
             val folder = File(root, name)
             val manifest = json.decodeFromString<OfflineManifest>(File(folder, "manifest.json").readText())
             manifest.validate()
-            require(File(folder, "tiles.tar").length() == manifest.bytes)
+            if (manifest.schemaVersion == 1) require(File(folder, "tiles.tar").length() == manifest.bytes)
+            else require(manifest.tiles.all { File(folder, "tiles/${it.path}").length() == it.bytes })
             InstalledOfflineDataset(folder, manifest)
         }.getOrNull()
     }
@@ -131,36 +159,42 @@ class OfflineDatasetStore(private val root: File) {
                     checkCancelled()
                     val count = zip.read(chunk)
                     if (count < 0) break
-                    require(headerBuffer.size() + count <= 16_384) { "Manifest troppo grande" }
+                    require(headerBuffer.size() + count <= 4 * 1024 * 1024) { "Manifest troppo grande" }
                     headerBuffer.write(chunk, 0, count)
                 }
                 val header = headerBuffer.toByteArray()
                 val manifest = json.decodeFromString<OfflineManifest>(header.decodeToString())
                 manifest.validate()
                 check(folder.usableSpace > manifest.bytes + 64L * 1024 * 1024) { "Spazio insufficiente" }
-                require(zip.nextEntry?.name == "tiles.tar") { "Grafo del pacchetto mancante" }
-                val hash = MessageDigest.getInstance("SHA-256")
-                var count = 0L
-                File(folder, "tiles.tar").outputStream().use { output ->
-                    val buffer = ByteArray(65536)
-                    while (true) {
+                if (manifest.schemaVersion == 1) {
+                    require(zip.nextEntry?.name == "tiles.tar") { "Grafo del pacchetto mancante" }
+                    copyVerified(zip, File(folder, "tiles.tar"), manifest.bytes, manifest.sha256, checkCancelled)
+                } else {
+                    val remaining = manifest.tiles.associateBy { it.path }.toMutableMap()
+                    repeat(manifest.tiles.size) {
                         checkCancelled()
-                        val n = zip.read(buffer)
-                        if (n < 0) break
-                        count += n
-                        require(count <= manifest.bytes) { "Dimensione del grafo non valida" }
-                        output.write(buffer, 0, n); hash.update(buffer, 0, n)
+                        val entry = requireNotNull(zip.nextEntry) { "Tile mancante" }
+                        val tile = requireNotNull(remaining.remove(entry.name)) { "Tile inattesa o duplicata" }
+                        require(!entry.isDirectory)
+                        copyVerified(zip, File(folder, "tiles/${tile.path}"), tile.bytes, tile.sha256, checkCancelled)
                     }
-                    output.fd.sync()
-                }
-                require(count == manifest.bytes && hash.digest().joinToString("") { "%02x".format(it) } == manifest.sha256) {
-                    "Verifica SHA-256 del grafo fallita"
                 }
                 require(zip.nextEntry == null) { "File inattesi nel pacchetto" }
                 File(folder, "manifest.json").outputStream().use { it.write(header); it.fd.sync() }
                 val dataset = InstalledOfflineDataset(folder, manifest)
                 checkCancelled()
-                all().firstOrNull { it.manifest.sha256 == manifest.sha256 }?.let { return it }
+                all().firstOrNull { it.manifest.sha256 == manifest.sha256 && it.manifest.graphFamily == manifest.graphFamily &&
+                    (manifest.schemaVersion == 1 || listOf(it.manifest.south, it.manifest.west, it.manifest.north, it.manifest.east) ==
+                        listOf(manifest.south, manifest.west, manifest.north, manifest.east)) }?.let { return it }
+                // Same family must never overwrite a tile with different bytes.
+                if (manifest.graphFamily != null) {
+                    val incoming = manifest.tiles.associateBy { it.path }
+                    all().filter { it.manifest.graphFamily == manifest.graphFamily }.forEach { existing ->
+                        existing.manifest.tiles.forEach { tile ->
+                            require(incoming[tile.path]?.let { it == tile } != false) { "Tile incompatibili nello stesso set" }
+                        }
+                    }
+                }
                 probe(dataset) // Native route verification before registering the package.
                 checkCancelled()
                 publish(previous + folder.name)
@@ -171,6 +205,28 @@ class OfflineDatasetStore(private val root: File) {
             if (!published) folder.deleteRecursively()
         }
     }
+    private fun copyVerified(input: InputStream, file: File, bytes: Long, digest: String, checkCancelled: () -> Unit) {
+        file.parentFile!!.mkdirs()
+        val hash = MessageDigest.getInstance("SHA-256")
+        var count = 0L
+        file.outputStream().use { output ->
+            val buffer = ByteArray(65536)
+            while (true) {
+                checkCancelled()
+                val n = input.read(buffer)
+                if (n < 0) break
+                count += n
+                require(count <= bytes) { "Dimensione del grafo non valida" }
+                output.write(buffer, 0, n)
+                hash.update(buffer, 0, n)
+            }
+            output.fd.sync()
+        }
+        require(count == bytes && hash.digest().joinToString("") { "%02x".format(it) } == digest) {
+            "Verifica SHA-256 del grafo fallita"
+        }
+    }
+
 }
 
 @Serializable

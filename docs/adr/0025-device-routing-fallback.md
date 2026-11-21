@@ -60,3 +60,6 @@ and allow explicit removal. Select a covering independent graph per route and tr
 alternatives without stitching graph fragments. Global tile caching remains disabled so graph
 IDs from independent builds cannot share cached tiles. This extends installation/selection;
 a merged cross-package road graph would require a separate compatible provisioning design.
+
+The joint regional graph provisioning/assembly added in 0.28.63 is specified in
+[ADR 0026](0026-composable-offline-map-regions.md). Schema-1 graphs retain this standalone behavior.

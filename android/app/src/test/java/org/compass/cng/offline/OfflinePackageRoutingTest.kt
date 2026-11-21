@@ -22,7 +22,7 @@ class OfflinePackageRoutingTest {
         val local = area("Nord-Est")
         val distant = area("Ovest", 7.0, 9.0)
         val result = routeWithOfflinePackages(listOf(local, distant), listOf(a, b)) {
-            assertEquals(local, it)
+            assertEquals(listOf(local), it)
             route
         }
         assertEquals(route, result)
@@ -33,8 +33,8 @@ class OfflinePackageRoutingTest {
         val newer = area("new")
         val tried = mutableListOf<String>()
         assertEquals(route, routeWithOfflinePackages(listOf(old, newer), listOf(a, b)) {
-            tried += it.manifest.label
-            if (it == newer) error("No route in this graph")
+            tried += it.single().manifest.label
+            if (it.single() == newer) error("No route in this graph")
             route
         })
         assertEquals(listOf("new", "old"), tried)
