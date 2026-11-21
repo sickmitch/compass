@@ -27,7 +27,7 @@ are distinct constraints.
 | --- | --- |
 | [Architecture](docs/architecture.md) | Component boundaries and data flow |
 | [Deployment](docs/deployment.md) | Docker setup, data imports, graph operations and diagnostics |
-| [Scheduled updates](docs/scheduled-updates.md) | Stable map storage; maps then velox/Tutor nightly from 03:00; CNG hourly 07:00–20:00, Europe/Rome |
+| [Scheduled updates](docs/scheduled-updates.md) | Stable map storage; maps then velox/Tutor nightly from 03:00; CNG hourly 07:00–20:00; offline ZIPs Sunday 01:00, Europe/Rome |
 | [API](docs/api.md) / [OpenAPI](docs/openapi.json) | Requests, responses, units and errors |
 | [Android](docs/android.md) | Toolchain, configuration and device diagnostics |
 | [Offline routing](docs/offline-routing.md) | Android initial/offline waypoint planning, rerouting and regional graph import |

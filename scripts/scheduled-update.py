@@ -51,6 +51,8 @@ def compose(*args: str, capture: bool | None = None) -> str:
         "jobs",
         "--profile",
         "routing-build",
+        "--profile",
+        "offline-build",
         *args,
         capture=(args[0] == "ps") if capture is None else capture,
     )
@@ -58,6 +60,10 @@ def compose(*args: str, capture: bool | None = None) -> str:
 
 def update_cng() -> None:
     compose("run", "--rm", "--no-deps", "etl", "cng")
+
+
+def update_offline_assets() -> None:
+    compose("run", "--rm", "--no-deps", "-T", "offline-assets")
 
 
 def update_enforcement() -> None:
@@ -226,13 +232,22 @@ def execute(job: str, source_volume: str | None = None) -> None:
             return
         jobs = ("map", "enforcement") if job == "map" else (job,)
         actions = {"map": update_map, "map-rollback": rollback_map, "cng": update_cng,
+                   "offline-assets": update_offline_assets,
                    "enforcement": update_enforcement,
                    "map-import": lambda: import_map(source_volume)}
         errors = []
         for current in jobs:
             print(f"{current} update started at {datetime.now(UTC).isoformat()}", flush=True)
             try:
-                actions[current]()
+                if current in {"map", "offline-assets"}:
+                    # Queue expensive builds instead of skipping the daily map refresh.
+                    # A third worker keeps CNG responsive while one build waits for the other.
+                    with (STATE / "graph-build.lock").open("a") as build_lock:
+                        print(f"{current} waiting for graph build slot", flush=True)
+                        fcntl.flock(build_lock, fcntl.LOCK_EX)
+                        actions[current]()
+                else:
+                    actions[current]()
                 (STATE / f"{current}.last-success").write_text(
                     datetime.now(UTC).isoformat() + "\n"
                 )
@@ -248,6 +263,8 @@ def due_jobs(now: datetime) -> list[tuple[str, str]]:
     if local.minute != 0:
         return []
     slot = local.strftime("%Y-%m-%dT%H")
+    if local.weekday() == 6 and local.hour == 1:
+        return [("offline-assets", slot)]
     if local.hour == 3:
         return [("map", slot)]
     if 7 <= local.hour <= 20:
@@ -351,10 +368,11 @@ def serve() -> None:
         ) as error:
             print(f"Scheduler unavailable: {error}; retry in 30 seconds", flush=True)
             time.sleep(30)
-    print("Scheduler ready: Europe/Rome; map 03:00 then enforcement; CNG hourly 07:00–20:00",
+    print("Scheduler ready: Europe/Rome; map 03:00 then enforcement; CNG hourly 07:00–20:00; "
+          "offline-assets Sunday 01:00",
           flush=True)
     running = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         while True:
             (STATE / "heartbeat").write_text(str(time.time()))
             for job, future in list(running.items()):
@@ -378,7 +396,7 @@ def serve() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("job", choices=["map", "map-import", "map-status", "map-rollback",
-                                        "cng", "enforcement", "serve", "health"])
+                                        "cng", "enforcement", "offline-assets", "serve", "health"])
     parser.add_argument("--source-volume",
                         help="Existing Docker volume to copy once (map-import only)")
     args = parser.parse_args()

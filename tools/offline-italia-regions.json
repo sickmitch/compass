@@ -1,0 +1,7 @@
+[
+  {"id":"nord-ovest","label":"Italia · Nord-Ovest","bounds":[43.5,6.0,47.5,11.0],"probe":[[45.4642,9.1900],[45.4857,9.2045]]},
+  {"id":"nord-est","label":"Italia · Nord-Est","bounds":[43.5,10.5,47.5,14.0],"probe":[[45.438,10.992],[45.414,11.044]]},
+  {"id":"centro","label":"Italia · Centro","bounds":[41.0,8.0,44.5,14.5],"probe":[[41.9028,12.4964],[41.9109,12.4818]]},
+  {"id":"sud-isole","label":"Italia · Sud e isole","bounds":[35.0,8.0,42.5,19.0],"probe":[[40.8518,14.2681],[40.8650,14.2810]]},
+  {"id":"italia","label":"Italia","bounds":[35.0,6.0,47.5,19.0],"probe":[[45.4642,9.1900],[45.438,10.992]],"allTiles":true}
+]

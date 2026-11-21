@@ -9,12 +9,17 @@ no cron, systemd units or host Python installation are required.
 | Map | Daily at 03:00 | Fresh PBF and isolated graph generation in the stable volume, health/routing probes, activation |
 | Velox/Tutor | Daily, after the 03:00 map job finishes (including failure) | OSM inventory import and all pending Valhalla associations, in batches of 500 |
 | CNG | Hourly, 07:00 through 20:00 inclusive | One `etl cng` container: MIMIT station/prices, OSM enrichment, normalization |
+| Offline Android ZIPs | Sunday at 01:00 | One Italy 3.9.0 graph, five compatible dated packages in `/offline_assets` |
 
-The scheduler polls every 15 seconds and follows Italian daylight saving time. Map/CNG jobs
-start within the scheduled minute; enforcement follows the map job. Missed slots while
+The scheduler polls every 15 seconds and follows Italian daylight saving time. Map/CNG/offline jobs
+are queued within the scheduled minute; enforcement follows the map job. Missed slots while
 the container is off are not replayed.
 Attempt slots and last-success timestamps persist in `scheduled_update_state`, preventing
 a restart within the same minute from launching the same slot again. CNG runs independently.
+Map and offline builds share a blocking build lock: if the weekly export is still running at
+03:00, the map job waits and then continues with enforcement. Three scheduler workers keep
+CNG available while a build is active and another is waiting. Use scheduler commands for
+manual builds too; starting builder services directly bypasses this coordination.
 Map and enforcement share a maintenance lock: a manual scheduler
 invocation cannot race a graph replacement or another enforcement refresh. The nightly map
 job always attempts enforcement afterwards, even if the map build/activation fails. The
@@ -35,6 +40,86 @@ still runs. Standalone `mimit`, `osm` and `normalize` commands remain available.
 Docker event views still show creation, start, exit and removal for that single container;
 these are lifecycle events, not four separate updates. Downloads have the same frequency;
 this change reduces container/process startup overhead, not source refresh frequency.
+
+## Weekly offline packages
+
+The separate one-shot `offline-assets` service (profile `offline-build`) uses the pinned
+Valhalla **3.9.0** image required by Android. It downloads the Italy PBF, builds once in
+`offline_build_data`, checks routes using a temporary router, then reuses the regional
+exporter to produce schema-2 packages with the **same graphFamily**. It never activates
+this graph in the serving backend or changes its persistent volume. The builder uses
+Valhalla's [path_extension support](https://github.com/valhalla/valhalla/blob/3.9.0/docker/scripts/helpers.sh)
+to isolate each attempt. Its build subprocess has a 12-hour timeout.
+
+Output filenames use the **publication date in Europe/Rome, DDMMYYYY**, for example:
+
+```text
+nord-ovest_22112026.zip
+nord-est_22112026.zip
+centro_22112026.zip
+sud-isole_22112026.zip
+italia_22112026.zip
+```
+
+`tools/offline-italia-regions.json` defines overlapping rectangular regional coverage;
+these are practical download areas, not exact administrative boundaries. `italia` includes
+all original tiles (`allTiles: true`); each regional ZIP includes the shared hierarchy.
+Every package preserves OpenStreetMap/ODbL attribution. There are no visual map tiles in these ZIPs.
+
+`latest.json` is replaced atomically **after all five ZIPs are ready**, and lists their
+SHA-256 checksums, lengths, creation time and common graph family. `set-DDMMYYYY.json`
+marks each complete set. Consumers should use this manifest, not glob files during
+publication, because the five individual directory entries cannot appear atomically.
+Build, probe or export failures leave the previous publication available. Repeating a
+successful run on the same date reuses that immutable set; an interrupted publication can
+be retried. Working directories are removed on exit and abandoned staging directories
+are removed on the next run. By default the last **two completed sets** are retained;
+only recognized sets are pruned, after successful publication.
+
+### Enable and validate on the server
+
+From `~/docker/compass`, after synchronizing the repository, with the existing `.env`,
+Docker socket and external networks already configured. No new secrets are required.
+For rootless Docker, create the default host output directory owned by the daemon user:
+
+```bash
+sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /offline_assets
+docker compose --profile routing build scheduled-updates
+docker compose --profile routing up -d --no-deps --force-recreate scheduled-updates
+# First generation now, using the same lock and pipeline as the weekly schedule:
+docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py offline-assets
+ls -lh /offline_assets/*_*.zip
+cat /offline_assets/latest.json
+docker compose exec -T scheduled-updates cat /state/offline-assets.last-success
+```
+
+Configuration in `.env`: `COMPASS_OFFLINE_ASSETS_DIR` changes the **absolute host** output
+path (inside the worker it remains `/offline_assets`); `COMPASS_OFFLINE_THREADS` defaults
+to 2; `COMPASS_OFFLINE_KEEP_SETS` defaults to 2 and must be at least 1. This directory is
+managed output, not a general-purpose backup directory. Allow disk space for the full
+Italy build, temporary files, all five new ZIPs and retained sets. Duration, peak memory
+and actual space usage require measurement on the deployment host.
+
+Expected: five dated ZIPs, matching `graphFamily` in their internal manifests, matching
+SHA-256 values in `latest.json`, and a new `offline-assets.last-success`. A second run on
+the same date reports `Offline set already published today; no rebuild`. Import the ZIPs
+on Android 0.28.63+ and verify a route crossing Nord-Ovest/Nord-Est with just those two
+regions installed; also verify `italia` alone. New weekly sets must not be mixed with
+older graph families. No APK rebuild, API deployment or DB migration is required here.
+
+If generation fails, return the failing command output and:
+
+```bash
+docker compose logs --since 24h --tail 100 scheduled-updates
+docker compose --profile offline-build ps -a offline-assets
+df -h /offline_assets
+docker compose exec -T scheduled-updates cat /state/offline-assets.last-success
+```
+
+The final timestamp can be absent before the first success. Manual `exec` job output is
+in that terminal, while automatic job output appears in scheduler logs. Local tests use
+small synthetic graphs and mocked native processes; full Italy building and Android
+cross-region routing remain operator acceptance checks.
 
 ## Nightly autovelox and Tutor
 

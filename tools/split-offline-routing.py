@@ -63,6 +63,8 @@ def export_regions(
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", name) or name in ids:
             raise ValueError("Region ids must be distinct safe filenames")
         ids.add(name)
+        if not isinstance(region.get("allTiles", False), bool):
+            raise ValueError("allTiles must be a boolean")
         s, w, n, e = region["bounds"]
         if not all(math.isfinite(v) for v in (s, w, n, e)) or not (
             -90 <= s < n <= 90 and -180 <= w < e <= 180
@@ -98,7 +100,11 @@ def export_regions(
         family = inventory_digest(inventory)
         for region in regions:
             tiles = sorted(
-                (t for t in inventory if intersects(t["path"], region["bounds"])),
+                (
+                    t
+                    for t in inventory
+                    if region.get("allTiles", False) or intersects(t["path"], region["bounds"])
+                ),
                 key=lambda t: t["path"],
             )
             if not any(t["path"].startswith("2/") for t in tiles):

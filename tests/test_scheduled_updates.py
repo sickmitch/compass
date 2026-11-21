@@ -428,3 +428,74 @@ def test_initialize_rejects_mixed_versions_before_job(monkeypatch):
     with pytest.raises(RuntimeError, match="incompatible"):
         module.initialize()
     assert calls == ["docker", "config"]
+
+
+@pytest.mark.parametrize("instant", [
+    "2026-11-22T00:00:00+00:00", "2026-07-25T23:00:00+00:00",
+    "2026-03-29T00:00:00+00:00", "2026-10-24T23:00:00+00:00",
+])
+def test_offline_weekly_schedule_at_sunday_one_including_dst(instant):
+    jobs = module.due_jobs(datetime.fromisoformat(instant))
+    assert len(jobs) == 1
+    assert jobs[0][0] == "offline-assets"
+    assert jobs[0][1].endswith("T01")
+
+
+@pytest.mark.parametrize("instant", [
+    "2026-11-21T01:00:00+01:00", "2026-11-23T01:00:00+01:00",
+    "2026-11-22T01:01:00+01:00", "2026-11-22T02:00:00+01:00",
+])
+def test_offline_not_scheduled_other_days_or_minutes(instant):
+    assert module.due_jobs(datetime.fromisoformat(instant)) == []
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_offline_job_uses_one_container_and_records_only_success(tmp_path, monkeypatch, fails):
+    monkeypatch.setattr(module, "STATE", tmp_path)
+    calls = []
+
+    def compose(*args):
+        calls.append(args)
+        if fails:
+            raise RuntimeError("build failed")
+
+    monkeypatch.setattr(module, "compose", compose)
+    if fails:
+        with pytest.raises(RuntimeError, match="build failed"):
+            module.execute("offline-assets")
+    else:
+        module.execute("offline-assets")
+    assert calls == [("run", "--rm", "--no-deps", "-T", "offline-assets")]
+    assert (tmp_path / "offline-assets.last-success").exists() is not fails
+
+
+@pytest.mark.parametrize("job", ["map", "offline-assets"])
+def test_expensive_builds_share_blocking_lock_without_blocking_cng(tmp_path, monkeypatch, job):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    monkeypatch.setattr(module, "STATE", tmp_path)
+    waiting, built = Event(), Event()
+    real_flock = module.fcntl.flock
+
+    def flock(fd, flags):
+        if flags == fcntl.LOCK_EX:
+            waiting.set()
+        return real_flock(fd, flags)
+
+    monkeypatch.setattr(module.fcntl, "flock", flock)
+    monkeypatch.setattr(module, "update_map", built.set)
+    monkeypatch.setattr(module, "update_offline_assets", built.set)
+    monkeypatch.setattr(module, "update_enforcement", lambda: None)
+    cng = []
+    monkeypatch.setattr(module, "update_cng", lambda: cng.append(True))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with (tmp_path / "graph-build.lock").open("a") as lock:
+            real_flock(lock, fcntl.LOCK_EX)
+            future = executor.submit(module.execute, job)
+            assert waiting.wait(timeout=5)
+            assert not built.is_set()
+            module.execute("cng")
+            assert cng == [True]
+        future.result(timeout=5)
+    assert built.is_set()

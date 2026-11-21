@@ -191,6 +191,37 @@ services:
     networks:
       - compass-backend
 
+  offline-assets:
+    container_name: compass-offline-assets
+    profiles: ["offline-build"]
+    # Must match the native Android routing engine, independently of the server engine.
+    image: ghcr.io/valhalla/valhalla-scripted:3.9.0@sha256:89daaf61547167893cf58c03defd43c6eba0071dc965988c16a629260f8ac683
+    entrypoint: ["python3", "/opt/compass/build-offline-assets.py"]
+    user: "0:0"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      tile_urls: https://download.geofabrik.de/europe/italy-latest.osm.pbf
+      serve_tiles: "False"
+      build_tar: "True"
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      server_threads: ${COMPASS_OFFLINE_THREADS:-2}
+      COMPASS_OFFLINE_KEEP_SETS: ${COMPASS_OFFLINE_KEEP_SETS:-2}
+    volumes:
+      - offline_build_data:/custom_files
+      - ./tools/build-offline-assets.py:/opt/compass/build-offline-assets.py:ro
+      - ./tools/split-offline-routing.py:/opt/compass/split-offline-routing.py:ro
+      - ./tools/offline-italia-regions.json:/opt/compass/offline-italia-regions.json:ro
+      - type: bind
+        source: ${COMPASS_OFFLINE_ASSETS_DIR:-/offline_assets}
+        target: /offline_assets
+        bind:
+          create_host_path: false
+    restart: "no"
+    networks:
+      - compass-backend
+
   scheduled-updates:
     container_name: compass-scheduled-updates
     profiles: ["routing"]
@@ -256,6 +287,7 @@ services:
       - compass-backend
 
 volumes:
+  offline_build_data:
   scheduled_update_state:
   postgres_data:
   valhalla_data:

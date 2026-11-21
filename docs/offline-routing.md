@@ -8,6 +8,14 @@ and exposes their tiles to one native Valhalla actor. Installed schema-1 package
 individually; to combine areas, import schema-2 regions exported from a common graph.
 See [ADR 0026](adr/0026-composable-offline-map-regions.md) for the format and compatibility rules.
 
+### Weekly Italy packages
+
+The [container scheduler](scheduled-updates.md#weekly-offline-packages) now generates
+Nord-Ovest, Nord-Est, Centro, Sud/isole and full Italy together every Sunday at 01:00
+Europe/Rome, with names such as `nord-est_22112026.zip` under `/offline_assets`.
+Use all regional files from the same completed set (`latest.json`). These are schema-2
+packages for the existing client; no APK update is needed for scheduled generation.
+
 ### Generate compatible packages
 
 From the repository root, with Python 3.11+ (standard library only), no credentials required:

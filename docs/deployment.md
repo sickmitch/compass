@@ -102,6 +102,9 @@ without transport encryption and the Android app requires an explicit warning ac
 
 ## Automatic updates
 
+Weekly offline Android packages are generated on Sunday at 01:00 in `/offline_assets`;
+see [output-directory setup and validation](scheduled-updates.md#weekly-offline-packages).
+
 The [container scheduler](scheduled-updates.md) runs map rebuilds at 03:00, followed by autovelox/Tutor
 import and road association, and CNG imports every hour from 07:00 through 20:00, Europe/Rome. Build `scheduled-updates`
 and start the `routing` profile with Compose; no host timers are needed.

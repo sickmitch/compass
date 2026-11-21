@@ -117,3 +117,16 @@ def test_rejects_aliases_for_the_same_tile_id():
         module.tile_bounds("2/777/001.gph")
     with pytest.raises(ValueError, match="Invalid tile id"):
         module.tile_bounds("2/999/999/999.gph")
+
+
+def test_all_tiles_exports_complete_inventory_even_outside_bbox(tmp_path):
+    archive, original = source(tmp_path)
+    region = dict(regions()[0], id="italia", allTiles=True)
+    output = tmp_path / "output"
+    module.export_regions(archive, output, [region], "2026-11-21")
+    with zipfile.ZipFile(output / "italia.zip") as package:
+        manifest = json.loads(package.read("manifest.json"))
+        assert {tile["path"] for tile in manifest["tiles"]} == set(original)
+        assert manifest["sha256"] == manifest["graphFamily"]
+    with pytest.raises(ValueError, match="boolean"):
+        module.export_regions(archive, tmp_path / "bad", [dict(region, allTiles="true")], "today")
