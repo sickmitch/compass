@@ -9,7 +9,7 @@ no cron, systemd units or host Python installation are required.
 | Map | Daily at 03:00 | Fresh PBF and isolated graph generation in the stable volume, health/routing probes, activation |
 | Velox/Tutor | Daily, after the 03:00 map job finishes (including failure) | OSM inventory import and all pending Valhalla associations, in batches of 500 |
 | CNG | Hourly, 07:00 through 20:00 inclusive | One `etl cng` container: MIMIT station/prices, OSM enrichment, normalization |
-| Offline Android ZIPs | Sunday at 01:00 | One Italy 3.9.0 graph, five compatible dated packages in `/offline_assets` |
+| Offline Android ZIPs | Sunday at 01:00 | One Italy 3.9.0 graph, five compatible dated packages in `./offline_assets` |
 
 The scheduler polls every 15 seconds and follows Italian daylight saving time. Map/CNG/offline jobs
 are queued within the scheduled minute; enforcement follows the map job. Missed slots while
@@ -80,22 +80,31 @@ only recognized sets are pruned, after successful publication.
 
 From `~/docker/compass`, after synchronizing the repository, with the existing `.env`,
 Docker socket and external networks already configured. No new secrets are required.
-For rootless Docker, create the default host output directory owned by the daemon user:
+Compose creates `offline_assets` in the deployment project automatically, including with
+rootless Docker. Relative paths resolve against the Compose project directory. The scheduler
+already passes the discovered host deployment directory as `--project-directory`, so both
+manual and automatic runs write to the same host path (for example
+`/home/mike/docker/compass/offline_assets`). No `sudo` directory setup is needed:
 
 ```bash
-sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /offline_assets
 docker compose --profile routing build scheduled-updates
 docker compose --profile routing up -d --no-deps --force-recreate scheduled-updates
 # First generation now, using the same lock and pipeline as the weekly schedule:
 docker compose exec -T scheduled-updates python3 /opt/compass/scheduled-update.py offline-assets
-ls -lh /offline_assets/*_*.zip
-cat /offline_assets/latest.json
+ls -lh ./offline_assets/*_*.zip
+cat ./offline_assets/latest.json
 docker compose exec -T scheduled-updates cat /state/offline-assets.last-success
 ```
 
-Configuration in `.env`: `COMPASS_OFFLINE_ASSETS_DIR` changes the **absolute host** output
-path (inside the worker it remains `/offline_assets`); `COMPASS_OFFLINE_THREADS` defaults
-to 2; `COMPASS_OFFLINE_KEEP_SETS` defaults to 2 and must be at least 1. This directory is
+The host output path is fixed relative to the project: `./offline_assets`. The worker
+continues to access that bind mount as `/offline_assets` internally. An old
+`COMPASS_OFFLINE_ASSETS_DIR` in `.env` is no longer read and can be removed. For deployments
+that already run the weekly scheduler, synchronizing the updated Compose file is sufficient;
+no scheduler rebuild/restart is needed for this path correction. Generated assets are excluded
+from Git and Docker build contexts.
+
+Configuration in `.env`: `COMPASS_OFFLINE_THREADS` defaults to 2;
+`COMPASS_OFFLINE_KEEP_SETS` defaults to 2 and must be at least 1. This directory is
 managed output, not a general-purpose backup directory. Allow disk space for the full
 Italy build, temporary files, all five new ZIPs and retained sets. Duration, peak memory
 and actual space usage require measurement on the deployment host.
@@ -112,7 +121,7 @@ If generation fails, return the failing command output and:
 ```bash
 docker compose logs --since 24h --tail 100 scheduled-updates
 docker compose --profile offline-build ps -a offline-assets
-df -h /offline_assets
+df -h ./offline_assets
 docker compose exec -T scheduled-updates cat /state/offline-assets.last-success
 ```
 

@@ -102,7 +102,8 @@ without transport encryption and the Android app requires an explicit warning ac
 
 ## Automatic updates
 
-Weekly offline Android packages are generated on Sunday at 01:00 in `/offline_assets`;
+Weekly offline Android packages are generated on Sunday at 01:00 in the deployment
+project's `./offline_assets` directory;
 see [output-directory setup and validation](scheduled-updates.md#weekly-offline-packages).
 
 The [container scheduler](scheduled-updates.md) runs map rebuilds at 03:00, followed by autovelox/Tutor

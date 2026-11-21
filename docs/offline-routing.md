@@ -12,7 +12,8 @@ See [ADR 0026](adr/0026-composable-offline-map-regions.md) for the format and co
 
 The [container scheduler](scheduled-updates.md#weekly-offline-packages) now generates
 Nord-Ovest, Nord-Est, Centro, Sud/isole and full Italy together every Sunday at 01:00
-Europe/Rome, with names such as `nord-est_22112026.zip` under `/offline_assets`.
+Europe/Rome, with names such as `nord-est_22112026.zip` under `./offline_assets`
+in the deployment project.
 Use all regional files from the same completed set (`latest.json`). These are schema-2
 packages for the existing client; no APK update is needed for scheduled generation.
 

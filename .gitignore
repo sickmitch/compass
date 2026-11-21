@@ -22,6 +22,7 @@ android/**/build/
 
 # Locally built, potentially large offline routing packages
 offline-routing-build/
+/offline_assets/
 
 # Operator-supplied graph archives (kept locally, never included in APK/repository)
 /custom_files/*.zip

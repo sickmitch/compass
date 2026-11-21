@@ -7,4 +7,5 @@ __pycache__
 tests
 docs
 *.pyc
+offline_assets/
 

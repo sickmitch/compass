@@ -214,10 +214,10 @@ services:
       - ./tools/split-offline-routing.py:/opt/compass/split-offline-routing.py:ro
       - ./tools/offline-italia-regions.json:/opt/compass/offline-italia-regions.json:ro
       - type: bind
-        source: ${COMPASS_OFFLINE_ASSETS_DIR:-/offline_assets}
+        source: ./offline_assets
         target: /offline_assets
         bind:
-          create_host_path: false
+          create_host_path: true
     restart: "no"
     networks:
       - compass-backend
