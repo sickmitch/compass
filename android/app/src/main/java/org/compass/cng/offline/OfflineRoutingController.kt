@@ -18,6 +18,7 @@ import org.compass.cng.domain.model.RoutePreview
 /** One native call at a time; cancellation discards its result, never frees a live native actor. */
 class OfflineRoutingController(private val context: Context) : OfflineRouter {
     private val store = OfflineDatasetStore(File(context.noBackupFilesDir, "offline-routing"))
+    private val assembly = OfflineGraphAssembly(File(context.noBackupFilesDir, "offline-routing-assembly"))
     private val mutex = Mutex()
     private val io = Dispatchers.IO.limitedParallelism(1)
     private val scope = CoroutineScope(SupervisorJob() + io)
@@ -29,6 +30,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
     init {
         scope.launch { mutex.withLock {
             try {
+                assembly.clear()
                 installed = store.recover()
                 publish()
             } catch (_: Exception) {
@@ -53,7 +55,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
                         val input = requireNotNull(context.contentResolver.openInputStream(uri))
                         val dataset = input.use {
                             store.install(it, checkCancelled = { job.ensureActive() }) { candidate ->
-                                calculate(candidate, candidate.manifest.probePoints(), true, null)
+                                calculate(listOf(candidate), candidate.manifest.probePoints(), true, null) { job.ensureActive() }
                             }
                         }
                         if (installed.any { it.directory == dataset.directory }) duplicates++ else added++
@@ -72,6 +74,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
                 cancelled = true
                 throw error
             } finally {
+                assembly.clear()
                 installed = runCatching { store.all() }.getOrDefault(installed)
                 publish(listOfNotNull(
                     if (cancelled) "Importazione interrotta" else null,
@@ -87,6 +90,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
             ensureActive()
             publish("Rimozione pacchetto…", busy = true)
             try {
+                assembly.clear()
                 installed = store.remove(id)
                 publish("Pacchetto rimosso")
             } catch (error: CancellationException) {
@@ -99,18 +103,26 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
 
     override suspend fun route(points: List<Coordinate>, allowHighways: Boolean, direction: RouteOriginDirection?): List<RoutePreview> =
         withContext(io) { mutex.withLock {
-            routeWithOfflinePackages(installed, points) { dataset ->
-                calculate(dataset, points, allowHighways, direction)
+            val job = currentCoroutineContext()
+            routeWithOfflinePackages(installed, points) { datasets ->
+                calculate(datasets, points, allowHighways, direction) { job.ensureActive() }
             }
         } }
 
-    private fun calculate(dataset: InstalledOfflineDataset, points: List<Coordinate>, allowHighways: Boolean, direction: RouteOriginDirection?): List<RoutePreview> {
-        require(points.all(dataset.manifest::contains)) { "Percorso fuori dall’area offline scaricata" }
+    private fun calculate(datasets: List<InstalledOfflineDataset>, points: List<Coordinate>, allowHighways: Boolean, direction: RouteOriginDirection?, checkCancelled: () -> Unit = {}): List<RoutePreview> {
+        val dataset = datasets.first()
+        require(points.all { point -> datasets.any { it.manifest.contains(point) } }) { "Percorso fuori dall’area offline scaricata" }
         val config = File(dataset.directory, "runtime.json")
         val template = Json.parseToJsonElement(context.assets.open("offline-valhalla.json").bufferedReader().use { it.readText() }).jsonObject
         val mjolnir = template.getValue("mjolnir").jsonObject.toMutableMap().apply {
-            put("tile_extract", JsonPrimitive(File(dataset.directory, "tiles.tar").absolutePath))
-            put("tile_dir", JsonPrimitive(File(dataset.directory, "no-loose-tiles").absolutePath))
+            if (dataset.manifest.schemaVersion == 1) {
+                require(datasets.size == 1)
+                put("tile_extract", JsonPrimitive(File(dataset.directory, "tiles.tar").absolutePath))
+                put("tile_dir", JsonPrimitive(File(dataset.directory, "no-loose-tiles").absolutePath))
+            } else {
+                remove("tile_extract")
+                put("tile_dir", JsonPrimitive(assembly.prepare(datasets, checkCancelled).absolutePath))
+            }
         }
         config.writeText(JsonObject(template.toMutableMap().apply { put("mjolnir", JsonObject(mjolnir)) }).toString())
         val start = System.nanoTime()
@@ -129,6 +141,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
         mutableStatus.value = OfflineRoutingStatus(
             packages = installed.map { OfflineRoutingPackage(
                 it.directory.name, it.manifest.label, it.manifest.sourceDate, it.manifest.bytes,
+                graphSet = it.manifest.graphFamily?.take(8),
             ) } + unavailable.map { OfflineRoutingPackage(it, "Pacchetto non leggibile", "", 0, usable = false) },
             busy = busy,
             message = message,
@@ -138,6 +151,7 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
 
 data class OfflineRoutingPackage(
     val id: String, val label: String, val sourceDate: String, val bytes: Long, val usable: Boolean = true,
+    val graphSet: String? = null,
 )
 
 data class OfflineRoutingStatus(

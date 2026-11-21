@@ -48,6 +48,7 @@ fun OfflineRoutingSettings() {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                                 Text(dataset.label, style = MaterialTheme.typography.bodyMedium)
+                                Text(dataset.graphSet?.let { "Area combinabile · set $it" } ?: "Pacchetto indipendente", style = MaterialTheme.typography.labelSmall)
                                 Text(if (dataset.usable) "${dataset.sourceDate} · ${dataset.bytes / (1024 * 1024)} MB" else "Rimuovi e reimporta questo pacchetto", style = MaterialTheme.typography.bodySmall)
                             }
                             TextButton(enabled = !state.busy, onClick = { pendingRemoval = dataset }) { Text("Rimuovi") }
@@ -55,7 +56,7 @@ fun OfflineRoutingSettings() {
                     }
                 }
             }
-            Text("Il pacchetto adatto viene scelto automaticamente. Per un viaggio tra aree diverse, almeno un pacchetto deve coprire l’intero percorso: gli ZIP indipendenti non vengono uniti.", style = MaterialTheme.typography.bodySmall)
+            Text("Le aree esportate dallo stesso set si usano insieme, anche per viaggi tra regioni. I vecchi ZIP indipendenti restano utilizzabili singolarmente: per combinarli occorre riesportarli da un grafo comune.", style = MaterialTheme.typography.bodySmall)
             Text("Usa preferiti, coordinate o punti sulla mappa. Ricerca indirizzi, piano metano e cartografia visuale non sono inclusi.", style = MaterialTheme.typography.bodySmall)
             if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }

@@ -1,5 +1,106 @@
 # Android offline routing
 
+## Joint regional routing in 0.28.63
+
+Compatible regional packages are now used **together for one route**, including intermediate
+stops and navigation recalculation. Android groups areas from the same complete graph build
+and exposes their tiles to one native Valhalla actor. Installed schema-1 packages keep working
+individually; to combine areas, import schema-2 regions exported from a common graph.
+See [ADR 0026](adr/0026-composable-offline-map-regions.md) for the format and compatibility rules.
+
+### Generate compatible packages
+
+From the repository root, with Python 3.11+ (standard library only), no credentials required:
+
+```bash
+python3 tools/split-offline-routing.py \
+  --package custom_files/nord-est-offline.zip \
+  --engine-version 3.9.0 \
+  --regions docs/examples/offline-nord-est-regions.json \
+  --output-dir offline-routing-build/nord-est-combined
+```
+
+This reuses the original Nord-Est graph without rebuilding or modifying it. Outputs are
+`nord-est-ovest.zip` and `nord-est-est.zip`; import **both** in Options → Routing offline.
+The example splits at longitude 11.5 so a Verona–Padova journey uses both areas.
+Files with existing output names are never overwritten. For a repeat export choose another
+output directory. Locally supplied `custom_files/*.zip` and generated builds are ignored by Git.
+
+For other regions, define a JSON list with `id`, `label`, `bounds` (south/west/north/east) and
+two local `probe` coordinates per area. The input must cover the union of all required areas.
+A complete Valhalla 3.9.0 `valhalla_tiles.tar` can be supplied via `--tiles` instead of `--package`,
+adding `--source-date YYYY-MM-DD`. Existing schema-1 ZIPs are checksum-verified before splitting.
+A collection of independently built regional graphs cannot be passed as one input: build a
+wider graph once and partition that exact build. The same engine version or source date alone
+is not enough to establish compatibility. Never edit `graphFamily` manually.
+
+The UI marks new packages as **Area combinabile** with a short set identifier (matching identifiers
+indicate the same full build), and legacy packages as **Pacchetto indipendente**.
+No fixed package-count cap is introduced. The importer verifies every tile and rejects conflicting
+shared files. Removing a region invalidates the derived shared view without deleting other areas.
+There must still be installed road coverage for the whole journey, including any necessary detour.
+
+### Phone acceptance for 0.28.63
+
+Only the Android app and exported packages change. No backend redeploy/database migration is
+needed. On a machine with platform-tools and an authorized USB-debugging phone, repository root:
+
+```bash
+adb install -r dist/compass-0.28.63.apk
+adb push offline-routing-build/nord-est-combined/nord-est-ovest.zip /sdcard/Download/
+adb push offline-routing-build/nord-est-combined/nord-est-est.zip /sdcard/Download/
+```
+
+1. Import both ZIPs in Options. Both must be listed as combinable and survive app restart.
+   Keep the original ZIP outside the app, and remove the legacy Nord-Est installation **in the
+   app** for this test so it cannot act as a full-area fallback.
+2. In airplane mode with GPS enabled, select Verona (45.438, 10.992) and Padova (45.406, 11.877)
+   using map points/favorites/coordinates. A single continuous route must be calculated with
+   nominal ETA and maneuvers. Repeat in reverse and with an ordinary intermediate waypoint.
+3. Start navigation and exercise offline recalculation as usual. Confirm it can still use
+   both regions. Record latency and any route/geometry discontinuity; this is a device check.
+4. Remove the eastern package: Verona–Padova must fail explicitly rather than fabricate a
+   connection or retain the removed area through the derived view. A short Verona route must
+   still work. Reimport the eastern package and verify cross-area routing recovers.
+5. A package from another complete build must remain independent, never supply missing tiles
+   to this set. Legacy schema-1 standalone routes must remain usable.
+
+Return the import summaries, app version, route outcomes/durations for steps 2–4, and any
+failure text. If import or routing fails, collect:
+
+```bash
+adb logcat -d -s CompassOfflineRouting:I CompassNavigation:I AndroidRuntime:E
+adb shell dumpsys meminfo org.compass.cng.debug
+```
+
+Native cross-region routing, import probes on the phone and physical hard-link support remain
+operator acceptance checks. Local fixtures and tile-integrity verification do not establish
+those device results.
+
+### Local validation for 0.28.63
+
+```bash
+android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:compileDebugAndroidTestKotlin
+.venv/bin/pytest --noconftest -q tests/test_offline_routing_split.py tests/test_offline_routing_export.py
+.venv/bin/ruff check tools/split-offline-routing.py tests/test_offline_routing_split.py
+```
+
+JDK 17/Android SDK: build succeeded, 394 JVM tests passed without failures/skips; lint had
+zero errors, 100 warnings and three hints. Instrumentation was compiled, not executed.
+Python: eight tests passed and Ruff passed. Tests cover compatible cross-region selection,
+actual hard-linked union construction, shared tile conflicts, canonical paths, checksums,
+cancellation, removal/reassembly and separation of different builds.
+
+The supplied `custom_files/nord-est-offline.zip` was checksum-verified and exported unchanged
+into the example western/eastern packages (113 and 150 tiles). Their union contains 214 unique
+tiles, all byte-identical to the source; common files have matching hashes. The source has
+296 tiles overall: local tiles outside the example coverage/halo are intentionally excluded.
+Both packages have set prefix `a87ab06b`; the original ZIP remains intact and untracked.
+These local artifacts are in `offline-routing-build/nord-est-combined/`, not in Git.
+
+APK 0.28.63/versionCode 109: 93,133,784 bytes, signature verified against the existing update
+certificate; `dist/last.txt` points to `compass-0.28.63.apk`.
+
 ## Offline search availability in 0.28.62
 
 Place search now uses the existing backend-availability signal, just like CNG features.
