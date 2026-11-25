@@ -45,6 +45,11 @@ def test_output_bind_is_in_deployment_project_even_with_legacy_override(tmp_path
     assert output["source"] == str(project / "offline_assets")
     # Compose may omit the default true value from normalized JSON.
     assert output["bind"].get("create_host_path", True) is True
+    api_output = next(
+        m for m in config["services"]["api"]["volumes"] if m["target"] == "/offline_assets"
+    )
+    assert api_output["source"] == output["source"]
+    assert api_output["read_only"] is True
     scheduler = config["services"]["scheduled-updates"]
     socket = next(m for m in scheduler["volumes"] if m["target"] == "/var/run/docker.sock")
     assert socket["bind"]["create_host_path"] is False

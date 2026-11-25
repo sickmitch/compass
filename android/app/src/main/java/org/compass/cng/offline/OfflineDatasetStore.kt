@@ -127,11 +127,11 @@ class OfflineDatasetStore(private val root: File) {
         return names
     }
 
-    private fun publish(names: List<String>) {
+    private fun publish(names: List<String>, subscriptions: List<OfflineSubscription> = subscriptions()) {
         root.mkdirs()
         val temporary = File(root, "catalog.tmp")
         temporary.outputStream().use {
-            it.write(json.encodeToString(OfflineCatalog.serializer(), OfflineCatalog(datasets = names)).toByteArray())
+            it.write(json.encodeToString(OfflineCatalog.serializer(), OfflineCatalog(datasets = names, subscriptions = subscriptions.filter { it.datasetId == null || it.datasetId in names })).toByteArray())
             it.fd.sync()
         }
         Files.move(temporary.toPath(), File(root, "catalog.json").toPath(),
@@ -142,6 +142,7 @@ class OfflineDatasetStore(private val root: File) {
     fun install(
         input: InputStream,
         checkCancelled: () -> Unit = {},
+        register: Boolean = true,
         probe: (InstalledOfflineDataset) -> Unit,
     ): InstalledOfflineDataset {
         val previous = readNames()
@@ -197,7 +198,7 @@ class OfflineDatasetStore(private val root: File) {
                 }
                 probe(dataset) // Native route verification before registering the package.
                 checkCancelled()
-                publish(previous + folder.name)
+                if (register) publish(previous + folder.name)
                 published = true
                 return dataset
             }
@@ -205,6 +206,65 @@ class OfflineDatasetStore(private val root: File) {
             if (!published) folder.deleteRecursively()
         }
     }
+    fun subscriptions(): List<OfflineSubscription> = File(root, "catalog.json").takeIf { it.exists() }
+        ?.let { json.decodeFromString<OfflineCatalog>(it.readText()).subscriptions }.orEmpty()
+
+    fun subscribe(owner: String, area: String, enabled: Boolean) {
+        require(area in offlineAreaLabels)
+        val existing = subscriptions()
+        val updated = existing.filterNot { it.owner == owner && it.area == area }.toMutableList()
+        if (enabled) updated += existing.firstOrNull { it.owner == owner && it.area == area }
+            ?: OfflineSubscription(owner, area)
+        publish(readNames(), updated)
+    }
+
+    /** One catalog commit for the complete subscription set. Old packages survive any failure. */
+    fun replaceSubscribed(owner: String, expected: List<OfflineSubscription>, catalog: RemoteOfflineCatalog,
+        files: Map<String, File>, checkCancelled: () -> Unit = {},
+        probe: (InstalledOfflineDataset) -> Unit,
+    ) {
+        require(subscriptions().filter { it.owner == owner } == expected) { "Aree sottoscritte cambiate: riprova" }
+        catalog.validate()
+        val previousNames = readNames()
+        val staged = mutableListOf<InstalledOfflineDataset>()
+        var committed = false
+        try {
+            val replacements = expected.map { subscription ->
+                val remote = catalog.packages.single { it.area == subscription.area }
+                val file = files[subscription.area]
+                if (file == null) {
+                    require(subscription.sha256 == remote.sha256 && subscription.datasetId in previousNames)
+                    subscription
+                } else {
+                    val candidate = file.inputStream().use { input ->
+                        install(input, checkCancelled, register = false) { candidate ->
+                            require(candidate.manifest.graphFamily == catalog.graph_family) { "Set offline non coerente" }
+                            probe(candidate)
+                        }
+                    }
+                    staged += candidate
+                    val incoming = candidate.manifest.tiles.associateBy { it.path }
+                    staged.filter { it.manifest.graphFamily == candidate.manifest.graphFamily }.forEach { other ->
+                        other.manifest.tiles.forEach { tile ->
+                            require(incoming[tile.path]?.let { it == tile } != false) { "Tile incompatibili nello stesso set" }
+                        }
+                    }
+                    require(candidate.manifest.graphFamily == catalog.graph_family)
+                    subscription.copy(datasetId = candidate.directory.name, sha256 = remote.sha256)
+                }
+            }
+            checkCancelled()
+            val otherReferences = subscriptions().filter { it.owner != owner }.mapNotNull { it.datasetId }.toSet()
+            val obsolete = expected.mapNotNull { it.datasetId }.toSet() - otherReferences
+            val keep = (previousNames.filterNot { it in obsolete } + replacements.mapNotNull { it.datasetId }).distinct()
+            publish(keep, subscriptions().filterNot { it.owner == owner } + replacements)
+            committed = true
+            obsolete.filterNot { it in keep }.forEach { File(root, it).deleteRecursively() }
+        } finally {
+            if (!committed) staged.filter { it.directory.name !in previousNames }.forEach { it.directory.deleteRecursively() }
+        }
+    }
+
     private fun copyVerified(input: InputStream, file: File, bytes: Long, digest: String, checkCancelled: () -> Unit) {
         file.parentFile!!.mkdirs()
         val hash = MessageDigest.getInstance("SHA-256")
@@ -230,4 +290,5 @@ class OfflineDatasetStore(private val root: File) {
 }
 
 @Serializable
-private data class OfflineCatalog(val schemaVersion: Int = 1, val datasets: List<String>)
+private data class OfflineCatalog(val schemaVersion: Int = 1, val datasets: List<String>,
+    val subscriptions: List<OfflineSubscription> = emptyList())

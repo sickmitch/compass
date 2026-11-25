@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://compass:compass-local-only@localhost:5432/compass"
     log_level: str = "INFO"
+    offline_assets_path: str = "/offline_assets"
     api_auth_enabled: bool = False
     api_auth_username: str = ""
     api_auth_password: SecretStr = SecretStr("")

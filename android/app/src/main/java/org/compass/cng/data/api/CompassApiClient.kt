@@ -28,7 +28,7 @@ import org.compass.cng.domain.model.RouteTravelMode
 import org.compass.cng.domain.server.ServerConnection
 
 /** Cancellation closes the socket even while waiting for headers or reading a response body. */
-private suspend fun <T> okhttp3.Call.decodeCancellable(decode: (okhttp3.Response) -> T): T =
+internal suspend fun <T> okhttp3.Call.decodeCancellable(decode: (okhttp3.Response) -> T): T =
     suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { cancel() }
         enqueue(object : okhttp3.Callback {
@@ -46,6 +46,10 @@ private suspend fun <T> okhttp3.Call.decodeCancellable(decode: (okhttp3.Response
             }
         })
     }
+
+internal fun ServerConnection.authenticatedRequest(): Request.Builder = Request.Builder().apply {
+    if (hasCredentials) header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
+}
 
 class CompassApiClient(
     private val connectionProvider: () -> ServerConnection,
@@ -529,17 +533,7 @@ class CompassApiClient(
     private fun elapsedMillis(startedAtNanos: Long): Long =
         ((monotonicNanos() - startedAtNanos).coerceAtLeast(0L) / NANOS_PER_MILLISECOND)
 
-    private fun authenticatedRequestBuilder(): Request.Builder {
-        val connection = connectionProvider()
-        return Request.Builder().apply {
-            if (connection.hasCredentials) {
-                header(
-                    "Authorization",
-                    Credentials.basic(connection.username, connection.password, Charsets.UTF_8),
-                )
-            }
-        }
-    }
+    private fun authenticatedRequestBuilder(): Request.Builder = connectionProvider().authenticatedRequest()
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()

@@ -1,5 +1,82 @@
 # Android offline routing
 
+## Download and automatic updates in 0.28.64
+
+Options → Routing offline lists Nord-Ovest, Nord-Est, Centro, Sud e isole and Italia from
+Compass. Names contain only the geographic area; archive dates remain in metadata. Choose
+**Scarica e sottoscrivi** to download, verify, import and subscribe. **Aggiorna aree** checks
+subscribed areas immediately. **Disattiva aggiornamenti** retains the installed area;
+**Rimuovi** deletes it and its subscription. Manual ZIP import remains available.
+
+Automatic checking starts Monday at 06:00 Europe/Rome, following Sunday's weekly build,
+and catches up when Android allows execution on an unmetered network with sufficient
+battery. If the publication is still old or the request fails, it retries after six hours.
+Force-stopping the app suspends Android jobs until the app is reopened. These are flexible
+OS-managed jobs, not exact-time alarms. Device acceptance is pending.
+
+For manual initial downloads and updates totaling at least **100 MiB**, a mobile or metered non-Wi-Fi
+connection requires confirmation showing the total size. On Wi-Fi no confirmation appears,
+including metered Wi-Fi. Automatic updates remain restricted to unmetered networks. Moving
+from Wi-Fi to mobile during an unapproved large transfer pauses it and asks for confirmation.
+The displayed size is the full changed-package total (a resumed download may transfer less).
+
+ZIP transfers use authenticated Range requests and verify SHA-256. The client keeps the old
+subscription set until all new areas have been downloaded, verified and locally route-probed;
+then it swaps the catalog once and removes obsolete graphs. Subscribed areas are updated
+together to preserve cross-region routing. Storage must accommodate old graphs, downloaded
+ZIPs and staged new graphs at the same time. Previously imported packages are not automatically
+subscribed; select their geographic areas explicitly in the server catalog.
+
+### Deploy and accept this change
+
+On the deployment server, from `~/docker/compass`, with the existing `.env` credentials and
+Docker networks; no new secrets or DB migrations:
+
+```bash
+git pull
+docker compose build api
+docker compose up -d --no-deps --force-recreate api
+# Verify that the weekly publisher already has a complete set:
+cat ./offline_assets/latest.json
+# Authenticated API check from inside the API container:
+docker compose exec -T api python3 - <<'PYTEST'
+import base64, json, os, urllib.request
+headers = {}
+if os.environ.get('API_AUTH_ENABLED', 'false').lower() == 'true':
+    token = base64.b64encode((os.environ['API_AUTH_USERNAME'] + ':' + os.environ['API_AUTH_PASSWORD']).encode()).decode()
+    headers['Authorization'] = 'Basic ' + token
+request = urllib.request.Request('http://127.0.0.1:8000/api/v1/offline-routing/packages', headers=headers)
+with urllib.request.urlopen(request, timeout=15) as response:
+    print(json.dumps(json.load(response), indent=2))
+PYTEST
+```
+
+Expected: five areas with dated filenames, lengths, checksums and one common graph family.
+An empty publication returns an empty list; an incomplete/corrupt publication returns 503.
+If needed, run the existing scheduler's `offline-assets` command to create the first set.
+Download endpoints require the same credentials and expose only published ZIPs.
+
+Install `dist/compass-0.28.64.apk` through the usual client updater, then:
+
+1. On Wi-Fi open Options, select two neighboring areas and verify no mobile-data prompt;
+   wait for import and calculate a route across their boundary in airplane mode.
+2. With Wi-Fi disabled and mobile data enabled, request a large new area and then an update
+   of an already subscribed area from a newer publication. Both must show size/confirmation.
+   Cancel must prevent package transfer. Approve explicitly and verify download/import.
+3. Interrupt a transfer or switch Wi-Fi to mobile without approval. The old installed areas
+   remain usable; retry resumes the partial file and checks its full checksum.
+4. Publish a newer complete set, then trigger the scheduled job on an authorized USB phone:
+   `adb shell cmd jobscheduler run -f org.compass.cng 42063`. Use Wi-Fi for this diagnostic.
+   All subscribed areas must move to the new family together; unsubscribe one and repeat:
+   that area must remain untouched. Remove an area and verify it is no longer subscribed.
+5. Restart the app/phone and verify subscriptions, installed areas and the persisted job:
+   `adb shell dumpsys jobscheduler` (search for `org.compass.cng` / `42063`).
+
+If anything fails, return the API response, client error text, relevant output from
+`docker compose logs --tail 100 api`, and `adb logcat -d -s CompassOfflineAssets CompassOfflineRouting AndroidRuntime`.
+Full ZIP download/proxy streaming, scheduler restrictions and native route checks require these
+live tests; fixture tests do not establish their success. See ADR 0027 for failure semantics.
+
 ## Joint regional routing in 0.28.63
 
 Compatible regional packages are now used **together for one route**, including intermediate

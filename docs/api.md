@@ -397,3 +397,14 @@ and target coordinates. Inventory/package `alert_eligible=false` remains unchang
 vehicle-specific check supplies approach evidence. The endpoint makes no persistence changes.
 Responses use `Cache-Control: no-store`; failures return 503 `enforcement_approach_unavailable`.
 See [eligibility, timing and offline limits](phases/android-0.28.54-enforcement-approach.md).
+
+## Offline routing packages
+
+`GET /api/v1/offline-routing/packages` returns the latest complete publication with
+`graph_family`, `created_at`, and `packages` (area, geographic label, filename, bytes, SHA-256).
+Before the first publication the two metadata fields are null and the list is empty.
+`GET /api/v1/offline-routing/packages/{filename}` streams an authenticated ZIP; supports
+HTTP Range / If-Range and uses its SHA-256 as ETag. Filenames are selected from retained
+complete-set manifests only. Missing/expired files return `offline_package_not_found` (404);
+a damaged catalog returns `offline_catalog_unavailable` (503). Both use the standard
+code/message error shape. See OpenAPI and the offline-routing deployment/acceptance guide.

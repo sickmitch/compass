@@ -64,7 +64,8 @@ italia_22112026.zip
 `tools/offline-italia-regions.json` defines overlapping rectangular regional coverage;
 these are practical download areas, not exact administrative boundaries. `italia` includes
 all original tiles (`allTiles: true`); each regional ZIP includes the shared hierarchy.
-Every package preserves OpenStreetMap/ODbL attribution. There are no visual map tiles in these ZIPs.
+Every package preserves OpenStreetMap/ODbL attribution. There are no visual map tiles in these ZIPs. The API mounts this directory read-only to
+serve the authenticated catalog/download endpoints used by Android 0.28.64 subscriptions.
 
 `latest.json` is replaced atomically **after all five ZIPs are ready**, and lists their
 SHA-256 checksums, lengths, creation time and common graph family. `set-DDMMYYYY.json`

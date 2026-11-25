@@ -26,6 +26,7 @@ class CompassApplication : Application() {
             },
         )
         container = AppContainer(this)
+        org.compass.cng.offline.OfflineUpdateJobService.schedule(this, container.offlineAssets)
     }
 
     private companion object {

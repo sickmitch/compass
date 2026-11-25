@@ -85,6 +85,33 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
         }
     }
 
+    suspend fun subscriptions(): List<OfflineSubscription> = withContext(io) { mutex.withLock { store.subscriptions() } }
+
+    suspend fun subscribe(owner: String, area: String, enabled: Boolean) = withContext(io) {
+        mutex.withLock { store.subscribe(owner, area, enabled); publish() }
+    }
+
+    suspend fun replaceSubscribed(owner: String, expected: List<OfflineSubscription>, catalog: RemoteOfflineCatalog,
+        files: Map<String, File>, stillCurrent: () -> Boolean,
+    ) = withContext(io) {
+        mutex.withLock {
+            val job = currentCoroutineContext()
+            publish("Verifica e installazione aree…", busy = true)
+            try {
+                store.replaceSubscribed(owner, expected, catalog, files, checkCancelled = {
+                    job.ensureActive()
+                    check(stillCurrent()) { "Connessione al server cambiata: riprova" }
+                }) { candidate ->
+                    calculate(listOf(candidate), candidate.manifest.probePoints(), true, null) { job.ensureActive() }
+                }
+            } finally {
+                assembly.clear()
+                installed = store.all()
+                publish()
+            }
+        }
+    }
+
     suspend fun removePackage(id: String) = withContext(io) {
         mutex.withLock {
             ensureActive()
@@ -137,10 +164,12 @@ class OfflineRoutingController(private val context: Context) : OfflineRouter {
     }
 
     private fun publish(message: String? = null, busy: Boolean = false) {
+        val subscriptions = store.subscriptions()
         val unavailable = runCatching { store.unavailableIds() }.getOrDefault(emptyList())
         mutableStatus.value = OfflineRoutingStatus(
             packages = installed.map { OfflineRoutingPackage(
-                it.directory.name, it.manifest.label, it.manifest.sourceDate, it.manifest.bytes,
+                it.directory.name, subscriptions.firstOrNull { sub -> sub.datasetId == it.directory.name }
+                    ?.let { sub -> offlineAreaLabels[sub.area] } ?: offlineDisplayName(it.manifest.label), it.manifest.sourceDate, it.manifest.bytes,
                 graphSet = it.manifest.graphFamily?.take(8),
             ) } + unavailable.map { OfflineRoutingPackage(it, "Pacchetto non leggibile", "", 0, usable = false) },
             busy = busy,

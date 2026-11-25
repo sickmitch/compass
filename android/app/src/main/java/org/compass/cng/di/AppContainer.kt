@@ -53,6 +53,9 @@ class AppContainer(context: Context) {
         ),
     )
 
+    val offlineAssets = org.compass.cng.offline.OfflineAssetManager(context.applicationContext,
+        offlineRouting, serverConnectionRepository::load, org.compass.cng.offline.OfflineAssetClient(httpClient))
+
     private val apiClient = CompassApiClient(
             connectionProvider = serverConnectionRepository::load,
             httpClient = httpClient,

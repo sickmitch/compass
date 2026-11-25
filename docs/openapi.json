@@ -3179,6 +3179,81 @@
         "title": "NormalizedAddressResponse",
         "type": "object"
       },
+      "OfflinePackage": {
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "bytes": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 9663676416.0,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "area",
+          "label",
+          "filename",
+          "bytes",
+          "sha256"
+        ],
+        "title": "OfflinePackage",
+        "type": "object"
+      },
+      "OfflinePackages": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "graph_family": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Family"
+          },
+          "packages": {
+            "items": {
+              "$ref": "#/components/schemas/OfflinePackage"
+            },
+            "title": "Packages",
+            "type": "array"
+          }
+        },
+        "title": "OfflinePackages",
+        "type": "object"
+      },
       "OpeningHoursEvaluationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7912,6 +7987,146 @@
         "summary": "Road Context",
         "tags": [
           "enforcement"
+        ]
+      }
+    },
+    "/api/v1/offline-routing/packages": {
+      "get": {
+        "operationId": "catalog_api_v1_offline_routing_packages_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflinePackages"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Catalog",
+        "tags": [
+          "offline-routing"
+        ]
+      }
+    },
+    "/api/v1/offline-routing/packages/{filename}": {
+      "get": {
+        "operationId": "download_api_v1_offline_routing_packages__filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "206": {
+            "description": "Partial ZIP content (Range request)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid Compass API credentials."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "OptionalHTTPBasic": []
+          }
+        ],
+        "summary": "Download",
+        "tags": [
+          "offline-routing"
         ]
       }
     },
