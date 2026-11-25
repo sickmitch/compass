@@ -40,6 +40,7 @@ def test_output_bind_is_in_deployment_project_even_with_legacy_override(tmp_path
     )
     config = json.loads(result.stdout)
     worker = config["services"]["offline-assets"]
+    assert worker["command"] == []  # do not inherit the image's build_tiles argument
     output = next(m for m in worker["volumes"] if m["target"] == "/offline_assets")
     assert output["type"] == "bind"
     assert output["source"] == str(project / "offline_assets")

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import fcntl
 import hashlib
 import importlib.util
@@ -44,7 +45,7 @@ def atomic_json(path: Path, data: dict) -> None:
         os.close(fd)
 
 
-def read_set(output: Path, date: str) -> dict | None:
+def read_set(output: Path, date: str, *, verify_files: bool = True) -> dict | None:
     if not re.fullmatch(r"[0-9]{8}", date):
         raise ValueError("Invalid creation date")
     datetime.strptime(date, "%d%m%Y")
@@ -55,7 +56,7 @@ def read_set(output: Path, date: str) -> dict | None:
     expected = {f"{name}_{date}.zip" for name in NAMES}
     if record.get("schema_version") != 1 or set(record.get("files", {})) != expected:
         raise ValueError("Invalid offline set manifest")
-    for filename, details in record["files"].items():
+    for filename, details in record["files"].items() if verify_files else []:
         file = output / filename
         if file.is_symlink() or not file.is_file() or file.stat().st_size != details["bytes"]:
             raise ValueError(f"Published offline file missing or changed: {filename}")
@@ -105,23 +106,27 @@ def publish(staging: Path, output: Path, created: datetime, family: str) -> dict
         raise
 
 
-def prune(output: Path, keep: int) -> None:
-    records = []
+def prune(output: Path) -> None:
     latest = json.loads((output / "latest.json").read_text())
+    dates = {name.rsplit("_", 1)[-1].removesuffix(".zip") for name in latest["files"]}
+    if len(dates) != 1 or read_set(output, dates.pop()) != latest:
+        raise ValueError("Latest offline set is not complete; retaining previous builds")
     for marker in output.glob("set-????????.json"):
         try:
-            record = read_set(output, marker.stem[4:])
-            records.append((datetime.fromisoformat(record["created_at"]), marker, record))
+            # Previously interrupted cleanup can leave a manifest with missing files.
+            record = read_set(output, marker.stem[4:], verify_files=False)
+            if record is None:
+                continue
         except (ValueError, KeyError, OSError):
             print(f"Retaining unrecognized offline set: {marker.name}", flush=True)
-    records.sort(key=lambda item: item[0], reverse=True)
-    for _, marker, record in records[keep:]:
+            continue
         if record == latest:
             continue
-        # Remove the commit marker before files; never touch unrelated files/directories.
-        marker.unlink()
         for filename in record["files"]:
             (output / filename).unlink(missing_ok=True)
+        # Keep the manifest until cleanup completes so an interrupted prune can resume.
+        marker.unlink()
+        print(f"Removed obsolete offline set: {marker.stem[4:]}", flush=True)
 
 
 def build_graph(folder: Path) -> None:
@@ -209,18 +214,19 @@ def generate(folder: Path, staging: Path, regions: list[dict]) -> str:
     return families.pop()
 
 
-def main() -> None:
-    keep = int(os.environ.get("COMPASS_OFFLINE_KEEP_SETS", "2"))
-    if keep < 1:
-        raise ValueError("COMPASS_OFFLINE_KEEP_SETS must be at least one")
+def main(*, prune_only: bool = False) -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
     with (OUTPUT / ".compass-offline.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if prune_only:
+            prune(OUTPUT)
+            print("Only the latest complete offline set is retained", flush=True)
+            return
         existing = read_set(OUTPUT, now().strftime("%d%m%Y"))
         if existing is not None:
             atomic_json(OUTPUT / "latest.json", existing)
-            prune(OUTPUT, keep)
+            prune(OUTPUT)
             print("Offline set already published today; no rebuild", flush=True)
             return
         for root, pattern in ((OUTPUT, ".compass-offline-stage-*"), (WORK, "offline-build-*")):
@@ -236,7 +242,7 @@ def main() -> None:
             probe_graph(folder, regions)
             family = generate(folder, staging, regions)
             record = publish(staging, OUTPUT, now(), family)
-            prune(OUTPUT, keep)
+            prune(OUTPUT)
             print(json.dumps(record), flush=True)
         finally:
             shutil.rmtree(folder, ignore_errors=True)
@@ -244,4 +250,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--prune-only", action="store_true", help="Keep latest publication without rebuilding"
+    )
+    main(prune_only=parser.parse_args().prune_only)

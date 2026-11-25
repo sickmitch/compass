@@ -68,14 +68,15 @@ def test_partial_publish_rolls_back_without_touching_previous_set(tmp_path, monk
     assert module.read_set(tmp_path, "14112026") == first
 
 
-def test_retention_uses_chronological_dates_and_preserves_unrelated_files(tmp_path):
+def test_retention_keeps_only_latest_and_preserves_unrelated_files(tmp_path):
     for date in ("2026-10-31", "2026-11-07", "2026-11-14"):
         publish(tmp_path, date + "T10:00:00+01:00")
     unrelated = tmp_path / "personal.zip"
     unrelated.write_bytes(b"keep")
-    module.prune(tmp_path, 2)
+    module.prune(tmp_path)
     assert not list(tmp_path.glob("*_31102026.zip"))
-    assert module.read_set(tmp_path, "07112026")
+    assert module.read_set(tmp_path, "07112026") is None
+    assert not list(tmp_path.glob("*_07112026.zip"))
     assert module.read_set(tmp_path, "14112026")
     assert unrelated.read_bytes() == b"keep"
 
@@ -120,7 +121,7 @@ def test_pipeline_failures_preserve_published_set_and_cleanup(tmp_path, monkeypa
         assert calls == ["build", "probe", "export"]  # no second build on same date
     assert not list(work.iterdir())
     assert not list(output.glob(".compass-offline-stage-*"))
-    assert module.read_set(output, "14112026") == previous
+    assert module.read_set(output, "14112026") == (previous if failure else None)
 
 
 def test_build_uses_isolated_fresh_directory_and_checks_output(tmp_path, monkeypatch):
@@ -200,3 +201,35 @@ def test_five_real_zip_exports_share_the_same_graph(tmp_path):
             assert manifest["engineVersion"] == "3.9.0"
             if name == "italia":
                 assert set(package.namelist()) == paths | {"manifest.json"}
+
+
+def test_cleanup_can_resume_after_partial_deletion(tmp_path):
+    publish(tmp_path, "2026-11-14T10:00:00+01:00")
+    latest = publish(tmp_path, "2026-11-21T10:00:00+01:00")
+    (tmp_path / "italia_14112026.zip").unlink()
+    module.prune(tmp_path)
+    assert not list(tmp_path.glob("*_14112026.zip"))
+    assert module.read_set(tmp_path, "14112026") is None
+    assert module.read_set(tmp_path, "21112026") == latest
+
+
+def test_broken_latest_never_deletes_previous(tmp_path):
+    previous = publish(tmp_path, "2026-11-14T10:00:00+01:00")
+    publish(tmp_path, "2026-11-21T10:00:00+01:00")
+    (tmp_path / "italia_21112026.zip").unlink()
+    with pytest.raises(ValueError):
+        module.prune(tmp_path)
+    assert module.read_set(tmp_path, "14112026") == previous
+
+
+def test_prune_only_ignores_legacy_retention_setting_and_does_not_build(tmp_path, monkeypatch):
+    publish(tmp_path, "2026-11-14T10:00:00+01:00")
+    latest = publish(tmp_path, "2026-11-21T10:00:00+01:00")
+    monkeypatch.setattr(module, "OUTPUT", tmp_path)
+    monkeypatch.setattr(module, "WORK", tmp_path / "work")
+    monkeypatch.setenv("COMPASS_OFFLINE_KEEP_SETS", "2")
+    monkeypatch.setattr(module, "build_graph", lambda *args: pytest.fail("must not rebuild"))
+    module.main(prune_only=True)
+    assert list(tmp_path.glob("set-*.json")) == [tmp_path / "set-21112026.json"]
+    assert len(list(tmp_path.glob("*_*.zip"))) == 5
+    assert module.read_set(tmp_path, "21112026") == latest

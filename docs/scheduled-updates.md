@@ -74,8 +74,23 @@ publication, because the five individual directory entries cannot appear atomica
 Build, probe or export failures leave the previous publication available. Repeating a
 successful run on the same date reuses that immutable set; an interrupted publication can
 be retried. Working directories are removed on exit and abandoned staging directories
-are removed on the next run. By default the last **two completed sets** are retained;
-only recognized sets are pruned, after successful publication.
+are removed on the next run. Only the **latest complete set** is retained: five ZIPs and its set manifest. Previous
+recognized sets are removed after successful publication, also when rerunning the same day.
+Failed builds keep the prior complete set. Cleanup can resume after interruption.
+
+To remove old published builds immediately without rebuilding, synchronize the repository
+and run from `~/docker/compass` (existing `.env` and networks, no new secrets):
+
+```bash
+docker compose --profile offline-build run --rm --no-deps offline-assets --prune-only
+ls -lh ./offline_assets/*_*.zip ./offline_assets/set-*.json
+```
+
+Expected: only the five files listed in `latest.json` and their one set manifest remain.
+Unrelated archives are not deleted. If the latest set is missing or incomplete, cleanup
+fails without removing the previous builds; return the command output and `latest.json`.
+The tool is bind-mounted, so no API/scheduler rebuild or APK update is required. Clients
+trying to resume an older removed publication must fetch the latest catalog again.
 
 ### Enable and validate on the server
 
@@ -105,9 +120,9 @@ no scheduler rebuild/restart is needed for this path correction. Generated asset
 from Git and Docker build contexts.
 
 Configuration in `.env`: `COMPASS_OFFLINE_THREADS` defaults to 2;
-`COMPASS_OFFLINE_KEEP_SETS` defaults to 2 and must be at least 1. This directory is
+the old `COMPASS_OFFLINE_KEEP_SETS` setting is ignored (retention is always one set). This directory is
 managed output, not a general-purpose backup directory. Allow disk space for the full
-Italy build, temporary files, all five new ZIPs and retained sets. Duration, peak memory
+Italy build, temporary files, all five new ZIPs and the previous set until the replacement is ready. Duration, peak memory
 and actual space usage require measurement on the deployment host.
 
 Expected: five dated ZIPs, matching `graphFamily` in their internal manifests, matching
